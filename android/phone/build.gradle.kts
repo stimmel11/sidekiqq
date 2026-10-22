@@ -11,8 +11,19 @@ if (file("google-services.json").exists()) {
     apply(plugin = libs.plugins.google.services.get().pluginId)
 }
 
+// Jetpack XR Projected (androidx.xr.projected) is an alpha library. Everything that touches it is
+// in src/xr; src/noxr holds a stub with the same API. If the alpha fails to resolve or compile,
+// build with -Psidekiqq.xr=false: glasses then use the Bluetooth-headset bridge only.
+val xrEnabled: Boolean = (findProperty("sidekiqq.xr") as String?)?.toBooleanStrictOrNull() ?: true
+
 android {
     namespace = "com.sidekiqq.phone"
+
+    sourceSets {
+        getByName("main") {
+            java.srcDir(if (xrEnabled) "src/xr/java" else "src/noxr/java")
+        }
+    }
     compileSdk = 36
 
     defaultConfig {
@@ -77,9 +88,11 @@ dependencies {
     implementation(libs.firebase.messaging)
     implementation(libs.play.services.wearable)
 
-    // Jetpack XR Projected (audio/display glasses). Alpha — all uses are isolated in
-    // com.sidekiqq.phone.glasses.ProjectedGlassesBridge / GlassesActivity.
-    implementation(libs.androidx.xr.projected)
+    // Jetpack XR Projected (audio/display glasses). Alpha. All uses are isolated in src/xr
+    // (ProjectedGlassesBridge, ProjectedSupport); see xrEnabled above.
+    if (xrEnabled) {
+        implementation(libs.androidx.xr.projected)
+    }
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
