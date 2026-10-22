@@ -1,6 +1,7 @@
 import type { KV } from "../kv";
 import { CommitmentSchema, StoredCommitmentSchema, type Commitment, type Confidence, type StoredCommitment } from "../models";
-import { newId, normalizeDate, sameClient, slugify } from "../util";
+import { config } from "../env";
+import { newId, normalizeDate, normalizeOwnerDate, sameClient, slugify } from "../util";
 import { Collection } from "./collection";
 
 export type CommitmentFilter = "open" | "overdue" | "all";
@@ -54,11 +55,16 @@ export class CommitmentsRepo {
 
   async add(input: NewCommitment): Promise<{ commitment: StoredCommitment; created: boolean }> {
     const fp = commitmentFingerprint(input);
-    const existing = (await this.col.all()).find((c) => commitmentFingerprint(c) === fp);
+    // Email-sourced commitments dedup against everything from the same message (re-scans).
+    // Ref-less (voice) commitments only dedup against still-open ones, so a recurring promise
+    // ("call Dana") can be recorded again after the previous one was completed.
+    const existing = (await this.col.all()).find(
+      (c) => commitmentFingerprint(c) === fp && (input.source.ref !== undefined || c.status !== "done"),
+    );
     if (existing) return { commitment: existing, created: false };
 
     const now = this.clock().toISOString();
-    const dueAt = normalizeDate(input.dueAt);
+    const dueAt = this.due(input.dueAt);
     const record: StoredCommitment = {
       id: newId("cmt"),
       who: input.who,
@@ -76,6 +82,11 @@ export class CommitmentsRepo {
       updatedAt: now,
     };
     return { commitment: await this.col.put(record), created: true };
+  }
+
+  /** Zone-less / date-only due dates are owner-local (America/Denver), never server UTC. */
+  private due(s: string | undefined): string | undefined {
+    return normalizeOwnerDate(s, { timeZone: config.ownerTimezone(), dateOnly: "endOfDay" });
   }
 
   get(id: string) {
@@ -96,7 +107,7 @@ export class CommitmentsRepo {
       delete next.dueAt;
       next.dueInferred = false;
     } else if (patch.dueAt !== undefined) {
-      const d = normalizeDate(patch.dueAt);
+      const d = this.due(patch.dueAt);
       if (d) next.dueAt = d;
     }
     if (patch.dueInferred !== undefined && next.dueAt) next.dueInferred = patch.dueInferred;

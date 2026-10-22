@@ -4,7 +4,7 @@ import type { EmailMessage } from "../google/workspace";
 import { structuredCall } from "../assistant/llm";
 import { formatNow, systemBlocks } from "../assistant/prompt";
 import type { Importance } from "../models";
-import { mapLimit, truncate } from "../util";
+import { localDay, mapLimit, truncate } from "../util";
 import { ExtractionToolSchema, parseExtraction, type Extraction } from "./extract";
 
 export interface ScanResult {
@@ -17,6 +17,8 @@ export interface ScanResult {
   followupsUpserted: number;
   alertsSent: number;
   overdueAlerts: number;
+  /** Unprocessed messages left for the next run. */
+  backlog: number;
 }
 
 const ALERT_LEVELS: Importance[] = ["CRITICAL", "HIGH"];
@@ -130,12 +132,25 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
     followupsUpserted: 0,
     alertsSent: 0,
     overdueAlerts: 0,
+    backlog: 0,
   };
 
   const ws = await deps.workspace();
   const ownerEmail = await ws.ownerEmail().catch(() => undefined);
   const query = `(in:inbox OR in:sent) after:${Math.floor(fromDate.getTime() / 1000)} -category:promotions -category:social -in:chats`;
-  const ids = await ws.listMessageIds(query, config.scanMaxMessages());
+  // Gmail lists newest first. Listing only `scanMaxMessages` and then advancing the cursor silently
+  // dropped everything older once more than that arrived between runs (and later runs only ever
+  // saw the same, already-processed newest page). Instead: over-fetch, drop already-processed ids,
+  // work OLDEST first, and hold the cursor while a backlog remains so the next run continues.
+  const maxPerRun = config.scanMaxMessages();
+  const listLimit = Math.min(500, maxPerRun * 5);
+  const listed = await ws.listMessageIds(query, listLimit);
+  const seen = await Promise.all(listed.map((m) => deps.repos.state.isMessageProcessed(m.id)));
+  const pending = listed.filter((_, i) => !seen[i]).reverse();
+  const ids = pending.slice(0, maxPerRun);
+  const backlog = pending.length > ids.length;
+  result.skipped += listed.length - pending.length;
+  if (listed.length >= listLimit) console.warn(`[scan] ${listed.length} messages since ${fromDate.toISOString()}; older ones beyond the list limit are skipped`);
   const system = await systemBlocks(`Current time: ${formatNow(started)}. You are running as a background email scanner.`);
   const llm = deps.llm();
 
@@ -182,7 +197,8 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
   // Overdue commitments: alert once per commitment per day.
   const overdue = await deps.repos.commitments.list("overdue");
   for (const c of overdue) {
-    const day = started.toISOString().slice(0, 10);
+    // Owner-local day, so the once-a-day reminder rolls over at Denver midnight, not 5-6pm (UTC midnight).
+    const day = localDay(started, config.ownerTimezone());
     if (!(await deps.repos.state.claimAlert(`overdue:${c.id}:${day}`, 60 * 60 * 26))) continue;
     const isOwner = c.who.toLowerCase().includes(config.ownerName().toLowerCase());
     result.overdueAlerts += await pushToAll(
@@ -195,7 +211,9 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
   }
 
   if (result.processed || result.commitmentsAdded || result.followupsUpserted) await deps.repos.state.invalidateTop5();
-  // Only advance the cursor if nothing failed, so failed messages are retried within the window.
-  if (!result.failed) await deps.repos.state.setLastScan({ at: started.toISOString() });
+  // Only advance the cursor if nothing failed and no backlog remains, so failed/unprocessed
+  // messages are picked up within the window by the next run (dedup markers prevent repeats).
+  result.backlog = pending.length - ids.length;
+  if (!result.failed && !backlog) await deps.repos.state.setLastScan({ at: started.toISOString() });
   return result;
 }

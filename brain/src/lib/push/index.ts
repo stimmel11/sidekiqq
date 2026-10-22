@@ -29,10 +29,11 @@ export class NoopPushSender implements PushSender {
   }
 }
 
-const INVALID_TOKEN_CODES = new Set([
+// Only errors that are definitely about the token. "messaging/invalid-argument" is NOT here: it is
+// also returned for payload problems (e.g. oversize data), which would wrongly wipe every device's token.
+export const INVALID_TOKEN_CODES = new Set([
   "messaging/registration-token-not-registered",
   "messaging/invalid-registration-token",
-  "messaging/invalid-argument",
 ]);
 
 /** Parse FIREBASE_SERVICE_ACCOUNT_JSON given either as raw JSON or base64-encoded JSON. */
@@ -43,6 +44,20 @@ export function parseServiceAccount(raw: string): { projectId: string; clientEma
     throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing project_id, client_email or private_key");
   }
   return { projectId: json.project_id, clientEmail: json.client_email, privateKey: json.private_key.replace(/\\n/g, "\n") };
+}
+
+/**
+ * DATA-ONLY on purpose. A `notification` block makes Android display the alert itself while the
+ * app is backgrounded and skip onMessageReceived, so the watch relay and the medallion haptic
+ * never fire (and the old "sidekiqq_alerts" channel id does not exist in the phone app). The phone
+ * builds the notification from data.title/body on its own "alerts" channel.
+ */
+export function buildMulticast(tokens: string[], msg: PushMessage) {
+  return {
+    tokens,
+    data: { title: msg.title, body: msg.body, ...(msg.data ?? {}) },
+    android: { priority: msg.priority === "high" ? ("high" as const) : ("normal" as const) },
+  };
 }
 
 export class FcmPushSender implements PushSender {
@@ -66,12 +81,7 @@ export class FcmPushSender implements PushSender {
     const unique = [...new Set(tokens)].filter(Boolean);
     if (!unique.length) return { sent: 0, failed: 0, invalidTokens: [] };
     const messaging = await this.messaging();
-    const res = await messaging.sendEachForMulticast({
-      tokens: unique,
-      notification: { title: msg.title, body: msg.body },
-      data: { title: msg.title, body: msg.body, ...(msg.data ?? {}) },
-      android: { priority: msg.priority === "high" ? "high" : "normal", notification: { channelId: "sidekiqq_alerts" } },
-    });
+    const res = await messaging.sendEachForMulticast(buildMulticast(unique, msg));
     const invalidTokens: string[] = [];
     res.responses.forEach((r, i) => {
       if (!r.success && r.error && INVALID_TOKEN_CODES.has(r.error.code)) invalidTokens.push(unique[i] as string);
