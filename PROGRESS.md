@@ -41,7 +41,20 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [ ] Connectors: Outlook / Microsoft 365, generic IMAP/SMTP; investigate Instacart's developer platform terms for other grocery chains.
 - [ ] "Request a connector" flow: the build crew generates an MCP connector, opens a PR, and the owner approves before it goes live.
 - [ ] Android Auto: messaging-style alerts + voice reply via the phone app, plus a simple Car App Library screen (Top 5, Talk). Driving mode: voice only, no full email on screen, drafts still need a spoken "send it", screen-only tasks wait until parked.
-- [ ] (Future) iOS app + CarPlay + Siri Shortcuts.
+
+### Apple support (owner request, 2026-10-21)
+Same brain and API contract; Apple devices are thin clients like the Android ones. Swift/SwiftUI in a new `/apple` folder (one Xcode project, shared `SideKiqqKit` Swift package mirroring `android/shared`).
+- [ ] Design `docs/APPLE.md`: targets, shared Swift client + models generated or mirrored from `ARCHITECTURE.md`, pairing, push, which Android features map to which Apple APIs, and App Store / TestFlight path.
+- [ ] Brain: Apple push (APNs) alongside FCM, either via FCM's APNs bridge or direct APNs with a token-based key. Device kinds for `iphone`, `apple_watch`, `mac` in TS + Kotlin models + `ARCHITECTURE.md`.
+- [ ] `SideKiqqKit` Swift package: API client, models, Keychain token store, and unit tests (runs on macOS CI).
+- [ ] iPhone app: pairing, Today/Top 5, follow-ups, commitments, drafts with confirm-to-send, push alerts, and the voice loop (record → `/api/transcribe` → `/api/ask` → spoken reply via AirPods or speaker).
+- [ ] iPhone: medallion support over CoreBluetooth (same GATT protocol as the Android phone), including background BLE restoration.
+- [ ] Siri + Shortcuts via App Intents: "Hey Siri, ask SideKiqq…", "…what's my brief", "…who do I need to follow up with". Drafts still need an explicit confirmation step.
+- [ ] Apple Watch app: Top 5, follow-ups, dictate a question, approve drafts with two taps, complications and Smart Stack widget, haptic for CRITICAL alerts.
+- [ ] CarPlay: communication-style experience with voice-first alerts and replies, plus the same driving-mode rules as Android Auto.
+- [ ] Mac: menu-bar app (Top 5, quick ask, drafts to approve) and notifications.
+- [ ] Connectors: iCloud Mail (IMAP/SMTP with an app-specific password), Apple Calendar (CalDAV), Apple Contacts (CardDAV), FaceTime call hand-off (`facetime://` from the iPhone app).
+- [ ] `[needs-human]` Apple Developer Program membership, App Store Connect app record, APNs key, and a Mac with Xcode for the first builds and TestFlight. The cloud crew can write Swift but can't compile or sign iOS apps.
 
 ### Earlier items
 
