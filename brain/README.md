@@ -24,7 +24,8 @@ All endpoints take and return JSON and require `Authorization: Bearer <device to
 | GET/POST | `/api/cron/scan` | `Authorization: Bearer $CRON_SECRET` (Vercel Cron, every 30 min) |
 | POST | `/api/devices/pair-code` | **Owner secret** (`Authorization: Bearer $OWNER_SECRET` or `X-Owner-Secret`). Body `{ label? }` → `{ code, expiresAt, ttlSeconds }` |
 | POST | `/api/devices/pair` | **No auth.** `{ code, device, name? }` → `{ token, deviceId, device }` |
-| GET | `/api/google/connect` | **Owner secret** (header or `?secret=`). Redirects to Google consent. |
+| POST | `/api/google/connect` | **Owner secret** (header). → `{ url, expiresAt }`: a one-time browser link (`?ticket=`, 5 min) |
+| GET | `/api/google/connect` | Owner secret header **or** one-time `?ticket=`. Redirects to Google consent. `?secret=` is refused (it would be logged). |
 | GET | `/api/google/callback` | OAuth redirect target |
 | GET | `/api/drafts` | *Extension:* pending drafts awaiting approval |
 | POST | `/api/drafts/:id/discard` | *Extension:* discard a pending draft (never sends) |
@@ -121,7 +122,8 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
    `ANTHROPIC_API_KEY`, `OWNER_SECRET`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `GOOGLE_CLIENT_ID`,
    `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, `CRON_SECRET`, `APP_URL`, an STT key, and
    `FIREBASE_SERVICE_ACCOUNT_JSON`). Deploy.
-5. **Connect Google**: open `https://<your-domain>/api/google/connect?secret=<OWNER_SECRET>` in a browser and approve.
+5. **Connect Google**: `curl -s -X POST https://<your-domain>/api/google/connect -H "Authorization: Bearer $OWNER_SECRET"`
+   returns a one-time `url`; open it in a browser within 5 minutes and approve. (Never put the owner secret in a URL.)
 6. **Cron**: `vercel.json` schedules `/api/cron/scan` every 30 minutes. Sub-daily crons require a Vercel Pro plan
    (Hobby allows daily only). The scan route sets `maxDuration = 300`.
 7. Pair devices as described above.

@@ -154,7 +154,7 @@ data class OkResponse(val ok: Boolean = false)
 @Serializable
 data class RegisterDeviceRequest(val fcmToken: String, val device: Device)
 
-/** ASSUMPTION: body/response of POST /api/devices/pair are not specified in ARCHITECTURE.md. */
+/** POST /api/devices/pair body, matching brain/src/app/api/devices/pair/route.ts. */
 @Serializable
 data class PairRequest(val code: String, val device: Device = Device.PHONE)
 

@@ -2,7 +2,6 @@ package com.sidekiqq.phone.glasses
 
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -27,8 +26,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.xr.projected.ProjectedContext
-import androidx.xr.projected.experimental.ExperimentalProjectedApi
 
 /**
  * The SideKiqq entry point that runs ON the glasses (declared with
@@ -94,17 +91,15 @@ class GlassesActivity : ComponentActivity() {
         GlassesSessionService.wake(host)
     }
 
-    @OptIn(ExperimentalProjectedApi::class)
+    /** Phone-side context. XR specifics live in ProjectedSupport (src/xr, or the src/noxr stub). */
     private fun hostContext(): Context =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            try {
-                ProjectedContext.createHostDeviceContext(this)
-            } catch (e: IllegalStateException) {
-                applicationContext
-            } catch (e: LinkageError) {
-                applicationContext
-            }
-        } else applicationContext
+        try {
+            ProjectedSupport.hostContext(this) ?: applicationContext
+        } catch (e: IllegalStateException) {
+            applicationContext
+        } catch (e: LinkageError) {
+            applicationContext
+        }
 
     companion object {
         private const val TAG = "SideKiqqGlassesAct"
@@ -113,16 +108,14 @@ class GlassesActivity : ComponentActivity() {
         /**
          * Launches this activity onto the connected glasses from the phone.
          * Uses ProjectedContext.createProjectedActivityOptions (API 35+), as in Google's first-activity guide.
-         * @return false if no glasses display is available.
+         * @return false if no glasses display is available (or this build has no XR support).
          */
-        @OptIn(ExperimentalProjectedApi::class)
         fun launchOnGlasses(context: Context): Boolean {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return false
             return try {
-                val options = ProjectedContext.createProjectedActivityOptions(context)
+                val options = ProjectedSupport.projectedActivityOptions(context) ?: return false
                 context.startActivity(
                     Intent(context, GlassesActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    options.toBundle(),
+                    options,
                 )
                 true
             } catch (e: IllegalStateException) {

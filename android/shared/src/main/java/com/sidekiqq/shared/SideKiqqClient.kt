@@ -148,12 +148,13 @@ class SideKiqqClient(
 
     /**
      * Exchanges a one-time pairing code for a long-lived device token.
-     * ASSUMPTION: POST /api/devices/pair {"code","device"} -> {"token"} (body shape not in the contract table).
+     * POST /api/devices/pair {"code","device"} -> {"token", ...} (see brain/src/app/api/devices/pair/route.ts).
+     * [device] labels the token on the brain side ("phone" or "watch").
      */
-    suspend fun pair(code: String): String =
+    suspend fun pair(code: String, device: Device = Device.PHONE): String =
         http.post(url("/api/devices/pair")) {
             contentType(ContentType.Application.Json)
-            setBody(PairRequest(code = code.trim()))
+            setBody(PairRequest(code = code.trim(), device = device))
         }.ensureOk().body<PairResponse>().token
 
     override fun close() {

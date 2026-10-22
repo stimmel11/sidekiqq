@@ -70,7 +70,8 @@ internal class GattQueue(private val handler: Handler) {
                 g.writeCharacteristic(op.ch, op.value, type) == BluetoothStatusCodes.SUCCESS
             } else {
                 op.ch.writeType = type
-                op.ch.value = op.value
+                // setValue returns Boolean, so Kotlin has no `value =` property setter for it.
+                op.ch.setValue(op.value)
                 g.writeCharacteristic(op.ch)
             }
         }
@@ -78,7 +79,7 @@ internal class GattQueue(private val handler: Handler) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 g.writeDescriptor(op.d, op.value) == BluetoothStatusCodes.SUCCESS
             } else {
-                op.d.value = op.value
+                op.d.setValue(op.value)
                 g.writeDescriptor(op.d)
             }
         }

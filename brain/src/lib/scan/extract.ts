@@ -7,7 +7,8 @@ import {
   type Confidence,
   type Importance,
 } from "../models";
-import { normalizeDate } from "../util";
+import { config } from "../env";
+import { normalizeOwnerDate } from "../util";
 
 /**
  * Email → structured intelligence.
@@ -112,16 +113,16 @@ function bool(v: unknown): boolean {
 }
 
 /**
- * Normalise a due date. Accepts ISO dates/datetimes; date-only values are pinned to
- * 17:00 in the owner's day (approximated as 23:59 UTC to avoid flagging overdue early).
+ * Normalise a due date. Accepts ISO dates/datetimes; date-only values are pinned to 23:59 in
+ * the OWNER's time zone (so "due Friday" is not overdue until Friday is over in Denver), and
+ * zone-less datetimes are read as owner-local time rather than server UTC.
  * Unparseable/relative strings ("next week") return undefined.
  */
-export function normalizeDue(v: unknown): string | undefined {
+export function normalizeDue(v: unknown, timeZone = config.ownerTimezone()): string | undefined {
   const s = str(v, 100);
   if (!s) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return normalizeDate(`${s}T23:59:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}T/.test(s)) return undefined;
-  return normalizeDate(s);
+  if (!/^\d{4}-\d{2}-\d{2}($|T)/.test(s)) return undefined;
+  return normalizeOwnerDate(s, { timeZone, dateOnly: "endOfDay" });
 }
 
 export function parseCommitment(raw: unknown): ExtractedCommitment | null {

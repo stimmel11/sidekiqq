@@ -70,9 +70,9 @@ watch both use.
 ```
 Unit tests (`src/test`) cover HapticPatterns, DueFormat, ApproveFlow, PushToTalk,
 ComplicationMath, Payloads (WearAlert routing / WearReply mapping) and the GlanceSnapshot round trip.
-The 24 tests that don't depend on :shared serialization were compiled and passed in the sandbox
-with kotlinc 2.0.21 against stub enums. Nothing that touches Android or :shared has been compiled,
-because Google Maven is blocked here. See the TODOs below.
+The pure-logic tests (ApproveFlow, DueFormat, HapticPatterns) were compiled and passed in the
+sandbox with Kotlin 2.0.21 against stub enums. Nothing that touches Android or :shared
+serialization has been compiled, because Google Maven is blocked there. See the TODOs below.
 
 ## Open TODOs / unverified APIs
 - Rotary scrolling relies on wear-compose-foundation ≥ 1.3 ScalingLazyColumn defaults (1.5.1 is pinned).
@@ -80,7 +80,5 @@ because Google Maven is blocked here. See the TODOs below.
 - `DataClient.getDataItems(uri)` with a host-less `wear:` URI (TokenSync).
 - Background CRITICAL vibration on Galaxy Watch with the screen off (Haptics).
 - `tile_preview.xml` is a placeholder vector. Replace it with a PNG screenshot.
-- :shared `pair()` sends `device: "phone"`. A device param is needed so a standalone-paired watch
-  token is labelled "watch".
 - Commitments swipe is a custom drag gesture, not wear-compose SwipeToReveal (whose experimental
   API changed between 1.4 and 1.5). It exposes a "Complete" accessibility action.

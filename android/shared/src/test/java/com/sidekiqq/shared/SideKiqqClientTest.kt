@@ -76,12 +76,18 @@ class SideKiqqClientTest {
 
     @Test
     fun pairHasNoAuthAndReturnsToken() = runTest {
+        val bodies = mutableListOf<String>()
         val engine = MockEngine { req ->
             assertNull(req.headers[HttpHeaders.Authorization])
+            bodies += req.body.toByteArray().decodeToString()
             respond("""{"token":"long-lived"}""", HttpStatusCode.OK, jsonHeaders)
         }
         val client = SideKiqqClient("https://brain.test", { "should-not-be-sent" }, engine)
         assertEquals("long-lived", client.pair("123456"))
+        assertEquals("long-lived", client.pair(" 654321 ", Device.WATCH))
+        assertTrue(bodies[0].contains("\"device\":\"phone\""))
+        assertTrue(bodies[1].contains("\"code\":\"654321\""))
+        assertTrue(bodies[1].contains("\"device\":\"watch\""))
     }
 
     @Test

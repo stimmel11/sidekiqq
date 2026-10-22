@@ -15,7 +15,7 @@ class Speaker(context: Context) : TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale.getDefault()
+            tts.setLanguage(Locale.getDefault()) // returns Int, so it is not a Kotlin property setter
             ready = true
             pending?.let { speak(it) }
             pending = null

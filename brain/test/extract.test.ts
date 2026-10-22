@@ -16,7 +16,7 @@ describe("commitment extraction parsing", () => {
     });
     expect(x.importance).toBe("HIGH");
     expect(x.categories).toEqual(["Payment", "Existing Client"]);
-    expect(x.commitments).toEqual([{ who: "Dana Lee", what: "Send deposit", dueAt: "2026-10-23T23:59:00.000Z", dueInferred: false, confidence: "CONFIRMED" }]);
+    expect(x.commitments).toEqual([{ who: "Dana Lee", what: "Send deposit", dueAt: "2026-10-24T05:59:00.000Z", dueInferred: false, confidence: "CONFIRMED" }]);
     expect(x.decisions[0]?.people).toEqual(["Dana Lee", "Stimmel"]);
   });
 
@@ -59,8 +59,13 @@ describe("commitment extraction parsing", () => {
   });
 
   it("normalizeDue only accepts ISO dates", () => {
-    expect(normalizeDue("2026-10-20")).toBe("2026-10-20T23:59:00.000Z");
+    // Date-only = end of the owner's (America/Denver) day, not UTC midnight / 23:59Z.
+    expect(normalizeDue("2026-10-20")).toBe("2026-10-21T05:59:00.000Z"); // MDT (UTC-6)
+    expect(normalizeDue("2026-12-04")).toBe("2026-12-05T06:59:00.000Z"); // MST (UTC-7)
+    // Zone-less datetime = owner-local wall clock, not server UTC.
+    expect(normalizeDue("2026-10-20T17:00:00")).toBe("2026-10-20T23:00:00.000Z");
     expect(normalizeDue("2026-10-20T09:00:00-06:00")).toBe("2026-10-20T15:00:00.000Z");
+    expect(normalizeDue("2026-10-20T09:00:00Z")).toBe("2026-10-20T09:00:00.000Z");
     expect(normalizeDue("Friday")).toBeUndefined();
     expect(normalizeDue("10/20/2026")).toBeUndefined();
     expect(normalizeDue("")).toBeUndefined();
