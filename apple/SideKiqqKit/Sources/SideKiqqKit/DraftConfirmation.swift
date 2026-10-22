@@ -18,6 +18,8 @@ public struct DraftConfirmation: Sendable {
         public var draftId: String
         public var summary: String
         public var offeredAt: Date
+        /** `fingerprint(of:)` of the draft as it was read back, so a later edit can be detected before sending. */
+        public var fingerprint: String?
     }
 
     public enum Decision: Equatable, Sendable {
@@ -52,25 +54,36 @@ public struct DraftConfirmation: Sendable {
      */
     @discardableResult
     public mutating func offer(_ draft: Draft) -> String {
-        arm(draftId: draft.id, summary: Self.readback(for: draft))
+        arm(draft)
         return Self.prompt(for: draft)
     }
 
     /** Starts the 30 s window now. */
-    public mutating func arm(draftId: String, summary: String) {
-        pending = Pending(draftId: draftId, summary: summary, offeredAt: now())
+    public mutating func arm(draftId: String, summary: String, fingerprint: String? = nil) {
+        pending = Pending(draftId: draftId, summary: summary, offeredAt: now(), fingerprint: fingerprint)
+    }
+
+    /** Starts the 30 s window now for a draft that was just read back. */
+    public mutating func arm(_ draft: Draft) {
+        arm(draftId: draft.id, summary: Self.readback(for: draft), fingerprint: Self.fingerprint(of: draft))
+    }
+
+    /** Identity of what the owner heard/saw: recipients, cc, subject and body. */
+    public static func fingerprint(of draft: Draft) -> String {
+        ([draft.to.joined(separator: "\u{1F}"), draft.cc.joined(separator: "\u{1F}"), draft.subject, draft.body])
+            .joined(separator: "\u{1E}")
     }
 
     /**
-     * - Parameter spokenAt: when the owner started speaking this answer, if known. Speech that started
-     *   before the window opened (over the read-back, or queued behind it) is an answer to nothing the
-     *   owner heard, so it declines instead of confirming.
+     * - Parameter spokenAt: when the owner started speaking this answer. Speech that started before the
+     *   window opened (over the read-back, or queued behind it) answers nothing the owner heard, so it
+     *   declines. `nil` means "not spoken" (typed, or unknown) and also declines: this fails closed.
      */
-    public mutating func evaluate(_ transcript: String, spokenAt: Date? = nil) -> Decision {
+    public mutating func evaluate(_ transcript: String, spokenAt: Date?) -> Decision {
         guard let p = pending else { return .nothingPending }
         pending = nil // one shot: any answer consumes the pending draft
         if now().timeIntervalSince(p.offeredAt) > window { return .expired }
-        if let spokenAt, spokenAt < p.offeredAt { return .declined }
+        guard let spokenAt, spokenAt >= p.offeredAt else { return .declined }
         return Self.isSendIt(transcript) ? .confirmed(draftId: p.draftId) : .declined
     }
 

@@ -180,7 +180,7 @@ final class SideKiqqClientTests: XCTestCase {
             _ = try await client.pair(code: "12345")
             XCTFail("expected invalid input")
         } catch {
-            guard case .invalidInput = error as? SideKiqqAPIError else { return XCTFail("got \(error)") }
+            guard case .invalidInput? = error as? SideKiqqAPIError else { return XCTFail("got \(error)") }
         }
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
     }
@@ -214,7 +214,7 @@ final class SideKiqqClientTests: XCTestCase {
             _ = try await client.followUps()
             XCTFail("expected decoding error")
         } catch {
-            guard case .decoding = error as? SideKiqqAPIError else { return XCTFail("got \(error)") }
+            guard case .decoding? = error as? SideKiqqAPIError else { return XCTFail("got \(error)") }
         }
     }
 

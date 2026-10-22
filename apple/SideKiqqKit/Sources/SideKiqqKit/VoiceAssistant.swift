@@ -51,6 +51,7 @@ public actor VoiceAssistant {
     public static let sendUncertain = "I couldn't confirm it was sent. Check the app before trying again."
     public static let windowClosed = "The confirmation window closed, so I didn't send it. The draft is saved in the app."
     public static let typedSendIt = "Not sent. To send, say \"send it\" out loud after the read-back, or use Review and send."
+    public static let draftChanged = "That draft changed or is gone since I read it to you, so I didn't send it. Review it in the app."
     public static let reviewInApp = "I drafted it, but couldn't read it back to you. Review it in the app before sending."
 
     private let apiProvider: @Sendable () -> SideKiqqAPI?
@@ -79,10 +80,11 @@ public actor VoiceAssistant {
 
     /**
      * 16 kHz mono PCM16 LE from the mic or the medallion.
-     * - Parameter startedAt: when capture of this utterance began. Speech that began before the
-     *   "send it" window opened (e.g. queued while the read-back played) can never confirm a draft.
+     * - Parameter startedAt: when capture of this utterance began (Talk tap, or medallion CONTROL 0x01).
+     *   Speech that began before the "send it" window opened (e.g. queued while the read-back played)
+     *   can never confirm a draft.
      */
-    public func handleUtterance(pcm: Data, device: DeviceKind, output: VoiceOutput, startedAt: Date? = nil) async -> Outcome {
+    public func handleUtterance(pcm: Data, device: DeviceKind, output: VoiceOutput, startedAt: Date) async -> Outcome {
         guard WavEncoder.durationMs(pcmBytes: pcm.count) >= Self.minUtteranceMs else { return .nothingHeard }
         guard !busy else { return .busy }
         guard let api = apiProvider() else {
@@ -113,11 +115,11 @@ public actor VoiceAssistant {
 
     /**
      * Text that was not captured by `handleUtterance`.
-     * - Parameter spoken: true only for speech transcribed elsewhere (it may confirm a draft, like an utterance);
-     *   false for typed text, which never confirms: typing anything while a draft is pending cancels it.
+     * - Parameter spokenAt: when the owner started saying it, for speech transcribed elsewhere (it may
+     *   confirm a draft like an utterance). `nil` for typed text, which never confirms: typing anything
+     *   while a draft is pending cancels it.
      */
-    public func handleText(_ text: String, device: DeviceKind, output: VoiceOutput, spoken: Bool,
-                           startedAt: Date? = nil) async -> Outcome {
+    public func handleText(_ text: String, device: DeviceKind, output: VoiceOutput, spokenAt: Date?) async -> Outcome {
         guard !busy else { return .busy }
         guard let api = apiProvider() else {
             await output.speak(Self.notPaired)
@@ -125,27 +127,40 @@ public actor VoiceAssistant {
         }
         busy = true
         defer { busy = false }
-        if !spoken, confirmation.pending != nil {
+        if spokenAt == nil, confirmation.pending != nil {
             confirmation.clear()
             if DraftConfirmation.isSendIt(text) {
                 await output.speak(Self.typedSendIt)
                 return .draftNotSent
             }
         }
-        return await runTurn(text: text, startedAt: startedAt, device: device, api: api, output: output)
+        return await runTurn(text: text, startedAt: spokenAt, device: device, api: api, output: output)
     }
 
     private func runTurn(text: String, startedAt: Date?, device: DeviceKind, api: SideKiqqAPI, output: VoiceOutput) async -> Outcome {
         // 1) A draft is waiting for confirmation: this utterance is the answer, nothing else.
+        let heardFingerprint = confirmation.pending?.fingerprint
         switch confirmation.evaluate(text, spokenAt: startedAt) {
         case let .confirmed(draftId):
+            // Send only what was read back: if the draft was edited (or sent/discarded elsewhere) since, stop.
+            let current: Draft?
+            do {
+                current = try await api.pendingDrafts().first { $0.id == draftId }
+            } catch {
+                await output.speak(Self.trouble)
+                return .failed("\(error)")
+            }
+            guard let current, let heardFingerprint, DraftConfirmation.fingerprint(of: current) == heardFingerprint else {
+                await output.speak(Self.draftChanged)
+                return .draftNotSent
+            }
             do {
                 try await api.approveDraft(id: draftId)
                 await output.speak(Self.sent)
                 return .draftSent(draftId: draftId)
             } catch {
                 // A transport error (timeout) may have happened after the brain sent it: don't claim it wasn't.
-                if case .transport = error as? SideKiqqAPIError {
+                if case .transport? = error as? SideKiqqAPIError {
                     await output.speak(Self.sendUncertain)
                 } else {
                     await output.speak(Self.sendFailed)
@@ -198,7 +213,7 @@ public actor VoiceAssistant {
             await output.speak(Self.reviewInApp)
             return .answered(transcript: text, response: response, awaitingConfirm: false)
         }
-        confirmation.arm(draftId: draft.id, summary: DraftConfirmation.readback(for: draft))
+        confirmation.arm(draft)
         return .answered(transcript: text, response: response, awaitingConfirm: true)
     }
 

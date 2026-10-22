@@ -40,7 +40,7 @@ final class DraftConfirmationTests: XCTestCase {
         XCTAssertEqual(prompt, "Send this: Reply to Dana: proposal attached? Say 'send it' to confirm, or anything else to cancel.")
         XCTAssertTrue(c.isAwaiting)
         clock.advance(5)
-        XCTAssertEqual(c.evaluate("send it"), .confirmed(draftId: "d1"))
+        XCTAssertEqual(c.evaluate("send it", spokenAt: clock.now), .confirmed(draftId: "d1"))
         XCTAssertNil(c.pending)
     }
 
@@ -49,15 +49,15 @@ final class DraftConfirmationTests: XCTestCase {
         var c = DraftConfirmation(now: clock.fn)
         c.arm(draftId: "d1", summary: "x")
         clock.advance(30)
-        XCTAssertEqual(c.evaluate("send it"), .confirmed(draftId: "d1"))
+        XCTAssertEqual(c.evaluate("send it", spokenAt: clock.now), .confirmed(draftId: "d1"))
     }
 
     func testAnythingElseDeclinesAndConsumes() {
         var c = DraftConfirmation()
         c.offer(draftId: "d1", summary: "x")
-        XCTAssertEqual(c.evaluate("what's on my calendar"), .declined)
+        XCTAssertEqual(c.evaluate("what's on my calendar", spokenAt: Date()), .declined)
         // A later "send it" must not resurrect the declined draft.
-        XCTAssertEqual(c.evaluate("send it"), .nothingPending)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: Date()), .nothingPending)
     }
 
     func testExpiresAfterWindow() {
@@ -66,16 +66,16 @@ final class DraftConfirmationTests: XCTestCase {
         c.offer(draftId: "d1", summary: "x")
         clock.advance(31)
         XCTAssertFalse(c.isAwaiting)
-        XCTAssertEqual(c.evaluate("send it"), .expired)
-        XCTAssertEqual(c.evaluate("send it"), .nothingPending)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: clock.now), .expired)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: clock.now), .nothingPending)
     }
 
     func testNothingPendingAndClear() {
         var c = DraftConfirmation()
-        XCTAssertEqual(c.evaluate("send it"), .nothingPending)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: Date()), .nothingPending)
         c.offer(draftId: "d1", summary: "x")
         c.clear()
-        XCTAssertEqual(c.evaluate("send it"), .nothingPending)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: Date()), .nothingPending)
     }
 
     func testSpeechStartedBeforeWindowCannotConfirm() {
@@ -96,7 +96,28 @@ final class DraftConfirmationTests: XCTestCase {
         var c = DraftConfirmation()
         c.offer(draftId: "d1", summary: "x")
         c.offer(draftId: "d2", summary: "y")
-        XCTAssertEqual(c.evaluate("send it"), .confirmed(draftId: "d2"))
+        XCTAssertEqual(c.evaluate("send it", spokenAt: Date()), .confirmed(draftId: "d2"))
+    }
+
+    func testUnknownSpeechTimeFailsClosed() {
+        var c = DraftConfirmation()
+        c.offer(draftId: "d1", summary: "x")
+        XCTAssertEqual(c.evaluate("send it", spokenAt: nil), .declined, "typed or untimed input never confirms")
+    }
+
+    func testFingerprintCoversWhatTheOwnerSaw() {
+        let base = Draft(id: "d", to: ["a@x"], cc: ["c@x"], subject: "S", body: "B", createdAt: "2026-10-22T00:00:00Z")
+        var c = DraftConfirmation()
+        c.arm(base)
+        XCTAssertEqual(c.pending?.fingerprint, DraftConfirmation.fingerprint(of: base))
+        var edited = base; edited.body = "B2"
+        XCTAssertNotEqual(DraftConfirmation.fingerprint(of: edited), DraftConfirmation.fingerprint(of: base))
+        edited = base; edited.to = ["b@x"]
+        XCTAssertNotEqual(DraftConfirmation.fingerprint(of: edited), DraftConfirmation.fingerprint(of: base))
+        edited = base; edited.subject = "S2"
+        XCTAssertNotEqual(DraftConfirmation.fingerprint(of: edited), DraftConfirmation.fingerprint(of: base))
+        edited = base; edited.cc = []
+        XCTAssertNotEqual(DraftConfirmation.fingerprint(of: edited), DraftConfirmation.fingerprint(of: base))
     }
 
     // MARK: - Read-back

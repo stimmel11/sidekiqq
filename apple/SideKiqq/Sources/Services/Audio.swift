@@ -160,7 +160,8 @@ final class Speaker: NSObject, VoiceOutput, AVSpeechSynthesizerDelegate, AVAudio
     @discardableResult
     func speak(_ text: String) async -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return true }
+        guard !t.isEmpty else { return true } // nothing to say; a draft read-back is never empty
+
         do {
             try AudioRouting.forSpeaking()
         } catch {
@@ -194,6 +195,9 @@ final class Speaker: NSObject, VoiceOutput, AVSpeechSynthesizerDelegate, AVAudio
     }
 
     private func play(_ p: AVAudioPlayer) async -> Bool {
+        // One player at a time: a previous caller still waiting is told its audio was cut off.
+        player?.stop()
+        finishPlayer(completed: false)
         player = p
         p.delegate = self
         return await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in

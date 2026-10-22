@@ -315,7 +315,7 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
     private func finishUtterance() {
         idleTimer?.cancel()
         guard let u = assembler.finish() else { return }
-        let startedAt = utteranceStartedAt ?? Date()
+        let startedAt = utteranceStartedAt ?? .distantPast // unknown start fails closed
         utteranceStartedAt = nil
         let warning = u.stats.warning
         updateStatus { $0.lastAudioWarning = warning }

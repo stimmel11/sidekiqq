@@ -38,6 +38,8 @@ final class VoiceSession {
     private let capture = AudioCapture()
     private var capTask: Task<Void, Never>?
     private var listeningSince: Date?
+    /** True while startListening awaits the mic permission, so a double tap can't start capture twice. */
+    private var starting = false
 
     init(assistant: VoiceAssistant, speaker: Speaker) {
         self.assistant = assistant
@@ -62,12 +64,15 @@ final class VoiceSession {
     }
 
     func startListening() async {
-        guard phase == .idle else { return }
+        guard phase == .idle, !starting else { return }
+        starting = true
+        defer { starting = false }
         errorMessage = nil
         guard await AudioCapture.requestPermission() else {
             errorMessage = CaptureError.micDenied.localizedDescription
             return
         }
+        guard phase == .idle else { return }
         do {
             try capture.start()
             listeningSince = Date()
@@ -88,7 +93,7 @@ final class VoiceSession {
         capTask?.cancel()
         capTask = nil
         let pcm = capture.stop()
-        let startedAt = listeningSince
+        let startedAt = listeningSince ?? .distantPast // unknown start fails closed: can't confirm a draft
         listeningSince = nil
         phase = .thinking
         let outcome = await assistant.handleUtterance(pcm: pcm, device: .thisIPhone, output: PhaseOutput(session: self),
@@ -102,7 +107,8 @@ final class VoiceSession {
         guard !t.isEmpty, phase == .idle else { return }
         errorMessage = nil
         phase = .thinking
-        let outcome = await assistant.handleText(t, device: .thisIPhone, output: PhaseOutput(session: self), spoken: false)
+        // spokenAt: nil = typed; typed text never confirms a draft.
+        let outcome = await assistant.handleText(t, device: .thisIPhone, output: PhaseOutput(session: self), spokenAt: nil)
         await finish(outcome)
     }
 
@@ -148,7 +154,9 @@ final class VoiceSession {
             confirmDeadline = nil
         }
         phase = .idle
-        AudioRouting.deactivate() // safe: capture only runs in .listening, which a finishing turn can't be in
+        // Capture only runs in .listening, which a finishing turn can't be in. Leave the session alone
+        // if the medallion is speaking through the shared Speaker.
+        if !speaker.isSpeaking { AudioRouting.deactivate() }
     }
 }
 

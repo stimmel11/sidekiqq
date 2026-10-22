@@ -90,15 +90,18 @@ struct DraftConfirmSheet: View {
         }
     }
 
-    /** After a failure, only offer Send again if the brain still lists the draft as pending. */
+    /**
+     * After a failure, only offer Send again when the brain definitely didn't send it: an HTTP error
+     * response and the draft still pending. A timeout or lost connection may have sent it, so Send stays off.
+     */
     private func handleFailure(_ failure: Error) async {
-        let stillPending = (try? await model.pendingDraft(id: draft.id)) ?? nil
-        if stillPending != nil {
+        if case .http? = failure as? SideKiqqAPIError,
+           let stillPending = try? await model.pendingDraft(id: draft.id), stillPending.id == draft.id {
             error = failure.friendly
-        } else {
-            uncertain = true
-            error = "Not sure this was sent. It's no longer waiting for approval, or SideKiqq couldn't be reached. Check your Sent mail before trying again."
+            return
         }
+        uncertain = true
+        error = "Not sure this was sent: SideKiqq didn't answer clearly. Check your Sent mail and the Drafts tab before trying again."
     }
 }
 

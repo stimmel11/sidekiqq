@@ -446,7 +446,7 @@ public struct APIErrorBody: Codable, Hashable, Sendable {
 // MARK: - Dates
 
 public enum SideKiqqDate {
-    // ISO8601DateFormatter is thread-safe (Apple docs), so shared instances are safe to reuse.
+    // ISO8601DateFormatter is documented thread-safe on Apple platforms; on Linux (tests) access is sequential.
     nonisolated(unsafe) private static let withFraction: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
