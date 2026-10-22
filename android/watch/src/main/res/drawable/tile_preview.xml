@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder tile preview shown in the tile picker. TODO: replace with a real 384x384 screenshot PNG. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="192dp"
+    android:height="192dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path android:fillColor="#FF000000" android:pathData="M96,0a96,96 0,1 1,0 192a96,96 0,1 1,0 -192z" />
+    <path android:fillColor="#FFAAAAAA" android:pathData="M70,40h52v6h-52z" />
+    <path android:fillColor="#FFFF5252" android:pathData="M40,66h112v10h-112z" />
+    <path android:fillColor="#FFFFB74D" android:pathData="M40,86h112v10h-112z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M40,106h112v10h-112z" />
+    <path android:fillColor="#FFFF5252" android:pathData="M66,136h60v8h-60z" />
+</vector>

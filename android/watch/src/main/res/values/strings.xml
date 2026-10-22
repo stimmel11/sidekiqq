@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SideKiqq</string>
+    <string name="tile_label">SideKiqq Top 3</string>
+    <string name="complication_label">SideKiqq follow-ups</string>
+    <string name="ask_button">Ask SideKiqq</string>
+    <string name="ask_hold">Hold to talk</string>
+    <string name="ask_listening">Listening… release to send</string>
+    <string name="ask_tap_to_send">Listening… tap to send</string>
+    <string name="ask_transcribing">Transcribing…</string>
+    <string name="ask_thinking">Thinking…</string>
+    <string name="voice_prompt">Ask SideKiqq</string>
+    <string name="pair_prompt">Pairing code</string>
+    <string name="channel_critical">Critical alerts</string>
+    <string name="channel_high">High priority alerts</string>
+    <string name="channel_normal">Alerts</string>
+    <string name="channel_low">Low priority / FYI</string>
+    <string name="channel_reply">Medallion replies</string>
+</resources>

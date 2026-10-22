@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SideKiqq</string>
+    <string name="glasses_label">SideKiqq</string>
+    <string name="channel_alerts">Alerts</string>
+    <string name="channel_alerts_desc">Proactive alerts from SideKiqq (follow-ups, overdue commitments)</string>
+    <string name="channel_connection">Wearable connections</string>
+    <string name="channel_connection_desc">Keeps the medallion and glasses connected</string>
+    <string name="channel_replies">Replies</string>
+    <string name="channel_replies_desc">Assistant replies and drafts awaiting approval</string>
+</resources>

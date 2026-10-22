@@ -1,0 +1,12 @@
+.gradle/
+build/
+/local.properties
+/.idea/
+*.iml
+.DS_Store
+/captures
+.externalNativeBuild
+.cxx
+# Firebase config is per-developer and must never be committed.
+phone/google-services.json
+watch/google-services.json
