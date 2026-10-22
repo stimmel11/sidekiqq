@@ -23,6 +23,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-21: Reachy Mini added as the fifth device (`crew/reachy-mini`): device kind `reachy`, alert log + `GET /api/alerts`, `POST /api/speak` (OpenAI TTS), and the `/reachy` app.
 - 2026-10-21: Marketing site built in `/site` (branch `crew/marketing-site`): Astro + Tailwind, schema-checked content, waitlist with mailto fallback.
 - 2026-10-21: UI framework: `/design` tokens + generator (CSS, Tailwind preset, Compose theme), owner web dashboard in the brain with signed-session login. Tagline changed to "SideKiqq, it goes where you go."
+- 2026-10-22: Connectors design written (`docs/CONNECTORS.md`, branch `crew/connectors-design`): capabilities, brain as MCP client, per-connector encrypted OAuth with minimal scopes, auto/confirm/user-finishes policy; confirm actions become Drafts so approve stays the only executor.
 
 ## Backlog (top = next)
 
@@ -30,7 +31,7 @@ Bots take the first unchecked item that is NOT tagged `[needs-human]`.
 
 ### Next up: connectors + tasks (owner priority, 2026-10-21)
 SideKiqq should connect to any email, video and grocery service, and run tasks started from any device.
-- [ ] Design `docs/CONNECTORS.md`: capability interfaces (`email.send`, `email.read`, `contacts.lookup`, `video.start`, `grocery.cart`, `calendar.*`), the brain as an MCP client, per-connector OAuth with encrypted token storage and minimal scopes, and a per-capability safety policy enforced by the brain (auto / confirm / user-finishes). No connector can bypass draft approval.
+- [x] Design `docs/CONNECTORS.md`: capability interfaces (`email.send`, `email.read`, `contacts.lookup`, `video.start`, `grocery.cart`, `calendar.*`), the brain as an MCP client, per-connector OAuth with encrypted token storage and minimal scopes, and a per-capability safety policy enforced by the brain (auto / confirm / user-finishes). No connector can bypass draft approval.
 - [ ] Brain: implement the connector framework from that doc + a "Connections" screen in the dashboard. Move Gmail/Calendar/Drive onto it.
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.
 - [ ] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.

@@ -100,6 +100,11 @@ with its own device token (device kind `"reachy"`): mic → endpointing → 16 k
 from its settings page (port 8042); an on-device wake word is optional and off by default, so room audio is not
 streamed to the cloud. Draft approval uses the same "send it" rule and still goes only through `/api/drafts/:id/approve`.
 
+## Connectors
+Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (design, not yet
+implemented): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+`/api/drafts/:id/approve` stays the only executor.
+
 ## Auth
 Single-owner system. Brain issues long-lived device tokens via a one-time pairing code shown on the phone
 (`/api/devices/pair`). Google OAuth tokens live server-side only (encrypted in Redis).
