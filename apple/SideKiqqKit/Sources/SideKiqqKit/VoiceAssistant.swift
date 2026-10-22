@@ -114,12 +114,18 @@ public actor VoiceAssistant {
     }
 
     /**
-     * Text that was not captured by `handleUtterance`.
-     * - Parameter spokenAt: when the owner started saying it, for speech transcribed elsewhere (it may
-     *   confirm a draft like an utterance). `nil` for typed text, which never confirms: typing anything
-     *   while a draft is pending cancels it.
+     * A typed question. Typed text never confirms a draft: typing anything while a draft is pending
+     * cancels it, and a typed "send it" is refused.
      */
-    public func handleText(_ text: String, device: DeviceKind, output: VoiceOutput, spokenAt: Date?) async -> Outcome {
+    public func handleTypedText(_ text: String, device: DeviceKind, output: VoiceOutput) async -> Outcome {
+        await handleText(text, device: device, output: output, spokenAt: nil)
+    }
+
+    /**
+     * Internal (tests): text with an optional speech start time. Not public, so app code can't pass a
+     * made-up `spokenAt` for typed text; spoken input goes through `handleUtterance`.
+     */
+    func handleText(_ text: String, device: DeviceKind, output: VoiceOutput, spokenAt: Date?) async -> Outcome {
         guard !busy else { return .busy }
         guard let api = apiProvider() else {
             await output.speak(Self.notPaired)

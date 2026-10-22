@@ -91,11 +91,12 @@ struct DraftConfirmSheet: View {
     }
 
     /**
-     * After a failure, only offer Send again when the brain definitely didn't send it: an HTTP error
-     * response and the draft still pending. A timeout or lost connection may have sent it, so Send stays off.
+     * After a failure, only offer Send again when the brain definitely didn't send it: a 4xx response
+     * and the draft still pending. A timeout or lost connection may have sent it, so Send stays off.
      */
     private func handleFailure(_ failure: Error) async {
-        if case .http? = failure as? SideKiqqAPIError,
+        // 4xx is a definite "not sent". 5xx (e.g. a gateway timeout) may arrive after the brain started sending.
+        if let status = (failure as? SideKiqqAPIError)?.status, (400..<500).contains(status),
            let stillPending = try? await model.pendingDraft(id: draft.id), stillPending.id == draft.id {
             error = failure.friendly
             return

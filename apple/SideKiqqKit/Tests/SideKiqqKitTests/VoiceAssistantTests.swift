@@ -249,7 +249,7 @@ final class VoiceAssistantTests: XCTestCase {
         let va = make(api)
         let out = SpokenLog()
         _ = await va.handleText("hi", device: .phone, output: out, spokenAt: clock.now)
-        let o = await va.handleText("send it", device: .phone, output: out, spokenAt: nil)
+        let o = await va.handleTypedText("send it", device: .phone, output: out)
         XCTAssertEqual(o, .draftNotSent)
         XCTAssertEqual(out.lines.last, VoiceAssistant.typedSendIt)
         XCTAssertEqual(api.approved, [])
@@ -263,7 +263,7 @@ final class VoiceAssistantTests: XCTestCase {
         let out = SpokenLog()
         _ = await va.handleText("hi", device: .phone, output: out, spokenAt: clock.now)
         api.askResponse = try! SideKiqqJSON.decoder().decode(AskResponse.self, from: Fixtures.data(Fixtures.askResponseNoActions))
-        let o = await va.handleText("what's next?", device: .phone, output: out, spokenAt: nil)
+        let o = await va.handleTypedText("what's next?", device: .phone, output: out)
         guard case .answered = o else { return XCTFail("got \(o)") }
         XCTAssertEqual(api.asked.count, 2)
         XCTAssertEqual(api.approved, [])

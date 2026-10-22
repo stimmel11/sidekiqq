@@ -107,8 +107,8 @@ final class VoiceSession {
         guard !t.isEmpty, phase == .idle else { return }
         errorMessage = nil
         phase = .thinking
-        // spokenAt: nil = typed; typed text never confirms a draft.
-        let outcome = await assistant.handleText(t, device: .thisIPhone, output: PhaseOutput(session: self), spokenAt: nil)
+        // Typed text never confirms a draft (VoiceAssistant enforces it).
+        let outcome = await assistant.handleTypedText(t, device: .thisIPhone, output: PhaseOutput(session: self))
         await finish(outcome)
     }
 

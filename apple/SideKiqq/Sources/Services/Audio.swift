@@ -148,7 +148,9 @@ final class Speaker: NSObject, VoiceOutput, AVSpeechSynthesizerDelegate, AVAudio
         set { UserDefaults.standard.set(newValue, forKey: "speech.useBrainVoice") }
     }
 
-    private(set) var isSpeaking = false
+    /** Number of `speak` calls in flight (overlapping callers: Talk and the medallion share this Speaker). */
+    private var activeSpeakers = 0
+    var isSpeaking: Bool { activeSpeakers > 0 }
 
     init(clientProvider: @escaping @Sendable () -> SideKiqqClient?) {
         self.clientProvider = clientProvider
@@ -167,8 +169,8 @@ final class Speaker: NSObject, VoiceOutput, AVSpeechSynthesizerDelegate, AVAudio
         } catch {
             return false // can't play audio right now (e.g. background start refused): nothing was heard
         }
-        isSpeaking = true
-        defer { isSpeaking = false }
+        activeSpeakers += 1
+        defer { activeSpeakers -= 1 }
         if useBrainVoice, let client = clientProvider(), let audio = try? await client.speak(text: t),
            let p = try? AVAudioPlayer(data: audio.wav) {
             return await play(p)
