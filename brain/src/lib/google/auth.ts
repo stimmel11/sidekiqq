@@ -90,6 +90,21 @@ export class GoogleTokenStore {
     return (await this.kv.getdel(`${this.prefix}:google:state:${state}`)) !== null;
   }
 
+  /**
+   * Single-use, short-lived ticket for opening /api/google/connect in a browser, so the owner
+   * secret itself never has to appear in a URL (URLs land in Vercel request logs and history).
+   */
+  async issueConnectTicket(ttlSeconds = 300): Promise<string> {
+    const ticket = randomToken(24);
+    await this.kv.set(`${this.prefix}:google:ticket:${ticket}`, "1", { exSeconds: ttlSeconds });
+    return ticket;
+  }
+
+  async consumeConnectTicket(ticket: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]{16,128}$/.test(ticket)) return false;
+    return (await this.kv.getdel(`${this.prefix}:google:ticket:${ticket}`)) !== null;
+  }
+
   /** An authorised OAuth2 client for the owner, or throws GoogleNotConnectedError. */
   async authorizedClient(): Promise<OAuth2Client> {
     const stored = await this.load();

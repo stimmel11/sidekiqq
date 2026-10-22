@@ -31,7 +31,7 @@ export class FollowUpsRepo {
   async upsert(input: NewFollowUp): Promise<{ followUp: StoredFollowUp; created: boolean }> {
     const now = this.clock().toISOString();
     const existing = (await this.col.all()).find(
-      (f) => !f.resolved && slugify(f.person) === slugify(input.person) && (f.client ?? "") === (input.client ?? ""),
+      (f) => !f.resolved && slugify(f.person) === slugify(input.person) && slugify(f.client ?? "") === slugify(input.client ?? ""),
     );
     const lastContactAt = normalizeDate(input.lastContactAt);
     if (existing) {

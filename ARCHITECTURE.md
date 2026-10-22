@@ -43,6 +43,17 @@ the thinking.
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
 
+Pairing / owner endpoints (not device-token auth):
+
+| Method | Path | Auth | Body → Returns |
+|---|---|---|---|
+| POST | /api/devices/pair-code | owner secret header | `{ "label"?: string }` → `{ "code": "123456", "expiresAt": string, "ttlSeconds": number }` |
+| POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone", "name"?: string }` → `{ "token": string, "deviceId": string, "device": string }` |
+| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link) |
+
+Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"), optional
+`importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
+
 ### Models (TypeScript names; Kotlin mirrors them in /android/shared)
 ```ts
 type Importance = "CRITICAL"|"HIGH"|"MEDIUM"|"LOW"|"FYI";

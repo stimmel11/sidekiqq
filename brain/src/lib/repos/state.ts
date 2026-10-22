@@ -22,6 +22,10 @@ export class StateRepo {
     return this.kv.set(`${this.prefix}:seen:msg:${messageId}`, "1", { nx: true, exSeconds: 60 * 60 * 24 * 30 });
   }
 
+  async isMessageProcessed(messageId: string): Promise<boolean> {
+    return (await this.kv.get(`${this.prefix}:seen:msg:${messageId}`)) !== null;
+  }
+
   async unmarkMessageProcessed(messageId: string): Promise<void> {
     await this.kv.del(`${this.prefix}:seen:msg:${messageId}`);
   }

@@ -8,7 +8,8 @@ import {
   type Action,
   type DeviceKind,
 } from "../models";
-import { truncate } from "../util";
+import { config } from "../env";
+import { normalizeOwnerDate, truncate } from "../util";
 import { toolSchema, type ToolDef } from "./llm";
 
 /**
@@ -82,8 +83,13 @@ const listCalendarEvents = tool({
     maxResults: z.number().int().min(1).max(50).default(20),
   }),
   async run(input, { deps, now }) {
-    const timeMin = input.start ? new Date(input.start) : now;
-    const timeMax = input.end ? new Date(input.end) : new Date(timeMin.getTime() + 7 * 86_400_000);
+    // Zone-less / date-only bounds are the owner's local day, not UTC (a UTC-midnight "2026-10-20"
+    // would start at 6pm the previous evening in Denver).
+    const tz = config.ownerTimezone();
+    const start = input.start ? normalizeOwnerDate(input.start, { timeZone: tz, dateOnly: "startOfDay" }) : undefined;
+    const end = input.end ? normalizeOwnerDate(input.end, { timeZone: tz, dateOnly: "endOfDay" }) : undefined;
+    const timeMin = input.start ? new Date(start ?? Number.NaN) : now;
+    const timeMax = input.end ? new Date(end ?? Number.NaN) : new Date(timeMin.getTime() + 7 * 86_400_000);
     if (Number.isNaN(timeMin.getTime()) || Number.isNaN(timeMax.getTime())) throw new ToolInputError("start/end must be valid dates");
     const ws = await deps.workspace();
     const events = await ws.listCalendarEvents({
