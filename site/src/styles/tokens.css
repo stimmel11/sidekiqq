@@ -1,0 +1,70 @@
+/*
+ * SideKiqq brand tokens — the ONE place colors and fonts are defined.
+ *
+ * TODO: generate this file from /design/tokens.json once the design-system bot
+ * lands it. Until then these values are hand-copied from the brand spec and
+ * must match the app exactly. Change a color here and the whole site follows.
+ *
+ * Brand palette (do not change without updating the app too):
+ *   Ink    #0F1420   Paper  #F6F4EF   Slate  #5B6475   Line   #E2DED5
+ *   Signal #E8A33D   Steady #2F8F83   Alert  #C2412D
+ */
+
+:root {
+  /* Raw brand values */
+  --brand-ink: #0f1420;
+  --brand-paper: #f6f4ef;
+  --brand-slate: #5b6475;
+  --brand-line: #e2ded5;
+  --brand-signal: #e8a33d;
+  --brand-steady: #2f8f83;
+  --brand-alert: #c2412d;
+
+  /* Fonts */
+  --font-heading: 'Space Grotesk Variable', 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-data: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Semantic roles, light mode (the default) */
+  --bg: var(--brand-paper);
+  --surface: #fbfaf7;          /* a half-step lighter than Paper, for cards */
+  --fg: var(--brand-ink);
+  --muted: var(--brand-slate);
+  --line: var(--brand-line);
+  --accent: var(--brand-signal);
+  --on-accent: var(--brand-ink);
+  --steady: var(--brand-steady);
+  --steady-text: #23705f;      /* Steady darkened so small text passes contrast on Paper */
+  --alert: var(--brand-alert);
+  --band-bg: var(--brand-ink);  /* the dark "trust" band */
+  --band-fg: var(--brand-paper);
+  --band-muted: #a7aebb;
+
+  color-scheme: light;
+}
+
+/* Dark mode: follows the OS unless the visitor picked a theme with the toggle. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: var(--brand-ink);
+    --surface: #161c2b;
+    --fg: var(--brand-paper);
+    --muted: #a7aebb;          /* Slate lifted for contrast on Ink */
+    --line: #2a3245;
+    --steady-text: #5fc0b2;
+    --alert: #e0664f;
+    --band-bg: #0a0e17;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: var(--brand-ink);
+  --surface: #161c2b;
+  --fg: var(--brand-paper);
+  --muted: #a7aebb;
+  --line: #2a3245;
+  --steady-text: #5fc0b2;
+  --alert: #e0664f;
+  --band-bg: #0a0e17;
+  color-scheme: dark;
+}

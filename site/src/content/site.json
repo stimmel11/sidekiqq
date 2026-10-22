@@ -1,0 +1,39 @@
+{
+  "name": "SideKiqq",
+  "tagline": "Your chief of staff, on every device.",
+  "description": "SideKiqq reads your email and calendar, tracks every commitment and open loop, tells you who to follow up with, and drafts replies it never sends without your approval.",
+  "url": "https://sidekiqq.vercel.app",
+  "locale": "en_US",
+  "ogImage": "/og.png",
+  "nav": [
+    { "label": "How it works", "href": "/#how-it-works" },
+    { "label": "Devices", "href": "/devices" },
+    { "label": "Privacy & trust", "href": "/privacy-and-trust" },
+    { "label": "Blog", "href": "/blog" }
+  ],
+  "headerCta": { "label": "Join the waitlist", "href": "/#waitlist" },
+  "waitlist": {
+    "provider": "form",
+    "fieldName": "email",
+    "fallbackEmail": "hello@example.com",
+    "fallbackSubject": "SideKiqq waitlist",
+    "heading": "Get early access",
+    "body": "SideKiqq is in private development. Leave your email and we'll write when there's a seat for you. One email, no newsletter.",
+    "inputLabel": "Work email",
+    "placeholder": "you@company.com",
+    "buttonLabel": "Join the waitlist",
+    "successMessage": "You're on the list. We'll email you when there's a seat.",
+    "errorMessage": "That didn't go through. Check the address and try again, or email us instead.",
+    "fallbackBody": "The waitlist form isn't connected yet. Email us and we'll add you by hand.",
+    "fallbackButtonLabel": "Email to join the waitlist"
+  },
+  "footer": {
+    "note": "SideKiqq is in private development. Nothing on this site is a promise of availability or pricing.",
+    "links": [
+      { "label": "Devices", "href": "/devices" },
+      { "label": "Privacy & trust", "href": "/privacy-and-trust" },
+      { "label": "Blog", "href": "/blog" }
+    ]
+  },
+  "social": []
+}

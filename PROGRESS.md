@@ -12,11 +12,13 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
 | Medallion firmware + hardware guide (`/medallion`) | Done, untested on hardware | Compiles and links for ESP32-S3; 31 native tests pass. See `medallion/HARDWARE.md`. |
+| Marketing site (`/site`) | Built, not deployed | Astro 7 + Tailwind, static. Home, /devices, /privacy-and-trust, /blog, 404. Copy in `site/src/content/`; see `site/EDITING.md`. |
 | QA review | Round 1 done | `QA_REPORT.md`. 8 issues fixed, 6 open (below). |
 
 ## History
 - 2026-10-16: First session wrote the architecture, brain, and Android apps. Never committed.
 - 2026-10-21: Work recovered and pushed. Build crew round 1: Android static fixes, QA review + fixes, medallion firmware.
+- 2026-10-21: Marketing site built in `/site` (branch `crew/marketing-site`): Astro + Tailwind, schema-checked content, waitlist with mailto fallback.
 
 ## Backlog (top = next)
 
@@ -33,6 +35,10 @@ Bots take the first unchecked item that is NOT tagged `[needs-human]`.
 - [ ] Phase 2 design: texts (Android SMS via the phone companion), Facebook groups (API limits; investigate options), Outlook. Write `docs/CHANNELS.md` with a recommendation before building.
 - [ ] `[needs-human]` First real Android build: `cd android && ./gradlew build` on a Mac with Android Studio/SDK; fix whatever breaks.
 - [ ] `[needs-human]` Deploy brain to Vercel and connect Google account.
+- [ ] Site: generate `site/src/styles/tokens.css` from `/design/tokens.json` once it exists.
+- [ ] `[needs-human]` Create the Vercel project for the site (Root Directory `site`) and attach a domain; then set `url` in `site/src/content/site.json`.
+- [ ] `[needs-human]` Choose a waitlist provider, set `PUBLIC_WAITLIST_ENDPOINT` in Vercel, and replace the placeholder `waitlist.fallbackEmail` in `site/src/content/site.json`.
+- [ ] `[needs-human]` Review site copy (especially `/privacy-and-trust` and device statuses) before making it public.
 - [ ] `[needs-human]` Order medallion parts (`medallion/HARDWARE.md`), flash, and test with the phone.
 
 ## Crew rules

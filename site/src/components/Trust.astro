@@ -1,0 +1,23 @@
+---
+/** The dark "never sends without you" band. Copy: home.md → trust. */
+import type { CollectionEntry } from 'astro:content';
+interface Props { data: CollectionEntry<'home'>['data']['trust'] }
+const { data } = Astro.props;
+---
+<section class="border-y border-line bg-band text-band-fg">
+  <div class="wrap grid gap-12 py-20 lg:grid-cols-[1.1fr_1fr] lg:gap-20 lg:py-28">
+    <div>
+      <h2 class="text-[2.4rem] font-semibold sm:text-[3.2rem] lg:text-[3.6rem]">{data.heading}</h2>
+      <p class="mt-6 max-w-xl text-lg text-band-muted">{data.body}</p>
+      <a href={data.link.href} class="mt-8 inline-block underline decoration-accent underline-offset-4 hover:text-accent">{data.link.label}</a>
+    </div>
+    <ul class="self-end">
+      {data.points.map((p) => (
+        <li class="border-t border-white/15 py-5">
+          <h3 class="text-lg font-semibold">{p.title}</h3>
+          <p class="mt-1 text-band-muted">{p.body}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>

@@ -1,0 +1,61 @@
+---
+/**
+ * Line drawings of each device, drawn by hand in SVG (no logos, no photos).
+ * Uses currentColor for strokes and the Signal accent for the "status light",
+ * so they work in light and dark mode. Pick one with the `art` field in a device file.
+ */
+interface Props { art: 'phone' | 'watch' | 'glasses' | 'medallion' | 'robot'; class?: string }
+const { art, class: cls } = Astro.props;
+---
+<svg viewBox="0 0 120 120" class={cls} aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  {art === 'phone' && (
+    <g>
+      <rect x="38" y="14" width="44" height="92" rx="8" />
+      <path d="M54 20h12" />
+      <path d="M45 36h30M45 44h22M45 58h30M45 66h18" opacity=".55" />
+      <rect x="45" y="80" width="30" height="10" rx="3" fill="var(--accent)" stroke="none" />
+    </g>
+  )}
+  {art === 'watch' && (
+    <g>
+      <path d="M48 22l3-10h18l3 10M48 98l3 10h18l3-10" />
+      <circle cx="60" cy="60" r="32" />
+      <circle cx="60" cy="60" r="25" opacity=".55" />
+      <path d="M50 54h20M50 62h14" />
+      <circle cx="60" cy="74" r="2.6" fill="var(--accent)" stroke="none" />
+      <path d="M92 56v8" />
+    </g>
+  )}
+  {art === 'glasses' && (
+    <g>
+      <rect x="14" y="46" width="38" height="28" rx="11" />
+      <rect x="68" y="46" width="38" height="28" rx="11" />
+      <path d="M52 56c3-4 13-4 16 0" />
+      <path d="M14 52L6 46M106 52l8-6" />
+      <path d="M22 58h14" opacity=".55" />
+      <circle cx="98" cy="54" r="2.4" fill="var(--accent)" stroke="none" />
+    </g>
+  )}
+  {art === 'medallion' && (
+    <g>
+      <path d="M40 12c4 14 10 22 20 26M80 12c-4 14-10 22-20 26" opacity=".55" />
+      <circle cx="60" cy="72" r="32" />
+      <circle cx="60" cy="72" r="13" />
+      <circle cx="60" cy="72" r="13" fill="var(--accent)" stroke="none" opacity=".9" />
+      <path d="M41 72a19 19 0 0 1 4-12M79 72a19 19 0 0 1-4 12" opacity=".55" />
+    </g>
+  )}
+  {art === 'robot' && (
+    <g>
+      <rect x="30" y="26" width="60" height="40" rx="20" />
+      <circle cx="50" cy="46" r="7" />
+      <circle cx="70" cy="46" r="7" />
+      <circle cx="50" cy="46" r="2.2" fill="var(--accent)" stroke="none" />
+      <circle cx="70" cy="46" r="2.2" fill="var(--accent)" stroke="none" />
+      <path d="M44 26l-6-12M76 26l6-12" />
+      <path d="M48 66l-4 14h32l-4-14" />
+      <path d="M34 80h52v14a6 6 0 0 1-6 6H40a6 6 0 0 1-6-6Z" />
+      <path d="M26 106h68" opacity=".55" />
+    </g>
+  )}
+</svg>
