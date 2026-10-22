@@ -54,6 +54,7 @@ Same brain and API contract; Apple devices are thin clients like the Android one
 - [ ] CarPlay: communication-style experience with voice-first alerts and replies, plus the same driving-mode rules as Android Auto.
 - [ ] Mac: menu-bar app (Top 5, quick ask, drafts to approve) and notifications.
 - [ ] Connectors: iCloud Mail (IMAP/SMTP with an app-specific password), Apple Calendar (CalDAV), Apple Contacts (CardDAV), FaceTime call hand-off (`facetime://` from the iPhone app).
+- [ ] Site: once Apple support ships (iPhone app in TestFlight or later), update the Questions section: rewrite `site/src/content/faq/04-phone.md` ("Does it work on iPhone?", currently "Not yet") and review the other FAQ answers (`03-devices.md`, `02-accounts.md` for iCloud). Also add iPhone / Apple Watch / CarPlay / Mac to `site/src/content/devices/` and the home page devices section. State only what has actually shipped. Do this in the same PR that marks the iPhone app as shipped, or right after it.
 - [ ] `[needs-human]` Apple Developer Program membership, App Store Connect app record, APNs key, and a Mac with Xcode for the first builds and TestFlight. The cloud crew can write Swift but can't compile or sign iOS apps.
 
 ### Earlier items
