@@ -1,0 +1,39 @@
+---
+import { site } from '../lib/site';
+import Logo from './Logo.astro';
+import ThemeToggle from './ThemeToggle.astro';
+const path = Astro.url.pathname.replace(/\/$/, '') || '/';
+---
+<header class="border-b border-line">
+  <div class="wrap flex h-16 items-center gap-4">
+    <a href="/" class="mr-auto" aria-label={`${site.name} home`}><Logo /></a>
+    <nav aria-label="Main" class="hidden md:block">
+      <ul class="flex items-center gap-1 text-[.95rem]">
+        {site.nav.map((item) => {
+          const active = item.href === path;
+          return (
+            <li>
+              <a href={item.href} aria-current={active ? 'page' : undefined}
+                class:list={['rounded-md px-3 py-2 hover:text-fg', active ? 'text-fg' : 'text-muted']}>{item.label}</a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+    <ThemeToggle />
+    <a href={site.headerCta.href} class="btn btn-primary hidden sm:inline-flex">{site.headerCta.label}</a>
+    <details class="md:hidden relative group">
+      <summary class="list-none inline-flex size-11 items-center justify-center rounded-md cursor-pointer [&::-webkit-details-marker]:hidden" aria-label="Menu">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14" stroke="currentColor" stroke-width="1.5" /></svg>
+      </summary>
+      <nav aria-label="Mobile" class="absolute right-0 top-12 z-40 w-60 rounded-lg border border-line bg-surface p-2 shadow-[0_12px_32px_-12px_rgba(15,20,32,.25)]">
+        <ul>
+          {site.nav.map((item) => (
+            <li><a href={item.href} class="block rounded-md px-3 py-2.5 hover:bg-bg">{item.label}</a></li>
+          ))}
+          <li class="mt-1 border-t border-line pt-2"><a href={site.headerCta.href} class="btn btn-primary w-full">{site.headerCta.label}</a></li>
+        </ul>
+      </nav>
+    </details>
+  </div>
+</header>

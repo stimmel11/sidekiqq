@@ -1,0 +1,25 @@
+---
+/** One device row on /devices. Data: src/content/devices/<name>.md (body = the paragraph under the list). */
+import { render, type CollectionEntry } from 'astro:content';
+import DeviceArt from './DeviceArt.astro';
+import StatusTag from './StatusTag.astro';
+interface Props { device: CollectionEntry<'devices'> }
+const { device } = Astro.props;
+const { Content } = await render(device);
+const d = device.data;
+---
+<li id={device.id} class="grid scroll-mt-8 gap-6 border-b border-line py-10 md:grid-cols-[10rem_1fr_1fr] md:gap-10">
+  <DeviceArt art={d.art} class="h-28 w-28 md:h-36 md:w-36" />
+  <div>
+    <p class="text-muted">{d.role}</p>
+    <h2 class="mt-1 text-2xl font-semibold sm:text-3xl">{d.name}</h2>
+    <StatusTag status={d.status} class="mt-3" />
+    <p class="mt-4 text-lg">{d.summary}</p>
+    <div class="prose mt-3 text-muted"><Content /></div>
+  </div>
+  <ul class="space-y-2 self-center md:border-l md:border-line md:pl-10">
+    {d.does.map((x) => (
+      <li class="flex gap-3"><span class="mt-[.7em] h-px w-3 shrink-0 bg-accent" aria-hidden="true"></span><span>{x}</span></li>
+    ))}
+  </ul>
+</li>
