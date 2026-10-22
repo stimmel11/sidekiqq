@@ -49,7 +49,7 @@ class Speaker(context: Context) {
         if (configured) return
         configured = true
         tts.setAudioAttributes(attrs)
-        tts.language = Locale.getDefault()
+        tts.setLanguage(Locale.getDefault()) // returns Int, so it is not a Kotlin property setter
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) {}
             override fun onDone(utteranceId: String) { pending.remove(utteranceId)?.complete(Unit) }

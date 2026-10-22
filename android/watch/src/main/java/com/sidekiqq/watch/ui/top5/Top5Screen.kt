@@ -62,16 +62,16 @@ fun Top5Screen(vm: Top5ViewModel = viewModel()) {
             is Load.Error -> errorItem(s.message, vm::refresh)
             is Load.Ready -> {
                 if (s.data.items.isEmpty()) emptyItem("Nothing pressing. Nice.")
-                s.data.items.forEachIndexed { i, item ->
+                s.data.items.forEachIndexed { i, top ->
                     item {
                         Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                "${i + 1}. ${item.title}",
-                                color = importanceColor(item.importance),
+                                "${i + 1}. ${top.title}",
+                                color = importanceColor(top.importance),
                                 style = MaterialTheme.typography.title3,
                             )
-                            Text(item.why, style = MaterialTheme.typography.body2, color = SkColors.Muted)
-                            DueFormat.parse(item.dueAt, zone)?.let { due ->
+                            Text(top.why, style = MaterialTheme.typography.body2, color = SkColors.Muted)
+                            DueFormat.parse(top.dueAt, zone)?.let { due ->
                                 // The TopItem contract has no inferred flag, so show the date as given.
                                 val overdue = due.isBefore(now)
                                 Text(
@@ -80,7 +80,7 @@ fun Top5Screen(vm: Top5ViewModel = viewModel()) {
                                     style = MaterialTheme.typography.caption2,
                                 )
                             }
-                            Text(item.importance.name, color = importanceColor(item.importance), style = MaterialTheme.typography.caption3)
+                            Text(top.importance.name, color = importanceColor(top.importance), style = MaterialTheme.typography.caption3)
                         }
                     }
                 }

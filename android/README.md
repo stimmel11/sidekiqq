@@ -13,7 +13,8 @@ The binding contracts are in `../ARCHITECTURE.md`: the Brain API and the medalli
 ## Requirements
 - Android Studio Narwhal or newer. To use the AI Glasses emulator you need the **latest Canary**, because the XR tools ship there first.
 - JDK 17+. The JBR bundled with Studio works.
-- AGP 8.13, Kotlin 2.2, Gradle 8.14.3. The wrapper properties are committed. The wrapper jar is not, so if `./gradlew` is missing, let Studio sync, or run `gradle wrapper --gradle-version 8.14.3` once.
+- AGP 8.13, Kotlin 2.2, Gradle 8.14.3. The Gradle wrapper (`gradlew`, `gradle/wrapper/gradle-wrapper.jar`) is committed.
+- **Build status:** this project has not yet been compiled end to end with AGP. The sandbox it was written in cannot reach Google Maven or dl.google.com. The pure-JVM logic and its tests were compiled and run with Kotlin 2.0.21. The first real `./gradlew build` may still surface API mismatches, most likely in the alpha XR code (see below).
 - Phone: Android 11 (API 30) or newer. Glasses projection needs Android 16 (API 36) on the phone. On older phones the glasses fall back to plain Bluetooth-headset mode.
 
 ## Open and run
@@ -66,7 +67,11 @@ Tap **Connect medallion** on the Home tab to start `MedallionService`, a foregro
 The service reconnects with exponential backoff.
 
 ## Galaxy Glasses
-Everything XR-specific is behind `glasses/GlassesBridge`:
+Everything XR-specific is behind `glasses/GlassesBridge`. The code that imports `androidx.xr` is in the `phone/src/xr` source set (`ProjectedGlassesBridge`, `ProjectedSupport`). `phone/src/noxr` has a stub `ProjectedSupport` with the same API.
+- By default (`sidekiqq.xr=true`) the XR source set and the `androidx.xr.projected` dependency are included.
+- If the alpha artifact fails to resolve or compile, build with `./gradlew assembleDebug -Psidekiqq.xr=false`, or set `sidekiqq.xr=false` in `gradle.properties`. Glasses then use only the Bluetooth-headset bridge, and "Open on glasses" returns false.
+
+The two bridges:
 - **`ProjectedGlassesBridge`** (Android 16+) uses `androidx.xr.projected:projected:1.0.0-alpha13`:
   - `ProjectedContext.isProjectedDeviceConnected` for connect and disconnect
   - `createProjectedDeviceContext` for glasses audio
@@ -100,7 +105,7 @@ There is no always-on hotword. You wake SideKiqq explicitly: tap the glasses tou
 
 ## Tests
 ```
-./gradlew :shared:testDebugUnitTest :phone:testDebugUnitTest
+./gradlew :shared:test :phone:testDebugUnitTest :watch:testDebugUnitTest
 ```
 - `:shared` covers `WavEncoder`, JSON (de)serialization and `SideKiqqClient` against the Ktor MockEngine.
 - `:phone` covers `UtteranceAssembler` (sequence wrap, gaps, duplicates and late packets) and `DraftConfirmation`.
@@ -115,5 +120,5 @@ There is no always-on hotword. You wake SideKiqq explicitly: tap the glasses tou
 The phone and watch must share **applicationId `com.sidekiqq.app`** and the same signing key, or the Data Layer drops messages.
 
 ## Known assumptions
-- `POST /api/devices/pair` takes `{"code","device"}` and returns `{"token"}`. The contract table lists the path but not the body.
+- `POST /api/devices/pair` takes `{"code","device"}` and returns `{"token","deviceId","device"}`. This was checked against `brain/src/app/api/devices/pair/route.ts`. The phone pairs as `phone` and the watch as `watch`.
 - There is no `GET /api/drafts/:id`. The glasses therefore speak the draft's `Action.summary` in the confirm prompt.

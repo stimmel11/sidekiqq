@@ -70,11 +70,8 @@ class SideKiqqRepository(
     /** Sends a drafted message. Only ApproveFlow's confirm step may call this. */
     suspend fun approveDraft(id: String) = client().approveDraft(id)
 
-    /**
-     * Standalone pairing. Note: :shared pair() always sends device="phone" (PairRequest default);
-     * TODO(shared): add a device param so the brain can label this token "watch".
-     */
-    suspend fun pair(code: String): String = client().pair(code).also { prefs.token = it }
+    /** Standalone pairing. The brain labels the resulting token as a "watch" device. */
+    suspend fun pair(code: String): String = client().pair(code, Device.WATCH).also { prefs.token = it }
 
     /** Fetches what the tile and complication need in parallel, and caches it. */
     suspend fun refreshGlance(): GlanceSnapshot = coroutineScope {

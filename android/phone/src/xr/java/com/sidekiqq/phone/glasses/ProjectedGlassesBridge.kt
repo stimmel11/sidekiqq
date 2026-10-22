@@ -38,8 +38,12 @@ import kotlinx.coroutines.launch
  *   }
  *   annotation: androidx.xr.projected.experimental.ExperimentalProjectedApi
  *
- * The Projected API needs API 36 for connection monitoring; [isSupported] gates it and
- * [GlassesBridgeFactory] falls back to [BluetoothHeadsetGlassesBridge] otherwise.
+ * The Projected API needs API 36 for connection monitoring. [GlassesBridgeFactory] (via
+ * [ProjectedSupport]) gates it and falls back to [BluetoothHeadsetGlassesBridge] otherwise.
+ *
+ * This file lives in the `xr` source set, which is compiled only when the Gradle property
+ * `sidekiqq.xr` is true (the default). Build with `-Psidekiqq.xr=false` if the alpha
+ * androidx.xr.projected artifact fails to resolve or compile; `src/noxr` then supplies a stub.
  *
  * Audio: Google's guide says glasses' mic is reached over Bluetooth HFP. Find the TYPE_BLUETOOTH_SCO input from
  * the projected context's AudioManager, record with VOICE_COMMUNICATION, then setPreferredDevice + setCommunicationDevice.
@@ -154,20 +158,5 @@ class ProjectedGlassesBridge(
     private companion object {
         const val TAG = "SideKiqqXrGlasses"
         const val SCO_SETTLE_MS = 400L
-    }
-}
-
-/** Picks the projected bridge on Android 16+ (when the XR library is usable), else the BT headset fallback. */
-object GlassesBridgeFactory {
-    fun create(context: Context, phoneSpeaker: Speaker): GlassesBridge {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
-            try {
-                return ProjectedGlassesBridge(context, phoneSpeaker)
-            } catch (e: LinkageError) {
-                // Library or platform services missing on this build: degrade gracefully.
-                Log.w("SideKiqqGlasses", "Projected API unavailable, using BT headset bridge", e)
-            }
-        }
-        return BluetoothHeadsetGlassesBridge(context, phoneSpeaker)
     }
 }
