@@ -1,0 +1,54 @@
+@import "../../../design/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background: var(--sk-bg);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--sk-bg);
+    color: var(--sk-text);
+    font-family: var(--sk-font-body);
+    font-size: var(--sk-text-body-size);
+    line-height: var(--sk-text-body-line);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--sk-font-heading);
+  }
+  :focus-visible {
+    outline: 2px solid var(--sk-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--sk-brand-signal);
+    color: var(--sk-brand-ink);
+  }
+  dialog[open] {
+    animation: sk-dialog-in var(--sk-motion-base) var(--sk-motion-easing);
+  }
+  dialog[open]::backdrop {
+    animation: sk-fade var(--sk-motion-base) linear;
+  }
+}
+
+@keyframes sk-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes sk-fade {
+  from {
+    opacity: 0;
+  }
+}
