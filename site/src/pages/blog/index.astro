@@ -1,0 +1,29 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import { formatDate } from '../../lib/format';
+
+const posts = (await getCollection('blog', (p) => import.meta.env.DEV || !p.data.draft))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+---
+<Base title="Blog" description="Notes on building SideKiqq, an AI chief of staff that never sends without you.">
+  <header class="wrap pt-14 pb-8 md:pt-20">
+    <h1 class="text-[2.5rem] font-semibold sm:text-[3.4rem]">Blog</h1>
+    <p class="mt-4 max-w-2xl text-lg text-muted">Notes on building SideKiqq.</p>
+  </header>
+  <div class="wrap">
+    <ul class="border-t border-line">
+      {posts.map((p) => (
+        <li class="border-b border-line">
+          <a href={`/blog/${p.id}`} class="group grid gap-2 py-8 md:grid-cols-[10rem_1fr] md:gap-8">
+            <time datetime={p.data.date.toISOString()} class="data pt-1.5 text-muted">{formatDate(p.data.date)}</time>
+            <div>
+              <h2 class="text-2xl font-semibold group-hover:underline group-hover:decoration-accent group-hover:underline-offset-4">{p.data.title}</h2>
+              <p class="mt-2 max-w-2xl text-muted">{p.data.description}</p>
+            </div>
+          </a>
+        </li>
+      ))}
+    </ul>
+  </div>
+</Base>

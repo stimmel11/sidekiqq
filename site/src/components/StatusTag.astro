@@ -1,0 +1,7 @@
+---
+interface Props { status: 'In development' | 'Planned' | 'Available'; class?: string }
+const { status, class: cls } = Astro.props;
+---
+<span class:list={['data inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-muted', cls]}>
+  <span class:list={['size-1.5 rounded-full', status === 'Available' ? 'bg-steady' : status === 'Planned' ? 'bg-muted' : 'bg-accent']} aria-hidden="true"></span>{status}
+</span>

@@ -11,6 +11,8 @@ import type { MailSender } from "@/lib/google/sender";
 import type { CreateParams, LLM } from "@/lib/assistant/llm";
 import type { PushMessage, PushSender } from "@/lib/push";
 import type { Transcriber } from "@/lib/transcribe";
+import type { SpeechSynthesizer } from "@/lib/tts";
+import { pcm16ToWav } from "@/lib/tts";
 
 /** In-memory Redis stand-in honouring TTL, NX and GETDEL semantics. */
 export class MemoryKV implements KV {
@@ -161,7 +163,7 @@ export interface TestDeps extends Deps {
   setNow(d: Date): void;
 }
 
-export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; googleConnected?: boolean } = {}): TestDeps {
+export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean } = {}): TestDeps {
   let now = opts.now ?? new Date("2026-10-16T15:00:00Z");
   const clock = () => now;
   const kv = new MemoryKV(() => now.getTime());
@@ -194,6 +196,11 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
         name: "fake",
         transcribe: async () => "fake transcript",
       },
+    tts: () =>
+      opts.tts ?? {
+        name: "fake",
+        synthesize: async () => ({ wav: pcm16ToWav(new Uint8Array(4800), 24000), sampleRate: 24000 }),
+      },
     ws,
     sender,
     pushFake,
@@ -222,7 +229,7 @@ export function params<P>(p: P) {
   return { params: Promise.resolve(p) };
 }
 
-export async function pairDevice(deps: TestDeps, kind: "watch" | "phone" | "glasses" | "medallion" = "watch") {
+export async function pairDevice(deps: TestDeps, kind: "watch" | "phone" | "glasses" | "medallion" | "reachy" = "watch") {
   const { token, device } = await deps.repos.devices.create(kind);
   return { token, device };
 }

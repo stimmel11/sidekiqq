@@ -1,0 +1,22 @@
+---
+/** FAQ. One file per question in src/content/faq/. */
+import { getCollection, render } from 'astro:content';
+interface Props { heading: string }
+const { heading } = Astro.props;
+const items = (await getCollection('faq')).sort((a, b) => a.data.order - b.data.order);
+const rendered = await Promise.all(items.map(async (i) => ({ ...i, Content: (await render(i)).Content })));
+---
+<section id="faq" class="wrap grid gap-10 py-20 lg:grid-cols-[1fr_2fr] lg:py-28">
+  <h2 class="text-3xl font-semibold sm:text-[2.6rem]">{heading}</h2>
+  <div class="border-t border-line">
+    {rendered.map(({ data, Content }) => (
+      <details class="faq group border-b border-line">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-6 py-5 font-heading text-lg font-medium [&::-webkit-details-marker]:hidden">
+          {data.question}
+          <svg class="shrink-0 transition-transform group-open:rotate-45" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" /></svg>
+        </summary>
+        <div class="prose pb-6 text-muted"><Content /></div>
+      </details>
+    ))}
+  </div>
+</section>

@@ -14,13 +14,15 @@ enum class Importance { CRITICAL, HIGH, MEDIUM, LOW, FYI }
 @Serializable
 enum class Confidence { CONFIRMED, LIKELY, INFERRED, UNKNOWN }
 
-/** Device kind. Serialized lowercase ("watch", "glasses", "medallion", "phone"). */
+/** Device kind. Serialized lowercase ("watch", "glasses", "medallion", "phone", "reachy"). */
 @Serializable
 enum class Device(val wire: String) {
     @SerialName("watch") WATCH("watch"),
     @SerialName("glasses") GLASSES("glasses"),
     @SerialName("medallion") MEDALLION("medallion"),
     @SerialName("phone") PHONE("phone"),
+    /** Reachy Mini desktop robot (Python app in /reachy). Never used by the Android apps themselves. */
+    @SerialName("reachy") REACHY("reachy"),
 }
 
 /**

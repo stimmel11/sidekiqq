@@ -2,6 +2,7 @@ import type { Deps } from "../deps";
 import { config } from "../env";
 import type { EmailMessage } from "../google/workspace";
 import { structuredCall } from "../assistant/llm";
+import { deliverAlert } from "../push/alerts";
 import { formatNow, systemBlocks } from "../assistant/prompt";
 import type { Importance } from "../models";
 import { localDay, mapLimit, truncate } from "../util";
@@ -109,13 +110,9 @@ async function persist(deps: Deps, msg: EmailMessage, x: Extraction) {
   return { commitmentsAdded, decisionsAdded, followupsUpserted };
 }
 
-async function pushToAll(deps: Deps, title: string, body: string, data: Record<string, string>, priority: "high" | "normal") {
-  const push = deps.push();
-  const tokens = await deps.repos.devices.pushTokens();
-  if (!tokens.length) return 0;
-  const res = await push.send(tokens, { title, body, data, priority });
-  for (const t of res.invalidTokens) await deps.repos.devices.clearFcmToken(t);
-  return res.sent > 0 || !push.enabled ? 1 : 0;
+/** Push + alert log (lib/push/alerts.ts), so FCM and polling devices get identical alerts. */
+function pushToAll(deps: Deps, title: string, body: string, data: Record<string, string>, priority: "high" | "normal") {
+  return deliverAlert(deps, { title, body, data, priority });
 }
 
 export async function runScan(deps: Deps): Promise<ScanResult> {

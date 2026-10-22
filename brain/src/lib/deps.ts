@@ -8,6 +8,7 @@ import { GmailDraftSender, type MailSender } from "./google/sender";
 import { llmFromEnv, type LLM } from "./assistant/llm";
 import { pushSenderFromEnv, type PushSender } from "./push";
 import { transcriberFromEnv, type Transcriber } from "./transcribe";
+import { speechSynthesizerFromEnv, type SpeechSynthesizer } from "./tts";
 
 /**
  * Dependency container. Routes call getDeps(); tests call setDeps() with fakes.
@@ -26,6 +27,8 @@ export interface Deps {
   mailSender(): Promise<MailSender>;
   push(): PushSender;
   transcriber(): Transcriber;
+  /** Text-to-speech for devices that play audio themselves (Reachy Mini). */
+  tts(): SpeechSynthesizer;
 }
 
 let current: Deps | null = null;
@@ -38,6 +41,7 @@ export function buildDeps(kv: KV): Deps {
     clock,
     conversationTtlSeconds: config.conversationTtlSeconds(),
     conversationMaxMessages: config.conversationMaxMessages(),
+    alertRetentionDays: config.alertLogDays(),
   });
   const googleTokens = new GoogleTokenStore(kv, prefix, encryptionKeyFromEnv);
   let llm: LLM | null = null;
@@ -52,6 +56,7 @@ export function buildDeps(kv: KV): Deps {
     mailSender: async () => new GmailDraftSender(await googleTokens.authorizedClient()),
     push: () => (push ??= pushSenderFromEnv()),
     transcriber: () => transcriberFromEnv(),
+    tts: () => speechSynthesizerFromEnv(),
   };
 }
 

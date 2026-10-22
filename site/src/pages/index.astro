@@ -1,0 +1,25 @@
+---
+/** Home page. All copy: src/content/home/home.md. Reorder sections by moving these lines. */
+import { getEntry } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import Hero from '../components/Hero.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import DeviceRow from '../components/DeviceRow.astro';
+import Trust from '../components/Trust.astro';
+import BriefSample from '../components/BriefSample.astro';
+import Faq from '../components/Faq.astro';
+import Waitlist from '../components/Waitlist.astro';
+
+const home = await getEntry('home', 'home');
+if (!home) throw new Error('Missing src/content/home/home.md');
+const d = home.data;
+---
+<Base title={d.title} description={d.description}>
+  <Hero hero={d.hero} />
+  <HowItWorks data={d.howItWorks} />
+  <DeviceRow data={d.devices} />
+  <Trust data={d.trust} />
+  <BriefSample data={d.brief} />
+  <Faq heading={d.faq.heading} />
+  <Waitlist />
+</Base>

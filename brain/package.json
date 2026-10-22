@@ -5,7 +5,7 @@
   "description": "SideKiqq cloud brain: Claude-powered executive assistant API for wearable clients",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "NODE_OPTIONS=--max-old-space-size=6144 next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -27,6 +27,9 @@
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
   }

@@ -20,6 +20,22 @@ export interface KV {
   hdel(key: string, field: string): Promise<number>;
 }
 
+/** Normalizes an HGETALL reply (flat pair array, object, or null) to a string record. */
+export function pairsToRecord(raw: unknown): Record<string, string> {
+  if (raw == null) return {};
+  const out: Record<string, string> = {};
+  if (Array.isArray(raw)) {
+    for (let i = 0; i + 1 < raw.length; i += 2) out[String(raw[i])] = String(raw[i + 1]);
+    return out;
+  }
+  if (typeof raw === "object") {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      out[k] = typeof v === "string" ? v : JSON.stringify(v);
+    }
+  }
+  return out;
+}
+
 export class UpstashKV implements KV {
   constructor(private readonly redis: Redis) {}
 
@@ -68,7 +84,10 @@ export class UpstashKV implements KV {
     await this.redis.hset(key, { [field]: value });
   }
   async hgetall(key: string) {
-    return ((await this.redis.hgetall<Record<string, string>>(key)) ?? {}) as Record<string, string>;
+    // With automaticDeserialization: false, @upstash/redis skips its HGETALL deserializer and
+    // returns the raw REST reply: a flat [field, value, field, value, ...] array (or null).
+    const raw = (await this.redis.hgetall(key)) as unknown;
+    return pairsToRecord(raw);
   }
   async hdel(key: string, field: string) {
     return this.redis.hdel(key, field);

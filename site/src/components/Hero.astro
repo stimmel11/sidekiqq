@@ -1,0 +1,73 @@
+---
+/** Home hero. Copy comes from src/content/home/home.md → hero. */
+import type { CollectionEntry } from 'astro:content';
+interface Props { hero: CollectionEntry<'home'>['data']['hero'] }
+const { hero } = Astro.props;
+const s = hero.sample;
+---
+<section class="wrap grid items-center gap-12 pt-14 pb-20 md:pt-20 lg:grid-cols-[1.15fr_1fr] lg:gap-16 lg:pt-24 lg:pb-28">
+  <div>
+    <h1 class="text-[2.6rem] font-semibold sm:text-[3.4rem] lg:text-[4.4rem] lg:leading-[1.02]">{hero.headline}</h1>
+    <p class="mt-6 max-w-[34rem] text-lg text-muted sm:text-xl">{hero.subhead}</p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href={hero.primaryCta.href} class="btn btn-primary">{hero.primaryCta.label}</a>
+      <a href={hero.secondaryCta.href} class="btn btn-quiet">{hero.secondaryCta.label}</a>
+    </div>
+  </div>
+
+  <figure class="slip relative mx-auto w-full max-w-[28rem]" aria-label="Example: an email becomes a tracked commitment and a draft that waits for your approval">
+    <div class="rounded-xl border border-line bg-surface shadow-[0_30px_60px_-30px_rgba(15,20,32,.35)]">
+      <div class="slip-step p-5 sm:p-6" style="--d:0">
+        <div class="data flex justify-between text-muted"><span>{s.from}</span><span>{s.received}</span></div>
+        <p class="mt-1 font-heading font-medium">{s.subject}</p>
+        <p class="mt-2 text-[.95rem] text-muted">&ldquo;{s.quote}&rdquo;</p>
+      </div>
+      <div class="slip-step border-t border-line p-5 sm:p-6" style="--d:1">
+        <p class="data text-steady-text">Commitment found</p>
+        <dl class="data mt-3 grid grid-cols-[5.5rem_1fr] gap-y-1.5">
+          <dt class="text-muted">Who</dt><dd>{s.commitment.who}</dd>
+          <dt class="text-muted">What</dt><dd>{s.commitment.what}</dd>
+          <dt class="text-muted">Due</dt><dd>{s.commitment.due}</dd>
+          <dt class="text-muted">Client</dt><dd>{s.commitment.client}</dd>
+        </dl>
+      </div>
+      <div class="slip-step relative p-5 sm:p-6" style="--d:2">
+        <div class="perf absolute inset-x-0 top-0" aria-hidden="true"></div>
+        <div class="data flex items-center justify-between text-muted">
+          <span>Draft to {s.draft.to}</span>
+          <span class="inline-flex items-center gap-2"><span class="waiting size-2 rounded-full bg-accent"></span>Waiting for you</span>
+        </div>
+        <p class="mt-3 text-[.95rem]">{s.draft.body}</p>
+        <div class="mt-5 flex gap-2" aria-hidden="true">
+          <span class="btn btn-primary !min-h-9 !px-4 !text-sm">Approve</span>
+          <span class="btn btn-quiet !min-h-9 !px-4 !text-sm">Edit</span>
+        </div>
+      </div>
+    </div>
+    <figcaption class="mt-3 text-sm text-muted">Sample. Names are fictional.</figcaption>
+  </figure>
+</section>
+
+<style>
+  /* The perforation: the line between what SideKiqq prepared and what you decide. */
+  .perf {
+    height: 1px;
+    background-image: linear-gradient(to right, var(--muted) 0 6px, transparent 6px 12px);
+    background-size: 12px 1px;
+    opacity: .6;
+  }
+  .perf::before, .perf::after {
+    content: ''; position: absolute; top: -7px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--bg); border: 1px solid var(--line);
+  }
+  .perf::before { left: -8px; clip-path: inset(0 0 0 50%); }
+  .perf::after { right: -8px; clip-path: inset(0 50% 0 0); }
+
+  /* One orchestrated load sequence: email, then commitment, then the draft. */
+  @media (prefers-reduced-motion: no-preference) {
+    .slip-step { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(.25s + var(--d) * .45s); }
+    .waiting { animation: breathe 2.4s ease-in-out 1.6s infinite; }
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes breathe { 50% { opacity: .35; } }
+</style>

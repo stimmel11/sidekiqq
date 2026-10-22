@@ -1,4 +1,5 @@
 import type { KV } from "../kv";
+import { AlertsRepo } from "./alerts";
 import { ClientsRepo } from "./clients";
 import { CommitmentsRepo } from "./commitments";
 import { ConversationsRepo } from "./conversations";
@@ -21,12 +22,15 @@ export interface Repos {
   conversations: ConversationsRepo;
   pairing: PairingRepo;
   state: StateRepo;
+  alerts: AlertsRepo;
 }
 
 export interface RepoOptions {
   prefix: string;
   conversationTtlSeconds: number;
   conversationMaxMessages: number;
+  /** Days of proactive alerts kept for polling devices. Default 7. */
+  alertRetentionDays?: number;
   clock?: () => Date;
 }
 
@@ -43,7 +47,8 @@ export function createRepos(kv: KV, o: RepoOptions): Repos {
     conversations: new ConversationsRepo(kv, o.prefix, o.conversationTtlSeconds, o.conversationMaxMessages),
     pairing: new PairingRepo(kv, o.prefix),
     state: new StateRepo(kv, o.prefix),
+    alerts: new AlertsRepo(kv, o.prefix, clock, o.alertRetentionDays ?? 7),
   };
 }
 
-export { ClientsRepo, CommitmentsRepo, ConversationsRepo, DecisionsRepo, DevicesRepo, DraftsRepo, FollowUpsRepo, PairingRepo, StateRepo, TimelineRepo };
+export { AlertsRepo, ClientsRepo, CommitmentsRepo, ConversationsRepo, DecisionsRepo, DevicesRepo, DraftsRepo, FollowUpsRepo, PairingRepo, StateRepo, TimelineRepo };
