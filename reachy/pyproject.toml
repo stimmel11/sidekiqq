@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "sidekiqq_reachy"
+version = "0.1.0"
+description = "SideKiqq AI executive assistant on Reachy Mini: tap-to-talk, alerts, briefs and voice-confirmed drafts"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "reachy-mini>=1.10",
+    "numpy>=1.24",
+]
+keywords = ["reachy-mini-app"]
+
+[project.optional-dependencies]
+# On-device wake word (off by default; see README "Privacy").
+wakeword = ["openwakeword>=0.6"]
+dev = ["pytest>=8"]
+
+[project.entry-points."reachy_mini_apps"]
+sidekiqq_reachy = "sidekiqq_reachy.main:SidekiqqReachy"
+
+[tool.setuptools]
+package-dir = { "" = "." }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sidekiqq_reachy*"]
+
+[tool.setuptools.package-data]
+sidekiqq_reachy = ["**/*"] # Also include all non-.py files
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

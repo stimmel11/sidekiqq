@@ -14,7 +14,7 @@ export const CONFIDENCE = ["CONFIRMED", "LIKELY", "INFERRED", "UNKNOWN"] as cons
 export const ConfidenceSchema = z.enum(CONFIDENCE);
 export type Confidence = z.infer<typeof ConfidenceSchema>;
 
-export const DEVICE_KINDS = ["watch", "glasses", "medallion", "phone"] as const;
+export const DEVICE_KINDS = ["watch", "glasses", "medallion", "phone", "reachy"] as const;
 export const DeviceKindSchema = z.enum(DEVICE_KINDS);
 export type DeviceKind = z.infer<typeof DeviceKindSchema>;
 
@@ -107,6 +107,41 @@ export const AskResponseSchema = z.object({
   actions: z.array(ActionSchema),
 });
 export type AskResponse = z.infer<typeof AskResponseSchema>;
+
+/**
+ * A proactive alert. Same content as the FCM data push (title, body, kind and the string data keys),
+ * kept in a short log so devices without FCM (Reachy Mini) can poll GET /api/alerts.
+ */
+export const AlertKindSchema = z.enum(["email", "commitment_overdue"]);
+export const AlertSchema = z.object({
+  /** Monotonic sequence number as a string; also usable as a cursor. */
+  id: z.string(),
+  at: isoDate,
+  title: z.string(),
+  body: z.string(),
+  kind: AlertKindSchema,
+  importance: ImportanceSchema.optional(),
+  priority: z.enum(["high", "normal"]),
+  client: z.string().optional(),
+  messageId: z.string().optional(),
+  threadId: z.string().optional(),
+  commitmentId: z.string().optional(),
+});
+export type Alert = z.infer<typeof AlertSchema>;
+
+export const AlertsResponseSchema = z.object({
+  items: z.array(AlertSchema),
+  cursor: z.string(),
+  more: z.boolean(),
+});
+export type AlertsResponse = z.infer<typeof AlertsResponseSchema>;
+
+export const TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"] as const;
+export const SpeakRequestSchema = z.object({
+  text: z.string().trim().min(1),
+  voice: z.enum(TTS_VOICES).optional(),
+});
+export type SpeakRequest = z.infer<typeof SpeakRequestSchema>;
 
 export const RegisterDeviceSchema = z.object({
   fcmToken: z.string().trim().min(1).max(4096),

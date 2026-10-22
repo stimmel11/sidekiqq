@@ -46,6 +46,8 @@ export const config = {
   scanMaxMessages: () => intEnv("SCAN_MAX_MESSAGES", 20),
   scanLookbackHours: () => intEnv("SCAN_LOOKBACK_HOURS", 24),
   pairCodeTtlSeconds: () => intEnv("PAIR_CODE_TTL_SECONDS", 600, 60),
+  speakMaxChars: () => Math.min(4000, intEnv("SPEAK_MAX_CHARS", 1000, 50)),
+  alertLogDays: () => intEnv("ALERT_LOG_DAYS", 7),
   redisPrefix: () => read("REDIS_PREFIX") ?? "sk",
   appUrl: () => read("APP_URL") ?? (read("VERCEL_PROJECT_PRODUCTION_URL") ? `https://${read("VERCEL_PROJECT_PRODUCTION_URL")}` : "http://localhost:3000"),
 };
