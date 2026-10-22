@@ -61,10 +61,16 @@ public struct DraftConfirmation: Sendable {
         pending = Pending(draftId: draftId, summary: summary, offeredAt: now())
     }
 
-    public mutating func evaluate(_ transcript: String) -> Decision {
+    /**
+     * - Parameter spokenAt: when the owner started speaking this answer, if known. Speech that started
+     *   before the window opened (over the read-back, or queued behind it) is an answer to nothing the
+     *   owner heard, so it declines instead of confirming.
+     */
+    public mutating func evaluate(_ transcript: String, spokenAt: Date? = nil) -> Decision {
         guard let p = pending else { return .nothingPending }
         pending = nil // one shot: any answer consumes the pending draft
         if now().timeIntervalSince(p.offeredAt) > window { return .expired }
+        if let spokenAt, spokenAt < p.offeredAt { return .declined }
         return Self.isSendIt(transcript) ? .confirmed(draftId: p.draftId) : .declined
     }
 

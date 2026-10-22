@@ -68,19 +68,25 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
     private var peripheral: CBPeripheral?
     private var control: CBCharacteristic?
     private var assembler = UtteranceAssembler()
+    /** When the current utterance began (CONTROL 0x01 or the first AUDIO packet). */
+    private var utteranceStartedAt: Date?
     private var idleTimer: DispatchWorkItem?
     private var wantsConnection = false
 
-    private let utterances: AsyncStream<UtteranceAssembler.Utterance>
-    private let utteranceSink: AsyncStream<UtteranceAssembler.Utterance>.Continuation
+    private struct Captured: Sendable {
+        let utterance: UtteranceAssembler.Utterance
+        let startedAt: Date
+    }
+
+    private let utterances: AsyncStream<Captured>
+    private let utteranceSink: AsyncStream<Captured>.Continuation
 
     init(assistant: VoiceAssistant, speaker: Speaker, status: MedallionStatus) {
         self.assistant = assistant
         self.speaker = speaker
         self.status = status
         // Like Android's Channel(capacity = 2): if the pipeline is busy, keep at most two queued utterances.
-        (utterances, utteranceSink) = AsyncStream.makeStream(of: UtteranceAssembler.Utterance.self,
-                                                              bufferingPolicy: .bufferingOldest(2))
+        (utterances, utteranceSink) = AsyncStream.makeStream(of: Captured.self, bufferingPolicy: .bufferingOldest(2))
         super.init()
         Task { [weak self] in
             guard let stream = self?.utterances else { return }
@@ -272,6 +278,7 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
         switch MedallionProtocol.Control(rawValue: byte) {
         case .startOfUtterance:
             assembler.start()
+            utteranceStartedAt = Date()
             // Barge-in: the owner is talking again, stop any reply still playing.
             Task { @MainActor [speaker] in speaker.stop() }
             setPhase(.listening)
@@ -291,6 +298,7 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
         if !assembler.isActive {
             // Tolerate a lost START notification: begin capturing at the first audio packet.
             assembler.start()
+            utteranceStartedAt = Date()
             setPhase(.listening)
         }
         assembler.onAudio(packet)
@@ -307,9 +315,12 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
     private func finishUtterance() {
         idleTimer?.cancel()
         guard let u = assembler.finish() else { return }
+        let startedAt = utteranceStartedAt ?? Date()
+        utteranceStartedAt = nil
         let warning = u.stats.warning
         updateStatus { $0.lastAudioWarning = warning }
-        if case .dropped(_) = utteranceSink.yield(u) {
+        // startedAt lets VoiceAssistant reject a "send it" that was spoken over (or queued behind) a read-back.
+        if case .dropped(_) = utteranceSink.yield(Captured(utterance: u, startedAt: startedAt)) {
             setPhase(.connected) // pipeline busy; drop like Android
         }
     }
@@ -324,11 +335,13 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
 
     // MARK: - Pipeline
 
-    private func process(_ u: UtteranceAssembler.Utterance) async {
+    private func process(_ captured: Captured) async {
         let bg = await BackgroundActivity.begin("medallion-utterance")
         setPhase(.thinking)
         writeControl(.thinking)
-        let outcome = await assistant.handleUtterance(pcm: u.pcm, device: .medallion, output: MedallionOutput(manager: self))
+        let outcome = await assistant.handleUtterance(pcm: captured.utterance.pcm, device: .medallion,
+                                                      output: MedallionOutput(manager: self),
+                                                      startedAt: captured.startedAt)
         if case let .answered(transcript, response, _) = outcome {
             updateStatus { $0.lastTranscript = transcript; $0.lastReply = response.reply }
         }
@@ -338,10 +351,11 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
         await BackgroundActivity.end(bg)
     }
 
-    fileprivate func speak(_ text: String) async {
+    fileprivate func speak(_ text: String) async -> Bool {
         setPhase(.speaking)
-        await speaker.speak(text)
+        let completed = await speaker.speak(text)
         setPhase(.thinking)
+        return completed
     }
 
     // MARK: - Status
@@ -357,25 +371,29 @@ final class MedallionManager: NSObject, @unchecked Sendable, CBCentralManagerDel
 
 private struct MedallionOutput: VoiceOutput {
     let manager: MedallionManager
-    func speak(_ text: String) async { await manager.speak(text) }
+    @discardableResult
+    func speak(_ text: String) async -> Bool { await manager.speak(text) }
 }
 
 /** Asks iOS for extra time when an utterance arrives while the app is in the background. */
 @MainActor
 enum BackgroundActivity {
-    private final class Box: @unchecked Sendable { var id: UIBackgroundTaskIdentifier = .invalid }
-
-    static func begin(_ name: String) -> UIBackgroundTaskIdentifier {
-        let box = Box()
-        box.id = UIApplication.shared.beginBackgroundTask(withName: name) {
-            // Expired: end it so iOS doesn't kill the app.
-            UIApplication.shared.endBackgroundTask(box.id)
-            box.id = .invalid
-        }
-        return box.id
+    final class Token: @unchecked Sendable {
+        fileprivate var id: UIBackgroundTaskIdentifier = .invalid
     }
 
-    static func end(_ id: UIBackgroundTaskIdentifier) {
-        if id != .invalid { UIApplication.shared.endBackgroundTask(id) }
+    static func begin(_ name: String) -> Token {
+        let token = Token()
+        token.id = UIApplication.shared.beginBackgroundTask(withName: name) {
+            // Expired (called on the main thread): end it now so iOS doesn't kill the app.
+            MainActor.assumeIsolated { end(token) }
+        }
+        return token
+    }
+
+    static func end(_ token: Token) {
+        guard token.id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(token.id)
+        token.id = .invalid
     }
 }

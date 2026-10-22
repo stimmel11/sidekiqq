@@ -93,10 +93,21 @@ public final class SideKiqqClient: SideKiqqAPI, @unchecked Sendable {
         var s = input.trimmingCharacters(in: .whitespacesAndNewlines)
         while s.hasSuffix("/") { s.removeLast() }
         guard !s.isEmpty, !s.contains(" ") else { return nil }
-        if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") { s = "https://" + s }
+        let lower = s.lowercased()
+        if lower.contains("://") {
+            // Some other scheme ("ftp://...") is an error, not something to prefix with https://.
+            guard lower.hasPrefix("http://") || lower.hasPrefix("https://") else { return nil }
+        } else {
+            s = "https://" + s
+        }
         guard let comps = URLComponents(string: s), let scheme = comps.scheme?.lowercased(),
               scheme == "https" || scheme == "http", let host = comps.host, !host.isEmpty,
-              comps.query == nil, comps.fragment == nil else { return nil }
+              comps.query == nil, comps.fragment == nil,
+              comps.user == nil, comps.password == nil else { return nil }
+        // "https://host:" (empty port) or a second "://" in the path means the input was mangled.
+        if let afterScheme = s.range(of: "://").map({ s[$0.upperBound...] }), afterScheme.contains("://") { return nil }
+        if comps.port == nil, let authorityEnd = s.range(of: "://").map({ s[$0.upperBound...] })?.split(separator: "/").first,
+           authorityEnd.hasSuffix(":") { return nil }
         return comps.url
     }
 

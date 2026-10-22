@@ -446,17 +446,26 @@ public struct APIErrorBody: Codable, Hashable, Sendable {
 // MARK: - Dates
 
 public enum SideKiqqDate {
-    /** Parses the brain's ISO-8601 strings (`2026-10-22T15:04:05.123Z`, with or without fractional seconds). */
+    // ISO8601DateFormatter is thread-safe (Apple docs), so shared instances are safe to reuse.
+    nonisolated(unsafe) private static let withFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    nonisolated(unsafe) private static let dateOnly: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
+    /** Parses the brain's ISO-8601 strings (`2026-10-22T15:04:05.123Z`, with or without fractional seconds, or a bare date). */
     public static func parse(_ s: String) -> Date? {
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = withFraction.date(from: s) { return d }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        if let d = plain.date(from: s) { return d }
-        let dateOnly = ISO8601DateFormatter()
-        dateOnly.formatOptions = [.withFullDate]
-        return dateOnly.date(from: s)
+        withFraction.date(from: s) ?? plain.date(from: s) ?? dateOnly.date(from: s)
     }
 }
 

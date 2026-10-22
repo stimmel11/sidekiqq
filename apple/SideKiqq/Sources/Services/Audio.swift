@@ -15,12 +15,13 @@ enum AudioRouting {
     }
 
     /**
-     * Speaking: high-quality A2DP output, ducking (not stopping) other audio. Mixable, so iOS lets the
-     * app start it in the background (Background Modes: audio) when the medallion asks something.
+     * Speaking: high-quality A2DP output, ducking (not stopping) other audio. `.mixWithOthers` makes the
+     * session mixable, which is what lets the app start audio from the background (Background Modes: audio)
+     * when the medallion asks something. Unverified on hardware; see docs/APPLE.md.
      */
     static func forSpeaking() throws {
         let s = AVAudioSession.sharedInstance()
-        try s.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try s.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers, .duckOthers])
         try s.setActive(true)
     }
 
@@ -136,9 +137,10 @@ final class AudioCapture: @unchecked Sendable {
 final class Speaker: NSObject, VoiceOutput, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     private let synth = AVSpeechSynthesizer()
     private let clientProvider: @Sendable () -> SideKiqqClient?
-    private var waiting: [ObjectIdentifier: CheckedContinuation<Void, Never>] = [:]
+    /** Utterances waiting to finish; the Bool is "played to the end". */
+    private var waiting: [ObjectIdentifier: CheckedContinuation<Bool, Never>] = [:]
     private var player: AVAudioPlayer?
-    private var playerDone: CheckedContinuation<Void, Never>?
+    private var playerDone: CheckedContinuation<Bool, Never>?
 
     /** Settings toggle: use the brain's TTS voice instead of the on-device one. */
     var useBrainVoice: Bool {
@@ -154,72 +156,77 @@ final class Speaker: NSObject, VoiceOutput, AVSpeechSynthesizerDelegate, AVAudio
         synth.delegate = self
     }
 
-    func speak(_ text: String) async {
+    /** Returns true only if the whole text was played (VoiceOutput contract). */
+    @discardableResult
+    func speak(_ text: String) async -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
-        try? AudioRouting.forSpeaking()
+        guard !t.isEmpty else { return true }
+        do {
+            try AudioRouting.forSpeaking()
+        } catch {
+            return false // can't play audio right now (e.g. background start refused): nothing was heard
+        }
         isSpeaking = true
         defer { isSpeaking = false }
         if useBrainVoice, let client = clientProvider(), let audio = try? await client.speak(text: t),
            let p = try? AVAudioPlayer(data: audio.wav) {
-            await play(p)
-        } else {
-            await synthesize(t)
+            return await play(p)
         }
+        return await synthesize(t)
     }
 
-    /** Barge-in: stop whatever is playing (the owner started talking again). */
+    /** Barge-in: stop whatever is playing (the owner started talking again). Interrupted speech reports false. */
     func stop() {
         synth.stopSpeaking(at: .immediate)
         player?.stop()
-        finishPlayer()
+        finishPlayer(completed: false)
     }
 
-    private func synthesize(_ text: String) async {
+    private func synthesize(_ text: String) async -> Bool {
         let u = AVSpeechUtterance(string: text)
         u.voice = AVSpeechSynthesisVoice(language: Locale.preferredLanguages.first ?? "en-US")
         u.rate = AVSpeechUtteranceDefaultSpeechRate
         let id = ObjectIdentifier(u)
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+        return await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
             waiting[id] = c
             synth.speak(u)
         }
     }
 
-    private func play(_ p: AVAudioPlayer) async {
+    private func play(_ p: AVAudioPlayer) async -> Bool {
         player = p
         p.delegate = self
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+        return await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
             playerDone = c
-            if !p.play() { finishPlayer() }
+            if !p.play() { finishPlayer(completed: false) }
         }
     }
 
-    private func finishPlayer() {
+    private func finishPlayer(completed: Bool) {
         player = nil
-        playerDone?.resume()
+        playerDone?.resume(returning: completed)
         playerDone = nil
     }
 
-    private func finishUtterance(_ id: ObjectIdentifier) {
-        waiting.removeValue(forKey: id)?.resume()
+    private func finishUtterance(_ id: ObjectIdentifier, completed: Bool) {
+        waiting.removeValue(forKey: id)?.resume(returning: completed)
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         let id = ObjectIdentifier(utterance)
-        Task { @MainActor in self.finishUtterance(id) }
+        Task { @MainActor in self.finishUtterance(id, completed: true) }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         let id = ObjectIdentifier(utterance)
-        Task { @MainActor in self.finishUtterance(id) }
+        Task { @MainActor in self.finishUtterance(id, completed: false) }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in self.finishPlayer() }
+        Task { @MainActor in self.finishPlayer(completed: flag) }
     }
 
     nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        Task { @MainActor in self.finishPlayer() }
+        Task { @MainActor in self.finishPlayer(completed: false) }
     }
 }

@@ -37,32 +37,40 @@ final class VoiceSession {
     private let speaker: Speaker
     private let capture = AudioCapture()
     private var capTask: Task<Void, Never>?
+    private var listeningSince: Date?
 
     init(assistant: VoiceAssistant, speaker: Speaker) {
         self.assistant = assistant
         self.speaker = speaker
     }
 
+    /**
+     * One turn at a time: only `.idle` starts listening. Tapping while SideKiqq speaks just stops the
+     * speech (barge-in); an interrupted draft read-back is not offered for "send it".
+     */
     func toggle() {
         switch phase {
-        case .idle, .speaking:
+        case .idle:
             Task { await startListening() }
         case .listening:
             Task { await stopAndSend() }
+        case .speaking:
+            speaker.stop()
         case .thinking:
             break
         }
     }
 
     func startListening() async {
+        guard phase == .idle else { return }
         errorMessage = nil
-        speaker.stop()
         guard await AudioCapture.requestPermission() else {
             errorMessage = CaptureError.micDenied.localizedDescription
             return
         }
         do {
             try capture.start()
+            listeningSince = Date()
             phase = .listening
             capTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(AudioCapture.maxSeconds))
@@ -80,16 +88,18 @@ final class VoiceSession {
         capTask?.cancel()
         capTask = nil
         let pcm = capture.stop()
+        let startedAt = listeningSince
+        listeningSince = nil
         phase = .thinking
-        let outcome = await assistant.handleUtterance(pcm: pcm, device: .thisIPhone, output: PhaseOutput(session: self))
+        let outcome = await assistant.handleUtterance(pcm: pcm, device: .thisIPhone, output: PhaseOutput(session: self),
+                                                      startedAt: startedAt)
         await finish(outcome)
     }
 
     /** Typed question. Typed text never confirms a draft (VoiceAssistant enforces it). */
     func ask(_ text: String) async {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, phase == .idle || phase == .speaking else { return }
-        speaker.stop()
+        guard !t.isEmpty, phase == .idle else { return }
         errorMessage = nil
         phase = .thinking
         let outcome = await assistant.handleText(t, device: .thisIPhone, output: PhaseOutput(session: self), spoken: false)
@@ -109,8 +119,11 @@ final class VoiceSession {
         lastAnswer = a
     }
 
-    fileprivate func setPhase(_ p: Phase) { phase = p }
-    fileprivate func say(_ text: String) async { await speaker.speak(text) }
+    fileprivate func setPhase(_ p: Phase) {
+        // Never let a running turn overwrite .listening (defensive; toggle() already serializes turns).
+        if phase != .listening { phase = p }
+    }
+    fileprivate func say(_ text: String) async -> Bool { await speaker.speak(text) }
 
     private func finish(_ outcome: VoiceAssistant.Outcome) async {
         switch outcome {
@@ -135,7 +148,7 @@ final class VoiceSession {
             confirmDeadline = nil
         }
         phase = .idle
-        AudioRouting.deactivate()
+        AudioRouting.deactivate() // safe: capture only runs in .listening, which a finishing turn can't be in
     }
 }
 
@@ -143,9 +156,11 @@ final class VoiceSession {
 private struct PhaseOutput: VoiceOutput {
     let session: VoiceSession
 
-    func speak(_ text: String) async {
+    @discardableResult
+    func speak(_ text: String) async -> Bool {
         await session.setPhase(.speaking)
-        await session.say(text)
+        let completed = await session.say(text)
         await session.setPhase(.thinking)
+        return completed
     }
 }

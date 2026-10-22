@@ -29,7 +29,7 @@ struct SideKiqqApp: App {
         // Background refresh: poll /api/alerts until the brain can push through APNs.
         .backgroundTask(.appRefresh(AlertPoller.refreshTaskID)) {
             AlertPoller.scheduleAppRefresh()
-            await appDelegate.model.alerts.pollOnce()
+            await AppModel.backgroundRefresh()
         }
     }
 }

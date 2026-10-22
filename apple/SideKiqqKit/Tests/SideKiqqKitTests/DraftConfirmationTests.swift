@@ -78,6 +78,20 @@ final class DraftConfirmationTests: XCTestCase {
         XCTAssertEqual(c.evaluate("send it"), .nothingPending)
     }
 
+    func testSpeechStartedBeforeWindowCannotConfirm() {
+        let clock = TestClock()
+        var c = DraftConfirmation(now: clock.fn)
+        let startedDuringReadback = clock.now
+        clock.advance(4) // read-back finishes
+        c.arm(draftId: "d1", summary: "x")
+        clock.advance(1)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: startedDuringReadback), .declined)
+        c.arm(draftId: "d2", summary: "y")
+        let afterWindowOpened = clock.now.addingTimeInterval(0.5)
+        clock.advance(2)
+        XCTAssertEqual(c.evaluate("send it", spokenAt: afterWindowOpened), .confirmed(draftId: "d2"))
+    }
+
     func testNewOfferReplacesOld() {
         var c = DraftConfirmation()
         c.offer(draftId: "d1", summary: "x")

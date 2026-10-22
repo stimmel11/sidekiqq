@@ -55,6 +55,15 @@ final class AppModel {
         // Until the brain supports APNs (docs/APPLE.md backlog) alerts come from polling + local notifications.
         self.push = push ?? LocalNotificationsOnly()
         loadCredentials()
+        AppModel.current = self
+    }
+
+    /** The app's model, for entry points that have no environment (background tasks). */
+    private(set) static weak var current: AppModel?
+
+    /** BGAppRefreshTask entry point: fetch new alerts and post them as local notifications. */
+    static func backgroundRefresh() async {
+        await current?.alerts.pollOnce()
     }
 
     /** Called from `application(_:didFinishLaunchingWithOptions:)`. */

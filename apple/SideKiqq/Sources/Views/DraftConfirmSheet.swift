@@ -15,6 +15,8 @@ struct DraftConfirmSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var sending = false
     @State private var error: String?
+    /** Set when a send failed in a way that might still have sent it (timeout): Send stays disabled. */
+    @State private var uncertain = false
 
     var body: some View {
         NavigationStack {
@@ -51,6 +53,7 @@ struct DraftConfirmSheet: View {
                     } else {
                         Button("Send") { send() }
                             .fontWeight(.semibold)
+                            .disabled(uncertain)
                             .accessibilityLabel("Send email to \(DraftConfirmation.spokenRecipients(draft.to))")
                     }
                 }
@@ -72,6 +75,7 @@ struct DraftConfirmSheet: View {
     }
 
     private func send() {
+        guard !sending, !uncertain else { return } // no double send from a double tap
         sending = true
         error = nil
         Task {
@@ -80,9 +84,20 @@ struct DraftConfirmSheet: View {
                 onSent(draft.id)
                 dismiss()
             } catch {
-                self.error = error.friendly
+                await handleFailure(error)
             }
             sending = false
+        }
+    }
+
+    /** After a failure, only offer Send again if the brain still lists the draft as pending. */
+    private func handleFailure(_ failure: Error) async {
+        let stillPending = (try? await model.pendingDraft(id: draft.id)) ?? nil
+        if stillPending != nil {
+            error = failure.friendly
+        } else {
+            uncertain = true
+            error = "Not sure this was sent. It's no longer waiting for approval, or SideKiqq couldn't be reached. Check your Sent mail before trying again."
         }
     }
 }

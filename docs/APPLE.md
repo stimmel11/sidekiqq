@@ -50,7 +50,7 @@ apple/
 | `AudioCapture.kt` (AudioRecord 16 kHz) | `AVAudioEngine` input tap + `AVAudioConverter` to 16 kHz mono Int16 | The hardware runs at 44.1 or 48 kHz; the converter resamples. 60 s cap. |
 | `SpeechInput.kt` | **Server transcribe** (`/api/transcribe`) today | Same path as every other device, so transcripts match. `SFSpeechRecognizer` (on-device, `requiresOnDeviceRecognition`) is a later option for instant local endpointing and recognizing "send it" offline. The permission string is already in `project.yml`. |
 | `Speaker.kt` (TextToSpeech, USAGE_ASSISTANT) | `AVSpeechSynthesizer`, or `/api/speak` WAV in `AVAudioPlayer` (Settings toggle) | Falls back to on-device on any error, including 413 for long text. `speak` waits until playback ends, so the 30 s window starts after the read-back. |
-| Audio routing to glasses/earbuds | `AVAudioSession` | Listening: `.playAndRecord` + `.allowBluetooth` (AirPods mic over HFP), `.allowBluetoothA2DP`, `.defaultToSpeaker`. Speaking: `.playback`, mode `.spokenAudio`, `.duckOthers` (A2DP quality, mixable so it can start in the background). |
+| Audio routing to glasses/earbuds | `AVAudioSession` | Listening: `.playAndRecord` + `.allowBluetooth` (AirPods mic over HFP), `.allowBluetoothA2DP`, `.defaultToSpeaker`. Speaking: `.playback`, mode `.spokenAudio`, `.mixWithOthers` + `.duckOthers` (A2DP quality; mixable so iOS lets it start from the background). |
 | `MedallionService.kt` (foreground service, BluetoothGatt) | `MedallionManager` (CoreBluetooth central) | Scans by service UUID (needed for background scanning), remembers the peripheral id, notifies on AUDIO/CONTROL/BATTERY, writes 0x10 / 0x11 / 0x12. **MTU:** iOS negotiates it and has no request API. The firmware asks for 247 and sizes packets to the negotiated MTU (`AudioFramer::packetSizeForMtu`), so nothing changes on the medallion. The app shows `maximumWriteValueLength` in Settings. |
 | Foreground service keeps BLE alive | `bluetooth-central` background mode + **state restoration** (`CBCentralManagerOptionRestoreIdentifierKey`) | The central is created in `didFinishLaunching` when the medallion is enabled, so a relaunch for a BLE event restores it. After a drop the app calls `connect` again; iOS pending connects never time out. Utterances processed in the background get a `beginBackgroundTask` for extra time. |
 | `UtteranceAssembler.kt` | `UtteranceAssembler` (SideKiqqKit) | Line-for-line port with the same tests. |
@@ -68,11 +68,15 @@ apple/
 
 - **Screen:** `DraftConfirmSheet` lists the recipients, subject and full body, and only its Send button calls `AppModel.approveDraftConfirmed`. Follow-ups, Drafts and Talk all go through it.
 - **Voice (Talk button and medallion):** `VoiceAssistant` speaks a read-back of the **recipient, subject and a one-sentence body summary**, *then* starts the 30 s window (`DraftConfirmation.arm`). Only the exact words "send it", after normalizing case, punctuation and spacing, confirm. Anything else, silence, or a timeout cancels, and the draft stays saved.
-- **Two deliberate differences from Android, both stricter.** Neither changes the contract.
+- **The read-back must have been heard.** `VoiceOutput.speak` returns whether the text played to the end. If the read-back was interrupted (barge-in, a phone call, or audio that couldn't start), the window never opens and the owner is told to review the draft in the app.
+- **The answer must come after the read-back.** Each utterance carries its capture start time (`startedAt`: the Talk tap, or medallion CONTROL 0x01). Speech that began before the window opened, for example a "send it" spoken over the read-back or queued behind it, declines instead of confirming.
+- **One turn at a time.** Tapping Talk while SideKiqq is speaking only stops the speech; it doesn't start a new recording.
+- **The confirm sheet can't double-send.** Send is guarded while a send is in flight. After a failure the sheet re-checks the draft: if it's no longer pending (or can't be checked), Send stays disabled and the owner is told to check Sent mail. A voice send that times out says "I couldn't confirm it was sent" instead of "not sent".
+- **Differences from Android, all stricter (the three above, plus these two).** None changes the contract.
   1. The read-back comes from the real draft (`GET /api/drafts`), not the action summary, which closes the QA open item "read a one-sentence summary of the body". If the draft can't be loaded, nothing is offered by voice and the owner is told to review it in the app.
   2. Typed text never confirms. A typed "send it" cancels the pending draft. A late "send it" (after 30 s) is answered with "the confirmation window closed" instead of being forwarded to `/api/ask`.
 - Only the first draft in a reply can be confirmed by voice. Any others wait in the Drafts tab (Android parity).
-- Tests: `DraftConfirmationTests` and `VoiceAssistantTests` (send within the window approves exactly once; decline, expiry, silence, typed text, a late "send it" and an unloadable draft never call `approveDraft`).
+- Tests: `DraftConfirmationTests` and `VoiceAssistantTests`. A send within the window approves exactly once. None of these ever call `approveDraft`: a decline, an expired window, silence, typed text, a late "send it", an unloadable draft, an interrupted read-back, or a "send it" spoken over the read-back.
 
 ## Pairing
 
@@ -137,7 +141,7 @@ Permission strings (in `project.yml` → `Info.plist`):
 | Key | Text (summary) |
 |---|---|
 | `NSMicrophoneUsageDescription` | Listens only after you tap Talk; the recording goes to your brain for transcription. |
-| `NSSpeechRecognitionUsageDescription` | For on-device recognition of short replies like "send it" (reserved; not requested yet). |
+| `NSSpeechRecognitionUsageDescription` | For on-device recognition of short replies like "send it". Reserved: the app doesn't request speech permission yet. Remove it before App Review if `SFSpeechRecognizer` still isn't used, since an unused purpose string can draw questions. |
 | `NSBluetoothAlwaysUsageDescription` | Connects to your SideKiqq medallion, even with the phone in your pocket. |
 
 Background modes: `bluetooth-central`, `audio` and `fetch`, plus `BGTaskSchedulerPermittedIdentifiers: com.sidekiqq.alerts.refresh`. ATS stays on; `NSAllowsLocalNetworking` is set only so a development brain on the LAN can be reached over `http://`.

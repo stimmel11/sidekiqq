@@ -64,6 +64,7 @@ struct TalkView: View {
 
     private var talkButton: some View {
         let listening = voice.phase == .listening
+        let speaking = voice.phase == .speaking
         let busy = voice.phase == .thinking
         return Button {
             voice.toggle()
@@ -75,7 +76,7 @@ struct TalkView: View {
                 if busy {
                     ProgressView().tint(SideKiqqTheme.Palette.accentText).scaleEffect(1.6)
                 } else {
-                    Image(systemName: listening ? "stop.fill" : "mic.fill")
+                    Image(systemName: listening ? "stop.fill" : speaking ? "speaker.slash.fill" : "mic.fill")
                         .font(.system(size: 56, weight: .semibold))
                         .foregroundStyle(listening ? SideKiqqTheme.Palette.dangerText : SideKiqqTheme.Palette.accentText)
                 }
@@ -84,9 +85,9 @@ struct TalkView: View {
         .buttonStyle(.plain)
         .disabled(busy)
         .padding(.top, SideKiqqTheme.Space.s8)
-        .accessibilityLabel(listening ? "Stop and send" : "Talk to SideKiqq")
+        .accessibilityLabel(listening ? "Stop and send" : speaking ? "Stop speaking" : "Talk to SideKiqq")
         .accessibilityValue(voice.phase.label)
-        .accessibilityHint(listening ? "Sends what you said." : "Starts listening. Tap again when you're done.")
+        .accessibilityHint(listening ? "Sends what you said." : speaking ? "Stops the reply." : "Starts listening. Tap again when you're done.")
         .accessibilityAddTraits(.startsMediaSession)
     }
 
@@ -101,7 +102,7 @@ struct TalkView: View {
             Button(action: sendTyped) {
                 Image(systemName: "arrow.up.circle.fill").font(.title)
             }
-            .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty || voice.phase == .thinking)
+            .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty || voice.phase != .idle)
             .frame(minWidth: SideKiqqTheme.Layout.touchTarget, minHeight: SideKiqqTheme.Layout.touchTarget)
             .accessibilityLabel("Ask")
         }

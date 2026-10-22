@@ -1,29 +1,40 @@
 import XCTest
 @testable import SideKiqqKit
 
-/** Records every call; `approveDraft` calls are what the safety tests watch. */
+/**
+ * Records every call; `approveDraft` calls are what the safety tests watch.
+ * Locked sections live in synchronous helpers (NSLock must not be used directly in async functions).
+ */
 final class FakeAPI: SideKiqqAPI, @unchecked Sendable {
     private let lock = NSLock()
     var transcript = "what do I owe Dana?"
     var askResponse = try! SideKiqqJSON.decoder().decode(AskResponse.self, from: Fixtures.data(Fixtures.askResponse))
     var drafts = try! SideKiqqJSON.decoder().decode(ItemsResponse<Draft>.self, from: Fixtures.data(Fixtures.drafts)).items
     var failDrafts = false
-    var failApprove = false
-    private(set) var approved: [String] = []
-    private(set) var asked: [(text: String, conversationId: String?)] = []
+    var approveError: SideKiqqAPIError?
+    private var _approved: [String] = []
+    private var _asked: [(text: String, conversationId: String?)] = []
 
-    func setTranscript(_ t: String) { lock.lock(); transcript = t; lock.unlock() }
+    var approved: [String] { locked { _approved } }
+    var asked: [(text: String, conversationId: String?)] { locked { _asked } }
+
+    private func locked<T>(_ body: () -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body()
+    }
+
+    func setTranscript(_ t: String) { locked { transcript = t } }
 
     func transcribe(wav: Data) async throws -> String {
-        lock.lock(); defer { lock.unlock() }
         XCTAssertEqual(String(decoding: wav.prefix(4), as: UTF8.self), "RIFF")
-        return transcript
+        return locked { transcript }
     }
 
     func ask(text: String, device: DeviceKind, conversationId: String?) async throws -> AskResponse {
-        lock.lock(); defer { lock.unlock() }
-        asked.append((text, conversationId))
-        return askResponse
+        locked {
+            _asked.append((text, conversationId))
+            return askResponse
+        }
     }
 
     func pendingDrafts() async throws -> [Draft] {
@@ -32,22 +43,32 @@ final class FakeAPI: SideKiqqAPI, @unchecked Sendable {
     }
 
     func approveDraft(id: String) async throws {
-        if failApprove { throw SideKiqqAPIError.http(status: 410, code: "gone", message: nil, body: "") }
-        lock.lock(); defer { lock.unlock() }
-        approved.append(id)
+        if let approveError { throw approveError }
+        locked { _approved.append(id) }
     }
 }
 
+/** Records what was spoken. `interruptReadbacks` simulates a barge-in during the draft read-back. */
 final class SpokenLog: VoiceOutput, @unchecked Sendable {
     private let lock = NSLock()
     private var _lines: [String] = []
-    var lines: [String] {
+    var interruptReadbacks = false
+
+    var lines: [String] { locked { _lines } }
+
+    private func locked<T>(_ body: () -> T) -> T {
         lock.lock(); defer { lock.unlock() }
-        return _lines
+        return body()
     }
-    func speak(_ text: String) async {
-        lock.lock(); _lines.append(text); lock.unlock()
+
+    private func record(_ text: String) -> Bool {
+        locked {
+            _lines.append(text)
+            return !(interruptReadbacks && text.hasSuffix(DraftConfirmation.confirmInstruction))
+        }
     }
+
+    func speak(_ text: String) async -> Bool { record(text) }
 }
 
 final class VoiceAssistantTests: XCTestCase {
@@ -90,7 +111,7 @@ final class VoiceAssistantTests: XCTestCase {
         XCTAssertEqual(out.lines.last, VoiceAssistant.sent)
         XCTAssertEqual(api.asked.count, 1, "'send it' is never forwarded to /api/ask")
         // Saying it again does nothing.
-        let again = await va.handleText("send it", device: .phone, output: out)
+        let again = await va.handleText("send it", device: .phone, output: out, spoken: true)
         guard case .answered = again else { return XCTFail("got \(again)") }
         XCTAssertEqual(api.approved, ["dr_1"])
     }
@@ -114,7 +135,7 @@ final class VoiceAssistantTests: XCTestCase {
         let va = make(api, clock: clock)
         _ = await va.handleUtterance(pcm: oneSecond, device: .phone, output: out)
         clock.advance(31)
-        let o = await va.handleText("send it", device: .phone, output: out)
+        let o = await va.handleText("send it", device: .phone, output: out, spoken: true)
         XCTAssertEqual(o, .draftNotSent)
         XCTAssertEqual(out.lines.last, VoiceAssistant.windowClosed)
         XCTAssertEqual(api.approved, [])
@@ -129,7 +150,7 @@ final class VoiceAssistantTests: XCTestCase {
         _ = await va.handleUtterance(pcm: oneSecond, device: .phone, output: out)
         clock.advance(45)
         api.askResponse = try! SideKiqqJSON.decoder().decode(AskResponse.self, from: Fixtures.data(Fixtures.askResponseNoActions))
-        let o = await va.handleText("what's next", device: .phone, output: out)
+        let o = await va.handleText("what's next", device: .phone, output: out, spoken: true)
         guard case let .answered(_, _, awaiting) = o else { return XCTFail("got \(o)") }
         XCTAssertFalse(awaiting)
         XCTAssertEqual(api.asked.count, 2)
@@ -168,18 +189,18 @@ final class VoiceAssistantTests: XCTestCase {
         api.drafts = []
         let va = make(api)
         let out = SpokenLog()
-        let o = await va.handleText("hi", device: .phone, output: out)
+        let o = await va.handleText("hi", device: .phone, output: out, spoken: true)
         guard case let .answered(_, _, awaiting) = o else { return XCTFail("got \(o)") }
         XCTAssertFalse(awaiting)
     }
 
     func testApproveFailureKeepsDraft() async {
         let api = FakeAPI()
-        api.failApprove = true
+        api.approveError = .http(status: 410, code: "gone", message: nil, body: "")
         let out = SpokenLog()
         let va = make(api)
-        _ = await va.handleText("hi", device: .phone, output: out)
-        let o = await va.handleText("send it", device: .phone, output: out)
+        _ = await va.handleText("hi", device: .phone, output: out, spoken: true)
+        let o = await va.handleText("send it", device: .phone, output: out, spoken: true)
         guard case .failed = o else { return XCTFail("got \(o)") }
         XCTAssertEqual(out.lines.last, VoiceAssistant.sendFailed)
     }
@@ -195,7 +216,7 @@ final class VoiceAssistantTests: XCTestCase {
     func testNotPaired() async {
         let va = make(nil)
         let out = SpokenLog()
-        let o = await va.handleText("hi", device: .phone, output: out)
+        let o = await va.handleText("hi", device: .phone, output: out, spoken: true)
         XCTAssertEqual(o, .notPaired)
         XCTAssertEqual(out.lines, [VoiceAssistant.notPaired])
     }
@@ -206,12 +227,12 @@ final class VoiceAssistantTests: XCTestCase {
         let clock = TestClock()
         let va = make(api, clock: clock)
         let out = SpokenLog()
-        _ = await va.handleText("one", device: .phone, output: out)
+        _ = await va.handleText("one", device: .phone, output: out, spoken: true)
         clock.advance(60)
-        _ = await va.handleText("two", device: .phone, output: out)
-        _ = await va.handleText("other device", device: .medallion, output: out)
+        _ = await va.handleText("two", device: .phone, output: out, spoken: true)
+        _ = await va.handleText("other device", device: .medallion, output: out, spoken: true)
         clock.advance(6 * 60)
-        _ = await va.handleText("three", device: .phone, output: out)
+        _ = await va.handleText("three", device: .phone, output: out, spoken: true)
         XCTAssertEqual(api.asked.map { $0.conversationId }, [nil, "c_1", nil, nil])
     }
 
@@ -219,7 +240,7 @@ final class VoiceAssistantTests: XCTestCase {
         let api = FakeAPI()
         let va = make(api)
         let out = SpokenLog()
-        _ = await va.handleText("hi", device: .phone, output: out)
+        _ = await va.handleText("hi", device: .phone, output: out, spoken: true)
         let o = await va.handleText("send it", device: .phone, output: out, spoken: false)
         XCTAssertEqual(o, .draftNotSent)
         XCTAssertEqual(out.lines.last, VoiceAssistant.typedSendIt)
@@ -232,7 +253,7 @@ final class VoiceAssistantTests: XCTestCase {
         let api = FakeAPI()
         let va = make(api)
         let out = SpokenLog()
-        _ = await va.handleText("hi", device: .phone, output: out)
+        _ = await va.handleText("hi", device: .phone, output: out, spoken: true)
         api.askResponse = try! SideKiqqJSON.decoder().decode(AskResponse.self, from: Fixtures.data(Fixtures.askResponseNoActions))
         let o = await va.handleText("what's next?", device: .phone, output: out, spoken: false)
         guard case .answered = o else { return XCTFail("got \(o)") }
@@ -240,13 +261,66 @@ final class VoiceAssistantTests: XCTestCase {
         XCTAssertEqual(api.approved, [])
     }
 
+    func testInterruptedReadbackNeverArmsTheWindow() async {
+        let api = FakeAPI()
+        let out = SpokenLog()
+        out.interruptReadbacks = true
+        let va = make(api)
+        let o = await va.handleUtterance(pcm: oneSecond, device: .medallion, output: out)
+        guard case let .answered(_, _, awaiting) = o else { return XCTFail("got \(o)") }
+        XCTAssertFalse(awaiting)
+        XCTAssertEqual(out.lines.last, VoiceAssistant.reviewInApp)
+        api.setTranscript("send it")
+        _ = await va.handleUtterance(pcm: oneSecond, device: .medallion, output: out)
+        XCTAssertEqual(api.approved, [], "a read-back the owner didn't fully hear can't be confirmed")
+    }
+
+    func testSendItSpokenOverTheReadbackDeclines() async {
+        let api = FakeAPI()
+        let out = SpokenLog()
+        let clock = TestClock()
+        let va = make(api, clock: clock)
+        let startedDuringReadback = clock.now
+        clock.advance(0.5)
+        _ = await va.handleUtterance(pcm: oneSecond, device: .medallion, output: out)
+        clock.advance(2)
+        api.setTranscript("send it")
+        let o = await va.handleUtterance(pcm: oneSecond, device: .medallion, output: out, startedAt: startedDuringReadback)
+        XCTAssertEqual(o, .draftNotSent)
+        XCTAssertEqual(api.approved, [])
+    }
+
+    func testSendItStartedAfterWindowOpenedConfirms() async {
+        let api = FakeAPI()
+        let out = SpokenLog()
+        let clock = TestClock()
+        let va = make(api, clock: clock)
+        _ = await va.handleUtterance(pcm: oneSecond, device: .medallion, output: out)
+        clock.advance(3)
+        api.setTranscript("send it")
+        let o = await va.handleUtterance(pcm: oneSecond, device: .medallion, output: out, startedAt: clock.now)
+        XCTAssertEqual(o, .draftSent(draftId: "dr_1"))
+        XCTAssertEqual(api.approved, ["dr_1"])
+    }
+
+    func testApproveTimeoutIsReportedAsUncertain() async {
+        let api = FakeAPI()
+        api.approveError = .transport("timed out")
+        let out = SpokenLog()
+        let va = make(api)
+        _ = await va.handleText("hi", device: .phone, output: out, spoken: true)
+        let o = await va.handleText("send it", device: .phone, output: out, spoken: true)
+        guard case .failed = o else { return XCTFail("got \(o)") }
+        XCTAssertEqual(out.lines.last, VoiceAssistant.sendUncertain)
+    }
+
     func testCancelPendingDraft() async {
         let api = FakeAPI()
         let va = make(api)
         let out = SpokenLog()
-        _ = await va.handleText("hi", device: .phone, output: out)
+        _ = await va.handleText("hi", device: .phone, output: out, spoken: true)
         await va.cancelPendingDraft()
-        let o = await va.handleText("send it", device: .phone, output: out)
+        let o = await va.handleText("send it", device: .phone, output: out, spoken: true)
         guard case .answered = o else { return XCTFail("got \(o)") }
         XCTAssertEqual(api.approved, [])
     }

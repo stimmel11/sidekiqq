@@ -228,6 +228,10 @@ final class SideKiqqClientTests: XCTestCase {
         XCTAssertNil(SideKiqqClient.normalizeBaseURL("ftp://x.com"))
         XCTAssertNil(SideKiqqClient.normalizeBaseURL("https://x.com?a=1"))
         XCTAssertNil(SideKiqqClient.normalizeBaseURL("not a url"))
+        XCTAssertNil(SideKiqqClient.normalizeBaseURL("FTP://x.com"))
+        XCTAssertNil(SideKiqqClient.normalizeBaseURL("https://x.com:"))
+        XCTAssertNil(SideKiqqClient.normalizeBaseURL("https://user:pw@x.com"))
+        XCTAssertEqual(SideKiqqClient.normalizeBaseURL("HTTPS://Brain.Example.com")?.host?.lowercased(), "brain.example.com")
     }
 
     func testNormalizePairingCode() {

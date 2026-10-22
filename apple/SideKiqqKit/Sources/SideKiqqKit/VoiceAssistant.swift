@@ -1,8 +1,15 @@
 import Foundation
 
-/** Where a voice turn's audio goes (AirPods, car, phone speaker). `speak` returns when speech has finished. */
+/** Where a voice turn's audio goes (AirPods, car, phone speaker). */
 public protocol VoiceOutput: Sendable {
-    func speak(_ text: String) async
+    /**
+     * Speaks `text` and returns when playback has ended.
+     * Returns true only if the whole text was played; false if it was interrupted (barge-in, a phone call)
+     * or could not be played at all. The draft read-back depends on this: an unheard read-back never arms
+     * the "send it" window.
+     */
+    @discardableResult
+    func speak(_ text: String) async -> Bool
 }
 
 /**
@@ -12,10 +19,12 @@ public protocol VoiceOutput: Sendable {
  *   PCM -> WAV -> /api/transcribe -> (pending draft confirmation?) -> /api/ask -> speak `spoken`
  *
  * Safety: nothing is sent unless `DraftConfirmation` returns `.confirmed`, i.e. the owner said exactly
- * "send it" within 30 s after hearing the read-back (recipient, subject, one-sentence body summary).
- * One deliberate difference from Android: the read-back comes from the real draft (`GET /api/drafts`),
- * not the action summary. If the draft can't be loaded, nothing is offered by voice and the owner is
- * told to review it in the app.
+ * "send it" within 30 s after hearing the complete read-back (recipient, subject, one-sentence body
+ * summary). Differences from Android, all stricter:
+ *  - the read-back comes from the real draft (`GET /api/drafts`), not the action summary; if the draft
+ *    can't be loaded, or the read-back was interrupted, nothing is offered by voice;
+ *  - an utterance that started before the window opened (spoken over the read-back) can't confirm;
+ *  - typed text never confirms, and a late "send it" is not forwarded to /api/ask.
  */
 public actor VoiceAssistant {
     public enum Outcome: Equatable, Sendable {
@@ -38,10 +47,11 @@ public actor VoiceAssistant {
     public static let notPaired = "SideKiqq isn't paired yet. Open the app on your iPhone to pair."
     public static let didntCatch = "Sorry, I didn't catch that."
     public static let sent = "Sent."
-    public static let sendFailed = "I couldn't send it. The draft is still saved in the app."
+    public static let sendFailed = "I couldn't send it. Check Drafts in the app."
+    public static let sendUncertain = "I couldn't confirm it was sent. Check the app before trying again."
     public static let windowClosed = "The confirmation window closed, so I didn't send it. The draft is saved in the app."
     public static let typedSendIt = "Not sent. To send, say \"send it\" out loud after the read-back, or use Review and send."
-    public static let reviewInApp ="I drafted it, but couldn't load it to read back. Review it in the app before sending."
+    public static let reviewInApp = "I drafted it, but couldn't read it back to you. Review it in the app before sending."
 
     private let apiProvider: @Sendable () -> SideKiqqAPI?
     private var confirmation: DraftConfirmation
@@ -49,11 +59,16 @@ public actor VoiceAssistant {
     private var conversations: [DeviceKind: (id: String, at: Date)] = [:]
     private var busy = false
 
+    /**
+     * - Parameters:
+     *   - confirmation: defaults to a 30 s `DraftConfirmation` on the same clock as `now`.
+     *   - now: injectable clock (tests).
+     */
     public init(api: @escaping @Sendable () -> SideKiqqAPI?,
-                confirmation: DraftConfirmation = DraftConfirmation(),
+                confirmation: DraftConfirmation? = nil,
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.apiProvider = api
-        self.confirmation = confirmation
+        self.confirmation = confirmation ?? DraftConfirmation(now: now)
         self.now = now
     }
 
@@ -62,8 +77,12 @@ public actor VoiceAssistant {
 
     public func cancelPendingDraft() { confirmation.clear() }
 
-    /** 16 kHz mono PCM16 LE from the mic or the medallion. */
-    public func handleUtterance(pcm: Data, device: DeviceKind, output: VoiceOutput) async -> Outcome {
+    /**
+     * 16 kHz mono PCM16 LE from the mic or the medallion.
+     * - Parameter startedAt: when capture of this utterance began. Speech that began before the
+     *   "send it" window opened (e.g. queued while the read-back played) can never confirm a draft.
+     */
+    public func handleUtterance(pcm: Data, device: DeviceKind, output: VoiceOutput, startedAt: Date? = nil) async -> Outcome {
         guard WavEncoder.durationMs(pcmBytes: pcm.count) >= Self.minUtteranceMs else { return .nothingHeard }
         guard !busy else { return .busy }
         guard let api = apiProvider() else {
@@ -89,15 +108,16 @@ public actor VoiceAssistant {
             await output.speak(Self.didntCatch)
             return .nothingHeard
         }
-        return await runTurn(text: text, device: device, api: api, output: output)
+        return await runTurn(text: text, startedAt: startedAt, device: device, api: api, output: output)
     }
 
     /**
-     * An already-transcribed (`spoken: true`) or typed (`spoken: false`) request.
-     * Typed text never confirms a draft: the rule is a spoken "send it". Typing anything while a draft
-     * is pending cancels it, like any other answer.
+     * Text that was not captured by `handleUtterance`.
+     * - Parameter spoken: true only for speech transcribed elsewhere (it may confirm a draft, like an utterance);
+     *   false for typed text, which never confirms: typing anything while a draft is pending cancels it.
      */
-    public func handleText(_ text: String, device: DeviceKind, output: VoiceOutput, spoken: Bool = true) async -> Outcome {
+    public func handleText(_ text: String, device: DeviceKind, output: VoiceOutput, spoken: Bool,
+                           startedAt: Date? = nil) async -> Outcome {
         guard !busy else { return .busy }
         guard let api = apiProvider() else {
             await output.speak(Self.notPaired)
@@ -112,19 +132,24 @@ public actor VoiceAssistant {
                 return .draftNotSent
             }
         }
-        return await runTurn(text: text, device: device, api: api, output: output)
+        return await runTurn(text: text, startedAt: startedAt, device: device, api: api, output: output)
     }
 
-    private func runTurn(text: String, device: DeviceKind, api: SideKiqqAPI, output: VoiceOutput) async -> Outcome {
+    private func runTurn(text: String, startedAt: Date?, device: DeviceKind, api: SideKiqqAPI, output: VoiceOutput) async -> Outcome {
         // 1) A draft is waiting for confirmation: this utterance is the answer, nothing else.
-        switch confirmation.evaluate(text) {
+        switch confirmation.evaluate(text, spokenAt: startedAt) {
         case let .confirmed(draftId):
             do {
                 try await api.approveDraft(id: draftId)
                 await output.speak(Self.sent)
                 return .draftSent(draftId: draftId)
             } catch {
-                await output.speak(Self.sendFailed)
+                // A transport error (timeout) may have happened after the brain sent it: don't claim it wasn't.
+                if case .transport = error as? SideKiqqAPIError {
+                    await output.speak(Self.sendUncertain)
+                } else {
+                    await output.speak(Self.sendFailed)
+                }
                 return .failed("\(error)")
             }
         case .declined:
@@ -150,8 +175,8 @@ public actor VoiceAssistant {
         }
         conversations[device] = (response.conversationId, now())
 
-        let spoken = response.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
-        await output.speak(spoken.isEmpty ? response.reply : spoken)
+        let spokenReply = response.spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        await output.speak(spokenReply.isEmpty ? response.reply : spokenReply)
 
         // 3) Only the first new draft can be confirmed by voice; others wait in the app (Android parity).
         guard let draftAction = response.draftActions.first else {
@@ -167,8 +192,12 @@ public actor VoiceAssistant {
             await output.speak(Self.reviewInApp)
             return .answered(transcript: text, response: response, awaitingConfirm: false)
         }
-        await output.speak(DraftConfirmation.prompt(for: draft))
-        // Start the 30 s window after the read-back has been spoken, so the owner gets all of it.
+        // The window opens only after the whole read-back was played. Interrupted = not heard = not offered.
+        let heard = await output.speak(DraftConfirmation.prompt(for: draft))
+        guard heard else {
+            await output.speak(Self.reviewInApp)
+            return .answered(transcript: text, response: response, awaitingConfirm: false)
+        }
         confirmation.arm(draftId: draft.id, summary: DraftConfirmation.readback(for: draft))
         return .answered(transcript: text, response: response, awaitingConfirm: true)
     }
