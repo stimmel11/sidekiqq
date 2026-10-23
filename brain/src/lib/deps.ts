@@ -3,8 +3,11 @@ import { encryptionKeyFromEnv } from "./crypto";
 import { UpstashKV, type KV } from "./kv";
 import { createRepos, type Repos } from "./repos";
 import { GoogleTokenStore } from "./google/auth";
-import { GoogleWorkspace, type Workspace } from "./google/workspace";
-import { GmailDraftSender, type MailSender } from "./google/sender";
+import { GoogleWorkspace } from "./google/workspace";
+import { GoogleConnector } from "./connectors/google";
+import { GmailDraftSender } from "./connectors/google/send";
+import { buildSenders, type SenderRegistry } from "./connectors/senders";
+import type { Connector } from "./connectors/types";
 import { llmFromEnv, type LLM } from "./assistant/llm";
 import { pushSenderFromEnv, type PushSender } from "./push";
 import { transcriberFromEnv, type Transcriber } from "./transcribe";
@@ -21,10 +24,13 @@ export interface Deps {
   clock: () => Date;
   llm(): LLM;
   googleTokens: GoogleTokenStore;
-  /** Read + draft access to Gmail/Calendar/Drive. Throws GoogleNotConnectedError. */
-  workspace(): Promise<Workspace>;
-  /** SEND capability. Must only be used by /api/drafts/[id]/approve (see test/no-send.test.ts). */
-  mailSender(): Promise<MailSender>;
+  /**
+   * Connectors (Gmail/Calendar/Drive today). Only lib/connectors/invoke.ts may call
+   * `Connector.invoke`; everything else goes through `invokeCapability`.
+   */
+  connectors(): readonly Connector[];
+  /** SENDER REGISTRY. Must only be used by /api/drafts/[id]/approve (see test/no-send.test.ts). */
+  senders(): SenderRegistry;
   push(): PushSender;
   transcriber(): Transcriber;
   /** Text-to-speech for devices that play audio themselves (Reachy Mini). */
@@ -46,14 +52,20 @@ export function buildDeps(kv: KV): Deps {
   const googleTokens = new GoogleTokenStore(kv, prefix, encryptionKeyFromEnv);
   let llm: LLM | null = null;
   let push: PushSender | null = null;
+  const googleWorkspace = async () => new GoogleWorkspace(await googleTokens.authorizedClient());
+  let connectors: Connector[] | null = null;
+  let senders: SenderRegistry | null = null;
   return {
     kv,
     repos,
     clock,
     llm: () => (llm ??= llmFromEnv()),
     googleTokens,
-    workspace: async () => new GoogleWorkspace(await googleTokens.authorizedClient()),
-    mailSender: async () => new GmailDraftSender(await googleTokens.authorizedClient()),
+    connectors: () => (connectors ??= [new GoogleConnector(googleWorkspace)]),
+    senders: () =>
+      (senders ??= buildSenders({
+        google: { workspace: googleWorkspace, mailer: async () => new GmailDraftSender(await googleTokens.authorizedClient()) },
+      })),
     push: () => (push ??= pushSenderFromEnv()),
     transcriber: () => transcriberFromEnv(),
     tts: () => speechSynthesizerFromEnv(),
