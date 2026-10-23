@@ -7,7 +7,9 @@ import { createRepos } from "@/lib/repos";
 import type { Deps } from "@/lib/deps";
 import { GoogleTokenStore } from "@/lib/google/auth";
 import type { CalendarEvent, DraftInput, EmailMessage, Workspace } from "@/lib/google/workspace";
-import type { MailSender } from "@/lib/google/sender";
+import type { MailSender } from "@/lib/connectors/google/send";
+import { GoogleConnector } from "@/lib/connectors/google";
+import { buildSenders } from "@/lib/connectors/senders";
 import type { CreateParams, LLM } from "@/lib/assistant/llm";
 import type { PushMessage, PushSender } from "@/lib/push";
 import type { Transcriber } from "@/lib/transcribe";
@@ -173,6 +175,13 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
   const sender = new SpyMailSender();
   const pushFake = new FakePush();
   const connected = opts.googleConnected ?? true;
+  const workspace = async (): Promise<Workspace> => {
+    if (!connected) {
+      const { GoogleNotConnectedError } = await import("@/lib/google/auth");
+      throw new GoogleNotConnectedError();
+    }
+    return ws;
+  };
   return {
     kv,
     repos,
@@ -182,14 +191,8 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
       return opts.llm;
     },
     googleTokens: new GoogleTokenStore(kv, "t", () => key),
-    workspace: async () => {
-      if (!connected) {
-        const { GoogleNotConnectedError } = await import("@/lib/google/auth");
-        throw new GoogleNotConnectedError();
-      }
-      return ws;
-    },
-    mailSender: async () => sender,
+    connectors: () => [new GoogleConnector(workspace)],
+    senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
     push: () => pushFake,
     transcriber: () =>
       opts.transcriber ?? {

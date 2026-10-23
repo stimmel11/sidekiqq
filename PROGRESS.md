@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 149 tests passing. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 242 tests passing. Connector framework slice 1 in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -24,6 +24,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-21: Marketing site built in `/site` (branch `crew/marketing-site`): Astro + Tailwind, schema-checked content, waitlist with mailto fallback.
 - 2026-10-21: UI framework: `/design` tokens + generator (CSS, Tailwind preset, Compose theme), owner web dashboard in the brain with signed-session login. Tagline changed to "SideKiqq, it goes where you go."
 - 2026-10-22: Connectors design written (`docs/CONNECTORS.md`, branch `crew/connectors-design`): capabilities, brain as MCP client, per-connector encrypted OAuth with minimal scopes, auto/confirm/user-finishes policy; confirm actions become Drafts so approve stays the only executor.
+- 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 
 ## Backlog (top = next)
 
@@ -33,6 +34,10 @@ Bots take the first unchecked item that is NOT tagged `[needs-human]`.
 SideKiqq should connect to any email, video and grocery service, and run tasks started from any device.
 - [x] Design `docs/CONNECTORS.md`: capability interfaces (`email.send`, `email.read`, `contacts.lookup`, `video.start`, `grocery.cart`, `calendar.*`), the brain as an MCP client, per-connector OAuth with encrypted token storage and minimal scopes, and a per-capability safety policy enforced by the brain (auto / confirm / user-finishes). No connector can bypass draft approval.
 - [ ] Brain: implement the connector framework from that doc + a "Connections" screen in the dashboard. Move Gmail/Calendar/Drive onto it.
+  - [x] Slice 1 (`crew/connector-framework`): capabilities + `POLICY`, `invokeCapability` (caller rules, audit log), `google` connector, sender registry (`lib/connectors/google/send.ts`), all Gmail/Calendar/Drive callers moved off `deps.workspace()`, no-send scan generalised.
+  - [ ] Slice 2: `ConnectionStore` (AAD per connector, PKCE, key rotation) + Google token migration + per-connection enabled capabilities.
+  - [ ] Slice 3: Draft `kind`/`connectorId`/`readback` (code-built readback as `Action.summary`), `email.draft` creating the Draft record, `ARCHITECTURE.md` + TS + Kotlin `Draft` model, `GET /api/drafts` fields.
+  - [ ] Slice 4: `/api/connections` routes + dashboard Connections screen; `search_email` tool rename with alias.
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.
 - [ ] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".

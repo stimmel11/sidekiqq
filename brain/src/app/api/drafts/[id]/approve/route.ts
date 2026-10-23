@@ -13,7 +13,8 @@ export const maxDuration = 30;
  *  1. Authenticated device (withDevice).
  *  2. Draft exists in our store and is still "pending" (not sent/discarded).
  *  3. Per-draft lock so a double-tap cannot send twice.
- *  4. The Gmail draft still exists (the owner may have deleted/sent it in Gmail).
+ *  4. The sender registry entry for this draft says it is still valid (for Gmail: the draft still
+ *     exists; the owner may have deleted/sent it in Gmail).
  */
 export const POST = withDevice<{ id: string }>(async (_req, { deps, params, device }) => {
   const { drafts, followups, timeline, state } = deps.repos;
@@ -28,14 +29,14 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
     const fresh = await drafts.get(draft.id);
     if (!fresh || fresh.status !== "pending") throw new HttpError(409, "Draft is no longer pending", "not_pending");
 
-    const ws = await deps.workspace();
-    if (!(await ws.draftExists(fresh.gmailDraftId))) {
+    // The sender registry is the only place that can execute a draft (docs/CONNECTORS.md §6).
+    const executor = deps.senders().for(fresh);
+    if (!(await executor.stillValid(fresh))) {
       await drafts.markDiscarded(fresh.id);
       throw new HttpError(410, "Draft no longer exists in Gmail", "gone");
     }
 
-    const sender = await deps.mailSender();
-    const sent = await sender.sendDraft(fresh.gmailDraftId);
+    const sent = await executor.execute(fresh);
     await drafts.markSent(fresh.id, sent.messageId);
 
     if (fresh.followupId) await followups.resolve(fresh.followupId).catch(() => undefined);
