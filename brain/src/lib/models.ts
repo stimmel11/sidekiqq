@@ -136,6 +136,77 @@ export const AlertsResponseSchema = z.object({
 });
 export type AlertsResponse = z.infer<typeof AlertsResponseSchema>;
 
+/**
+ * Device commands (task layer + device routing). A command is started on one device and runs on
+ * another (for example "call Dana" said to the watch opens the dialer on the phone).
+ *
+ * Every command is a hand-off (`user_finishes` in docs/CONNECTORS.md): the target device shows the
+ * label and the owner taps to act. A device NEVER auto-launches a command, dials with ACTION_CALL,
+ * or sends anything because of one. Fields are flat and optional per kind so clients that don't
+ * know a new kind can still parse (and ignore) it.
+ */
+export const COMMAND_KINDS = ["open_url", "call_contact", "reachy_wake"] as const;
+export const CommandKindSchema = z.enum(COMMAND_KINDS);
+export type CommandKind = z.infer<typeof CommandKindSchema>;
+
+export const CALL_APPS = ["phone", "whatsapp"] as const;
+export const REACHY_ACTIVITIES = ["chat", "brief", "dance", "game"] as const;
+export const COMMAND_RESULTS = ["opened", "dismissed", "failed"] as const;
+export const CommandResultSchema = z.enum(COMMAND_RESULTS);
+export type CommandResult = z.infer<typeof CommandResultSchema>;
+
+export const DeviceCommandSchema = z.object({
+  id: z.string(),
+  at: isoDate,
+  expiresAt: isoDate,
+  kind: CommandKindSchema,
+  /** One line built by the brain from the structured fields; what the target shows before the owner taps. */
+  label: z.string(),
+  /** Device kind the command was started from (for "from your watch"). */
+  from: DeviceKindSchema,
+  /** open_url: https URL on the allowlist. */
+  url: z.string().optional(),
+  /** call_contact: normalised number, digits with an optional leading "+". */
+  number: z.string().optional(),
+  /** call_contact: display name the owner gave. */
+  name: z.string().optional(),
+  /** call_contact: which app's dialer to open. */
+  app: z.enum(CALL_APPS).optional(),
+  /** reachy_wake: what Reachy should offer once awake. */
+  activity: z.enum(REACHY_ACTIVITIES).optional(),
+});
+export type DeviceCommand = z.infer<typeof DeviceCommandSchema>;
+
+/** Device-side target: a specific paired device id, or a device kind (most recently seen device of that kind). */
+export const CommandTargetSchema = z
+  .object({
+    deviceId: z.string().trim().min(1).max(64).optional(),
+    device: DeviceKindSchema.optional(),
+  })
+  .refine((t) => !(t.deviceId && t.device), "give deviceId or device, not both");
+
+export const CreateCommandRequestSchema = z.object({
+  kind: CommandKindSchema,
+  target: CommandTargetSchema.optional(),
+  url: z.string().trim().min(1).max(2048).optional(),
+  number: z.string().trim().min(1).max(32).optional(),
+  name: z.string().trim().min(1).max(80).optional(),
+  app: z.enum(CALL_APPS).optional(),
+  activity: z.enum(REACHY_ACTIVITIES).optional(),
+});
+export type CreateCommandRequest = z.infer<typeof CreateCommandRequestSchema>;
+
+export const CreateCommandResponseSchema = z.object({
+  command: DeviceCommandSchema,
+  /** The device the command was queued for. */
+  deviceId: z.string(),
+  device: DeviceKindSchema,
+});
+
+export const CommandsResponseSchema = z.object({ items: z.array(DeviceCommandSchema) });
+
+export const AckCommandRequestSchema = z.object({ result: CommandResultSchema });
+
 export const TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"] as const;
 export const SpeakRequestSchema = z.object({
   text: z.string().trim().min(1),
@@ -245,6 +316,15 @@ export const DraftSchema = z.object({
   gmailMessageId: z.string().optional(),
 });
 export type Draft = z.infer<typeof DraftSchema>;
+
+/** A queued command as stored: the contract fields plus routing and delivery state (never returned as-is). */
+export const StoredCommandSchema = DeviceCommandSchema.extend({
+  targetDeviceId: z.string(),
+  fromDeviceId: z.string(),
+  status: z.enum(["pending", ...COMMAND_RESULTS]),
+  ackedAt: isoDate.optional(),
+});
+export type StoredCommand = z.infer<typeof StoredCommandSchema>;
 
 export const DeviceRecordSchema = z.object({
   id: z.string(),
