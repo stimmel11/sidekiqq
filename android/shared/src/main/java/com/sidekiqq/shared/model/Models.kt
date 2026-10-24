@@ -162,3 +162,89 @@ data class PairRequest(val code: String, val device: Device = Device.PHONE)
 
 @Serializable
 data class PairResponse(val token: String)
+
+// ---- Device commands (GET/POST /api/commands, POST /api/commands/:id/ack) ----
+
+/**
+ * A command started on one device to run on another (e.g. "call Dana" said to the watch opens the
+ * dialer on the phone). Every command is a hand-off: show [label] and act ONLY after the owner taps.
+ * Never auto-launch, never dial with ACTION_CALL (use ACTION_DIAL), never send anything because of one.
+ * For call_contact, show [number] on its own line (not only inside [label]). Treat a command as live
+ * only while GET /api/commands still returns it (don't trust the device clock against [expiresAt]).
+ *
+ * [kind] is a plain string (see [CommandKind]) so a newer brain can add kinds without breaking
+ * parsing; ignore kinds you don't know.
+ */
+@Serializable
+data class DeviceCommand(
+    val id: String,
+    val at: String,
+    val expiresAt: String,
+    val kind: String,
+    val label: String,
+    val from: String,
+    val url: String? = null,
+    val number: String? = null,
+    val name: String? = null,
+    /** call_contact: "phone" or "whatsapp". */
+    val app: String? = null,
+    /** reachy_wake: "chat", "brief", "dance" or "game". */
+    val activity: String? = null,
+)
+
+object CommandKind {
+    const val OPEN_URL = "open_url"
+    const val CALL_CONTACT = "call_contact"
+    const val REACHY_WAKE = "reachy_wake"
+}
+
+/** Values for [DeviceCommand.app] / [CreateCommandRequest.app]. WhatsApp needs a "+" international number. */
+object CallApp {
+    const val PHONE = "phone"
+    const val WHATSAPP = "whatsapp"
+}
+
+/** Values for [DeviceCommand.activity] / [CreateCommandRequest.activity]. */
+object ReachyActivity {
+    const val CHAT = "chat"
+    const val BRIEF = "brief"
+    const val DANCE = "dance"
+    const val GAME = "game"
+}
+
+/** What the owner did with a command on its target device. */
+@Serializable
+enum class CommandResult {
+    @SerialName("opened") OPENED,
+    @SerialName("dismissed") DISMISSED,
+    @SerialName("failed") FAILED,
+}
+
+/** Route to a specific paired device id, or to the most recently seen device of a kind. Give one, not both. */
+@Serializable
+data class CommandTarget(
+    val deviceId: String? = null,
+    val device: Device? = null,
+)
+
+@Serializable
+data class CreateCommandRequest(
+    val kind: String,
+    val target: CommandTarget? = null,
+    val url: String? = null,
+    val number: String? = null,
+    val name: String? = null,
+    val app: String? = null,
+    val activity: String? = null,
+)
+
+@Serializable
+data class CreateCommandResponse(
+    val command: DeviceCommand,
+    val deviceId: String,
+    /** Device kind as a plain string ("phone", "reachy", ...) so a new kind can't break parsing. */
+    val device: String,
+)
+
+@Serializable
+data class AckCommandRequest(val result: CommandResult)

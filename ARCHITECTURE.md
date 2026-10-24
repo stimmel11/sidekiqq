@@ -41,6 +41,9 @@ the thinking.
 | POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
+| POST | /api/commands | `CreateCommandRequest` | `201 { "command": DeviceCommand, "deviceId": string, "device": DeviceKind }`. Queues a command started on this device to run on another. 400 bad fields/URL/number, 404 unknown `target.deviceId`, 409 no device that can run it (`no_target_device`, `wrong_target`), 429 `queue_full` |
+| GET | /api/commands?limit=<1..50> | – | `{ "items": DeviceCommand[] }` — this device's pending, unexpired commands, oldest first. A command stays listed until acked or expired, so dedupe by `id` |
+| POST | /api/commands/:id/ack | `{ "result": "opened"\|"dismissed"\|"failed" }` | `{ "ok": true }`. Target device only (others get 404). Same result again is a no-op; a different one is 409; `opened` after `expiresAt` is 410 |
 | POST | /api/devices/register | `{ "fcmToken": string, "device": string }` | `{ "ok": true }` |
 | POST | /api/cron/scan | (Vercel Cron, secret header) | scans Gmail, extracts commitments, pushes alerts |
 
@@ -75,7 +78,34 @@ type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
   kind: "email"|"commitment_overdue"; importance?: Importance; priority: "high"|"normal";
   client?: string; messageId?: string; threadId?: string; commitmentId?: string; }
+type CommandKind = "open_url"|"call_contact"|"reachy_wake";   // clients must ignore kinds they don't know
+interface DeviceCommand { id: string; at: string; expiresAt: string /* at + 15 min */; kind: CommandKind;
+  label: string /* built by the brain; shown before the owner taps */; from: DeviceKind;
+  url?: string /* open_url */; number?: string; name?: string; app?: "phone"|"whatsapp" /* call_contact */;
+  activity?: "chat"|"brief"|"dance"|"game" /* reachy_wake */; }
+interface CreateCommandRequest { kind: CommandKind; target?: { deviceId?: string; device?: DeviceKind } /* one, not both (400) */;
+  url?: string; number?: string; name?: string; app?: "phone"|"whatsapp"; activity?: "chat"|"brief"|"dance"|"game"; }
 ```
+
+### Device commands (task layer + device routing)
+A command is started on one device and runs on another ("call Dana" said to the watch opens the dialer on the phone).
+Every command is a **hand-off** (`user_finishes` in `docs/CONNECTORS.md`): the target shows `label` and acts only after
+the owner taps. Devices never auto-launch a command, dial with `ACTION_DIAL` (never `ACTION_CALL`), and nothing is ever
+sent because of a command; messages still go only through `/api/drafts/:id/approve`.
+- Targets: `open_url` and `call_contact` → `phone`; `reachy_wake` → `reachy`. Default is the most recently seen
+  non-revoked device of that kind; `target.deviceId` picks one.
+- `open_url`: `https` only, no credentials or port, host on a code allowlist (`meet.google.com`, `zoom.us` and its
+  subdomains, `www.kroger.com`, `www.kingsoopers.com`).
+- `call_contact`: digits with optional `+ ( ) . -` and spaces, 3–15 digits; `*`, `#`, `,` and `;` are rejected (no
+  MMI/USSD codes or post-dial digits). WhatsApp needs a leading `+`. Short codes such as 911 are accepted: the owner
+  still taps Call in the dialer. `name` loses digits, `+` and brackets so it can't carry a fake number; devices show
+  `number` on its own line, not only inside `label`.
+- Liveness: a device treats a command as live only while `GET /api/commands` returns it. An `opened` ack is accepted up
+  to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
+- This endpoint is the owner-device path. Hand-offs created later from `/api/ask` or connectors go through
+  `invokeCapability` with the caller rules and per-capability allowlists in `docs/CONNECTORS.md` §4.4.
+- Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`) for now;
+  an FCM nudge is a later slice.
 
 ## Safety rules baked in (from the EA operating system)
 - Nothing is ever sent automatically. The brain creates drafts; sending requires `/api/drafts/:id/approve`,
