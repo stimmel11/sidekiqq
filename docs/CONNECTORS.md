@@ -1,6 +1,9 @@
 # SideKiqq Connectors — Design
 
 Status: **design, not implemented** (2026-10-22). The next backlog items build this.
+Google `contacts.lookup` slice 1 (2026-10-25): `brain/src/lib/google/contacts.ts` implements the lookup
+(People API, saved + Other contacts) but is not registered as a capability yet; that waits for the
+connector framework. Its `Contact` adds `id` and `match` to the §2 shape.
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 
@@ -290,7 +293,7 @@ Initial scope plan (verify each against the provider's current docs when impleme
 | Google | calendar.read | `calendar.readonly` (today) |
 | Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (new, only when enabled) |
 | Google | files.read | `drive.readonly` (today) |
-| Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (new; People API search needs an empty warm-up query first) |
+| Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (requested since 2026-10-25; People API search needs an empty warm-up query first) |
 | Microsoft 365 | email.read / email.draft | `Mail.ReadWrite`, `offline_access`, `User.Read` |
 | Microsoft 365 | email.send | `Mail.Send` (only when enabled) |
 | Microsoft 365 | calendar.read / contacts.lookup | `Calendars.Read`, `Contacts.Read` |

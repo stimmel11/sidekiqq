@@ -109,11 +109,12 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
 ## Deploy (Vercel)
 
 1. **Upstash**: create a Redis database (or add the Upstash integration in Vercel). Copy the REST URL and token.
-2. **Google Cloud**: create a project and enable the **Gmail API**, **Google Calendar API** and **Google Drive API**.
+2. **Google Cloud**: create a project and enable the **Gmail API**, **Google Calendar API**, **Google Drive API** and **People API**.
    Configure the OAuth consent screen (External, add yourself as a test user, or publish). Create an OAuth client of
    type *Web application* with redirect URI `https://<your-domain>/api/google/callback` (plus
    `http://localhost:3000/api/google/callback` for dev). Scopes requested: `gmail.readonly`, `gmail.compose`,
-   `calendar.readonly`, `drive.readonly`, `openid email`.
+   `calendar.readonly`, `drive.readonly`, `contacts.readonly`, `contacts.other.readonly`, `openid email`.
+   An account connected before the contacts scopes were added must reconnect once to grant them.
    Note: while the app is in "Testing" status, Google expires refresh tokens after 7 days. Publish the app for a
    long-lived connection.
 3. **Firebase**: in the Firebase project used by the Android apps, generate a service-account key and paste the JSON
