@@ -3,7 +3,7 @@
 Status: **design, not implemented** (2026-10-22). The next backlog items build this.
 Google `contacts.lookup` slice 1 (2026-10-25): `brain/src/lib/google/contacts.ts` implements the lookup
 (People API, saved + Other contacts) but is not registered as a capability yet; that waits for the
-connector framework. Its `Contact` adds `id` and `match` to the §2 shape.
+connector framework. The §2 row reflects its output shape (`id`, `match`, `ambiguous`).
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 
@@ -43,7 +43,7 @@ prompts do not change per provider.
 | `email.read` | auto | `search {query, max}` → `EmailSummary[]`; `thread {threadId}` → `EmailMessage[]`; `message {id}` → `EmailMessage` | Same shapes as today's `Workspace` (`lib/google/workspace.ts`). Query syntax is provider-native; each connector documents it in its tool description. |
 | `email.draft` | auto (it *is* the email confirm step) | `DraftInput {to, cc?, subject, body, threadId?}` → `{draftId, providerDraftId?, readback}` | Creates the draft **in the provider** (Gmail/Outlook draft; for IMAP/SMTP only our record) **and** the pending Draft record, exactly as `create_email_draft` does today. Creating a draft sends nothing. |
 | `email.send` | executor only | `{providerDraftId}` → `{messageId?, threadId?}` | Not a callable capability. It exists only as a sender-registry entry run by the approve route (section 6). Claude never sees it. |
-| `contacts.lookup` | auto | `{name, max}` → `Contact[] {name, emails[], phones[], org?, source}` | Ambiguity is returned, not resolved: two "Dana"s → both, and the assistant asks. Never guesses an address. |
+| `contacts.lookup` | auto | `{name, max}` → `{contacts: Contact[] {id, name, emails[], phones[], org?, source, match}, ambiguous}` | Ambiguity is returned, not resolved: two "Dana"s → both, `ambiguous: true`, and the assistant asks. Never guesses an address. A lone partial match, or a best match from an auto-created contact (Google "Other contacts", `source: "google_other"`) when anyone else matched, is also ambiguous. `name`/`org` are untrusted third-party text. |
 | `calendar.read` | auto | `{timeMin, timeMax, query?, max}` → `CalendarEvent[]` | Today's `listCalendarEvents`. |
 | `calendar.hold.prepare` | **confirm** | `{title, start, end, location?}` → `{draftId, readback}` | Prepares an event on the owner's own calendar with **no attendees** (the executor asserts an empty attendee list). Still confirm: it writes to a shared-visibility calendar. |
 | `calendar.invite.prepare` | **confirm** | `{title, start, end, attendees[], location?, body?, conference?: "meet"\|"zoom"}` → `{draftId, readback}` | Prepares, never creates. Any calendar write with attendees is an invite (Google puts it on attendees' calendars even with `sendUpdates: "none"`; Graph always emails), so the executor lives only in the sender registry. A Meet link is added at execute time via Calendar `conferenceData`; a Zoom room is created at execute time too (no orphan rooms). |
