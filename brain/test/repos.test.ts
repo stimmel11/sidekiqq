@@ -138,7 +138,7 @@ describe("google token encryption", () => {
   it("stores the refresh token encrypted in KV", async () => {
     const deps = makeDeps();
     await deps.googleTokens.save({ refreshToken: "1//secret-refresh", connectedAt: new Date().toISOString() });
-    const raw = await deps.kv.get("t:google:tokens");
+    const raw = await deps.kv.get("t:conn:google:tokens");
     expect(raw).toBeTruthy();
     expect(raw).not.toContain("secret-refresh");
     expect((await deps.googleTokens.load())?.refreshToken).toBe("1//secret-refresh");

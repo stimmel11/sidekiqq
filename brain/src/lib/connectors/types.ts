@@ -40,3 +40,20 @@ export class CapabilityUnavailableError extends Error {
     this.name = "CapabilityUnavailableError";
   }
 }
+
+/**
+ * The connection exists but can't be used for this call: the owner turned the capability off,
+ * the provider didn't grant its scope, or the connection needs to be reconnected. The message
+ * is written to be spoken to the owner.
+ */
+export class ConnectionUnusableError extends CapabilityDeniedError {
+  constructor(
+    capability: string,
+    readonly connectorId: string,
+    readonly reason: "disabled" | "needs_reauth",
+    message: string,
+  ) {
+    super(capability, message);
+    this.name = "ConnectionUnusableError";
+  }
+}

@@ -6,6 +6,7 @@ import type { KV } from "@/lib/kv";
 import { createRepos } from "@/lib/repos";
 import type { Deps } from "@/lib/deps";
 import { GoogleTokenStore } from "@/lib/google/auth";
+import { ConnectionStore } from "@/lib/connectors/store";
 import type { CalendarEvent, DraftInput, EmailMessage, Workspace } from "@/lib/google/workspace";
 import type { MailSender } from "@/lib/connectors/google/send";
 import { GoogleConnector } from "@/lib/connectors/google";
@@ -171,6 +172,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
   const kv = new MemoryKV(() => now.getTime());
   const repos = createRepos(kv, { prefix: "t", clock, conversationTtlSeconds: 3600, conversationMaxMessages: 20 });
   const key = randomBytes(32);
+  const connections = new ConnectionStore(kv, "t", () => ({ current: key }));
   const ws = new FakeWorkspace();
   const sender = new SpyMailSender();
   const pushFake = new FakePush();
@@ -190,7 +192,8 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
       if (!opts.llm) throw new Error("no LLM configured for this test");
       return opts.llm;
     },
-    googleTokens: new GoogleTokenStore(kv, "t", () => key),
+    connections,
+    googleTokens: new GoogleTokenStore(connections),
     connectors: () => [new GoogleConnector(workspace)],
     senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
     push: () => pushFake,
