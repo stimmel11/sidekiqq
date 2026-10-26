@@ -1,6 +1,10 @@
 package com.sidekiqq.shared
 
 import com.sidekiqq.shared.model.BriefKind
+import com.sidekiqq.shared.model.CommandKind
+import com.sidekiqq.shared.model.CommandResult
+import com.sidekiqq.shared.model.CommandTarget
+import com.sidekiqq.shared.model.CreateCommandRequest
 import com.sidekiqq.shared.model.CommitmentStatus
 import com.sidekiqq.shared.model.Device
 import io.ktor.client.engine.mock.MockEngine
@@ -100,5 +104,42 @@ class SideKiqqClientTest {
         } catch (e: SideKiqqApiException) {
             assertEquals(401, e.status)
         }
+    }
+
+    @Test
+    fun commandsRoundTrip() = runTest {
+        val seen = mutableListOf<Pair<String, String>>()
+        val cmd = """{"id":"cmd_1","at":"2026-10-24T10:00:00.000Z","expiresAt":"2026-10-24T10:15:00.000Z",""" +
+            """"kind":"call_contact","label":"Call Dana Lee (+13035550142)","from":"watch","number":"+13035550142","name":"Dana Lee","app":"phone"}"""
+        val engine = MockEngine { req ->
+            seen += req.url.toString() to req.body.toByteArray().decodeToString()
+            val body = when {
+                req.method == HttpMethod.Post && req.url.encodedPath == "/api/commands" ->
+                    """{"command":$cmd,"deviceId":"dev_p","device":"phone"}"""
+                req.url.encodedPath == "/api/commands" ->
+                    // An unknown future kind and extra fields must still parse.
+                    """{"items":[$cmd,{"id":"cmd_2","at":"a","expiresAt":"b","kind":"future_kind","label":"L","from":"phone","extra":1}]}"""
+                else -> """{"ok":true}"""
+            }
+            respond(body, HttpStatusCode.OK, jsonHeaders)
+        }
+        val client = SideKiqqClient("https://brain.test", { "t" }, engine)
+        val created = client.createCommand(
+            CreateCommandRequest(kind = CommandKind.CALL_CONTACT, number = "303 555 0142", name = "Dana Lee", target = CommandTarget(device = Device.PHONE)),
+        )
+        assertEquals("dev_p", created.deviceId)
+        assertEquals("phone", created.device)
+        assertEquals("+13035550142", created.command.number)
+        // Nulls are omitted, not sent as null (the brain rejects null for optional fields).
+        assertTrue(seen[0].second.contains("\"target\":{\"device\":\"phone\"}"))
+        assertTrue(!seen[0].second.contains("null"))
+
+        val pending = client.commands(limit = 5)
+        assertEquals("https://brain.test/api/commands?limit=5", seen[1].first)
+        assertEquals(listOf("call_contact", "future_kind"), pending.map { it.kind })
+
+        client.ackCommand("cmd_1", CommandResult.OPENED)
+        assertEquals("https://brain.test/api/commands/cmd_1/ack", seen[2].first)
+        assertEquals("""{"result":"opened"}""", seen[2].second)
     }
 }

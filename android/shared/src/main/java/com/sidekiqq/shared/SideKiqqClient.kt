@@ -1,12 +1,17 @@
 package com.sidekiqq.shared
 
+import com.sidekiqq.shared.model.AckCommandRequest
 import com.sidekiqq.shared.model.AskRequest
 import com.sidekiqq.shared.model.AskResponse
 import com.sidekiqq.shared.model.Brief
 import com.sidekiqq.shared.model.BriefKind
+import com.sidekiqq.shared.model.CommandResult
 import com.sidekiqq.shared.model.Commitment
 import com.sidekiqq.shared.model.CommitmentStatus
+import com.sidekiqq.shared.model.CreateCommandRequest
+import com.sidekiqq.shared.model.CreateCommandResponse
 import com.sidekiqq.shared.model.Device
+import com.sidekiqq.shared.model.DeviceCommand
 import com.sidekiqq.shared.model.FollowUp
 import com.sidekiqq.shared.model.ItemsResponse
 import com.sidekiqq.shared.model.PairRequest
@@ -143,6 +148,33 @@ class SideKiqqClient(
             auth()
             contentType(ContentType.Application.Json)
             setBody(RegisterDeviceRequest(fcmToken = fcmToken, device = device))
+        }.ensureOkUnit()
+    }
+
+    /**
+     * Queues a command to run on another device (POST /api/commands). The brain validates it and
+     * builds the label; the target only acts after the owner taps. Sends nothing by itself.
+     */
+    suspend fun createCommand(request: CreateCommandRequest): CreateCommandResponse =
+        http.post(url("/api/commands")) {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(request)
+        }.ensureOk().body()
+
+    /** This device's pending, unexpired commands, oldest first (GET /api/commands). Dedupe by id. */
+    suspend fun commands(limit: Int = 20): List<DeviceCommand> =
+        http.get(url("/api/commands")) {
+            auth()
+            parameter("limit", limit)
+        }.ensureOk().body<ItemsResponse<DeviceCommand>>().items
+
+    /** Reports what the owner did with a command (POST /api/commands/:id/ack). 410 = it expired. */
+    suspend fun ackCommand(id: String, result: CommandResult) {
+        http.post(url("/api/commands/${id.encodeURLPathPart()}/ack")) {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(AckCommandRequest(result))
         }.ensureOkUnit()
     }
 
