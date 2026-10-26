@@ -243,7 +243,7 @@ describe("invokeCapability with a stored connection (§4 step 3)", () => {
 describe("GoogleTokenStore adapter", () => {
   it("a reconnect keeps the owner's enabled capabilities and clears needs_reauth", async () => {
     const kv = new MemoryKV();
-    const conns = new ConnectionStore(kv, "t", () => ({ current: randomBytes(32).fill(7) }));
+    const conns = new ConnectionStore(kv, "t", () => ({ current: Buffer.alloc(32, 7) }));
     const g = new GoogleTokenStore(conns);
     await g.save({ refreshToken: "1//a", email: "owner@example.com", scope: ALL_GOOGLE_SCOPES, connectedAt: "2026-10-01T00:00:00.000Z" });
     await conns.update("google", (v) => ({ ...v, enabled: ["email.read"] }));
@@ -278,5 +278,68 @@ describe("PKCE", () => {
 
   it("uses a distinct AAD per connector", () => {
     expect(connectionAad("google")).not.toBe(connectionAad("microsoft"));
+  });
+});
+
+describe("store hardening", () => {
+  it("a migration that read the legacy record before a disconnect does not resurrect it", async () => {
+    const key = Buffer.alloc(32, 3);
+    const kv = new MemoryKV();
+    const s = new ConnectionStore(kv, "t", () => ({ current: key }));
+    await kv.set("t:google:tokens", encrypt(JSON.stringify({ refreshToken: "1//legacy", connectedAt: "x" }), key, "sidekiqq:google-refresh-token:v1"));
+    // Simulate clear() landing between the migration's read and its write.
+    const realGet = kv.get.bind(kv);
+    let reads = 0;
+    kv.get = async (k: string) => {
+      const v = await realGet(k);
+      if (k === "t:google:tokens" && ++reads === 1) await kv.del("t:google:tokens");
+      return v;
+    };
+    expect(await s.load("google")).toBeNull();
+    kv.get = realGet;
+    expect(await kv.get("t:conn:google:tokens")).toBeNull();
+  });
+
+  it("markNeedsReauth leaves a newer connection alone", async () => {
+    const { s } = store();
+    await s.save("google", { ...base, secret: "1//new" });
+    expect(await s.markNeedsReauth("google", "invalid_grant", "1//old")).toBe(false);
+    expect((await s.load("google"))?.status).toBe("connected");
+    expect(await s.markNeedsReauth("google", "invalid_grant", "1//new")).toBe(true);
+  });
+
+  it("drops capability ids it no longer knows instead of losing the connection", async () => {
+    const key = Buffer.alloc(32, 5);
+    const kv = new MemoryKV();
+    const s = new ConnectionStore(kv, "t", () => ({ current: key }));
+    const rec = { ...base, enabled: ["email.read", "email.retired_capability"], status: "connected" };
+    await kv.set("t:conn:google:tokens", encrypt(JSON.stringify(rec), key, connectionAad("google")));
+    expect((await s.load("google"))?.enabled).toEqual(["email.read"]);
+  });
+
+  it("does not overwrite a record that changed after a rotated read", async () => {
+    const oldKey = Buffer.alloc(32, 1);
+    const newKey = Buffer.alloc(32, 2);
+    const kv = new MemoryKV();
+    let ring: { current: Buffer; previous?: Buffer } = { current: oldKey };
+    const s = new ConnectionStore(kv, "t", () => ring);
+    await s.save("google", base);
+    ring = { current: newKey, previous: oldKey };
+    const realGet = kv.get.bind(kv);
+    let n = 0;
+    kv.get = async (k: string) => {
+      const v = await realGet(k);
+      // After the first read, a reconnect writes a new record.
+      if (++n === 1) await kv.set(k, encrypt(JSON.stringify({ ...base, secret: "1//fresh", status: "connected" }), newKey, connectionAad("google")));
+      return v;
+    };
+    await s.load("google");
+    kv.get = realGet;
+    expect((await s.load("google"))?.secret).toBe("1//fresh");
+  });
+
+  it("isInvalidGrant recognises google-auth-library's JSON message form", () => {
+    expect(isInvalidGrant(new Error('{"error":"invalid_grant","error_description":"Token has been expired or revoked."}'))).toBe(true);
+    expect(isInvalidGrant(new Error("upstream said invalid_grant somewhere"))).toBe(false);
   });
 });

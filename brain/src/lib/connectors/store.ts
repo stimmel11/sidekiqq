@@ -29,7 +29,9 @@ export interface KeyRing {
 
 const ConnectorIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, "invalid connector id");
 
-const CapabilityIdSchema = z.string().refine((s): s is CapabilityId => (CAPABILITY_IDS as string[]).includes(s));
+const isCap = (s: unknown): s is CapabilityId => typeof s === "string" && (CAPABILITY_IDS as string[]).includes(s);
+/** Lenient: an id removed or renamed in a later release is dropped, not a reason to lose the whole record. */
+const EnabledSchema = z.array(z.unknown()).transform((a): CapabilityId[] => a.filter(isCap));
 
 export const StoredConnectionSchema = z.object({
   /** OAuth refresh token, or an app-specific password for IMAP/SMTP connectors. Never logged. */
@@ -41,7 +43,7 @@ export const StoredConnectionSchema = z.object({
   grantedScopes: z.array(z.string()),
   connectedAt: z.string(),
   /** Capabilities the owner turned on. Absent = every capability the connector offers. */
-  enabled: z.array(CapabilityIdSchema).optional(),
+  enabled: EnabledSchema.optional(),
   status: z.enum(["connected", "needs_reauth"]).default("connected"),
   lastError: z.string().max(300).optional(),
 });
@@ -109,19 +111,31 @@ export class ConnectionStore {
     const key = this.tokenKey(connectorId);
     const raw = await this.kv.get(key);
     if (!raw) return connectorId === "google" ? this.migrateLegacyGoogle() : null;
+    let opened: { plain: string; rotated: boolean };
     try {
-      const { plain, rotated } = this.open(raw, connectionAad(connectorId));
-      const stored = StoredConnectionSchema.parse(JSON.parse(plain));
-      if (rotated) {
-        await this.kv
-          .set(key, this.seal(connectorId, stored))
-          .catch((err: unknown) => console.warn(`[connections] ${connectorId}: re-encrypt after key rotation failed`, err));
-      }
-      return stored;
+      opened = this.open(raw, connectionAad(connectorId));
     } catch (err) {
-      console.error(`[connections] ${connectorId}: stored credentials could not be decrypted; reconnect required`, (err as Error)?.message);
+      console.error(`[connections] ${connectorId}: stored credentials could not be decrypted (wrong key or AAD); reconnect required`, (err as Error)?.message);
       return null;
     }
+    let stored: StoredConnection;
+    try {
+      stored = StoredConnectionSchema.parse(JSON.parse(opened.plain));
+    } catch (err) {
+      console.error(`[connections] ${connectorId}: stored record decrypted but is not valid; reconnect required`, (err as Error)?.message);
+      return null;
+    }
+    if (opened.rotated) {
+      // Best effort and not atomic: re-read first so a save that landed since our read is not
+      // overwritten with older contents. A write in the remaining gap is overwritten with this
+      // (still valid, just older) record; the next load reads it fine.
+      try {
+        if ((await this.kv.get(key)) === raw) await this.kv.set(key, this.seal(connectorId, stored));
+      } catch (err) {
+        console.warn(`[connections] ${connectorId}: re-encrypt after key rotation failed`, err);
+      }
+    }
+    return stored;
   }
 
   /** §8 step 3. Runs only when the new record is missing. Never deletes the legacy record. */
@@ -142,6 +156,8 @@ export class ConnectionStore {
       grantedScopes: parseScopes(legacy.scope),
       connectedAt: legacy.connectedAt,
     });
+    // A disconnect (clear) may have removed the legacy record since we read it: don't resurrect it.
+    if ((await this.kv.get(this.legacyGoogleKey())) === null) return null;
     // nx: if a concurrent request (or a fresh connect) wrote the new record first, keep theirs.
     const wrote = await this.kv.set(this.tokenKey("google"), this.seal("google", migrated), { nx: true });
     if (!wrote) {
@@ -156,8 +172,9 @@ export class ConnectionStore {
    * Revoking at the provider is the caller's job (disconnect route, slice 4).
    */
   async clear(connectorId: string): Promise<void> {
-    await this.kv.del(this.tokenKey(connectorId));
+    // Legacy first: a load() between the two deletes must not find it and migrate it back.
     if (connectorId === "google") await this.kv.del(this.legacyGoogleKey());
+    await this.kv.del(this.tokenKey(connectorId));
   }
 
   /** Read-modify-write of one connection. No-op (returns null) when not connected. */
@@ -167,10 +184,15 @@ export class ConnectionStore {
     return this.save(connectorId, patch(cur));
   }
 
-  /** Marks the connection as needing reconnect. Returns true only on the transition (so callers alert once). */
-  async markNeedsReauth(connectorId: string, reason: string): Promise<boolean> {
+  /**
+   * Marks the connection as needing reconnect. Returns true only on the transition (so callers
+   * alert once). `failedSecret` is the credential the failing call used: if the owner has
+   * reconnected since, the new connection is left alone.
+   */
+  async markNeedsReauth(connectorId: string, reason: string, failedSecret?: string): Promise<boolean> {
     const cur = await this.load(connectorId);
     if (!cur || cur.status === "needs_reauth") return false;
+    if (failedSecret !== undefined && cur.secret !== failedSecret) return false;
     await this.save(connectorId, { ...cur, status: "needs_reauth", lastError: reason.slice(0, 300) });
     return true;
   }

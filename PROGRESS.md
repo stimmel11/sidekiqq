@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 312 tests passing. Connector framework slice 1, task layer slice 1 (`/api/commands`) and the Google Contacts lookup module in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 345 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) and the Google Contacts lookup module in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -29,6 +29,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 - 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
+- 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 
 ## Backlog (top = next)
 
@@ -39,7 +40,7 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [x] Design `docs/CONNECTORS.md`: capability interfaces (`email.send`, `email.read`, `contacts.lookup`, `video.start`, `grocery.cart`, `calendar.*`), the brain as an MCP client, per-connector OAuth with encrypted token storage and minimal scopes, and a per-capability safety policy enforced by the brain (auto / confirm / user-finishes). No connector can bypass draft approval.
 - [ ] Brain: implement the connector framework from that doc + a "Connections" screen in the dashboard. Move Gmail/Calendar/Drive onto it.
   - [x] Slice 1 (`crew/connector-framework`): capabilities + `POLICY`, `invokeCapability` (caller rules, audit log), `google` connector, sender registry (`lib/connectors/google/send.ts`), all Gmail/Calendar/Drive callers moved off `deps.workspace()`, no-send scan generalised.
-  - [ ] Slice 2: `ConnectionStore` (AAD per connector, PKCE, key rotation) + Google token migration + per-connection enabled capabilities.
+  - [x] Slice 2 (`crew/connection-store`): `ConnectionStore` (AAD per connector, PKCE on Google OAuth, key rotation via `TOKEN_ENCRYPTION_KEY_PREV`), legacy Google token migration, per-connection enabled capabilities + granted-scope check + `needs_reauth` (set on `invalid_grant`) enforced in `invokeCapability`. Deferred to slice 4: the one owner alert on `needs_reauth` (needs a new alert kind in the contract), provider-side revoke on disconnect, incremental per-capability Google scopes, and deleting the legacy `google:tokens` key after one release.
   - [ ] Slice 3: Draft `kind`/`connectorId`/`readback` (code-built readback as `Action.summary`), `email.draft` creating the Draft record, `ARCHITECTURE.md` + TS + Kotlin `Draft` model, `GET /api/drafts` fields.
   - [ ] Slice 4: `/api/connections` routes + dashboard Connections screen; `search_email` tool rename with alias.
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.

@@ -64,7 +64,9 @@ alerts use high priority.
   `src/lib/connectors/google/send.ts` (registered in the sender registry `src/lib/connectors/senders.ts`) and is reachable only from `/api/drafts/:id/approve`, which checks that the draft exists and
   is `pending`, takes a per-draft lock against double taps, and confirms the Gmail draft still exists.
   `test/no-send.test.ts` fails if any other file gains a send primitive.
-- **Google tokens**: the refresh token is encrypted with AES-256-GCM (`TOKEN_ENCRYPTION_KEY`, AAD-bound) in Redis.
+- **Connector tokens**: `ConnectionStore` (`src/lib/connectors/store.ts`) encrypts each connector's refresh token
+  with AES-256-GCM (`TOKEN_ENCRYPTION_KEY`, AAD `sidekiqq:conn:<connector>:v1`) in Redis, supports key rotation via
+  `TOKEN_ENCRYPTION_KEY_PREV`, and stores per-connection status and enabled capabilities. Google OAuth uses PKCE.
   Access tokens are never persisted.
 
 ```

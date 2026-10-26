@@ -4,8 +4,11 @@ Status: **partly implemented.** Design 2026-10-22. Framework slice 1 (2026-10-23
 `POLICY` table, `invokeCapability` with caller rules and an audit log (`repos/audit.ts`), the
 `google` connector wrapping `GoogleWorkspace` (§8 steps 1, 2, 4: tools, cron scan and briefing all
 call `invokeCapability`; `deps.workspace()` is gone), and the sender registry with
-`lib/connectors/google/send.ts`. Not yet built: `ConnectionStore` + token migration (§7, §8 step 3),
-per-connection enabled capabilities (§4 step 3), Draft `kind`/`readback` (§5), the generic
+`lib/connectors/google/send.ts`. Slice 2 (2026-10-26): `ConnectionStore` (`lib/connectors/store.ts`:
+per-connector AAD, `TOKEN_ENCRYPTION_KEY_PREV` rotation, single-use state carrying the PKCE verifier),
+the Google token migration (§8 step 3), and per-connection enabled capabilities, granted scopes and
+`needs_reauth` checked in `invokeCapability` (§4 step 3). From slice 2, still open in §7: the owner
+alert on `needs_reauth`, provider revoke on disconnect, incremental scopes. Not yet built: Draft `kind`/`readback` (§5), the generic
 connections routes and the Connections screen (§9), the `search_email` tool rename, and remote MCP.
 Slice 1 differences from §2, to settle in the next slice: `email.draft` returns
 `{providerDraftId, threadId?}` and the caller (the `create_email_draft` tool) still creates the
