@@ -1,9 +1,18 @@
 # SideKiqq Connectors — Design
 
-Status: **design, not implemented** (2026-10-22). The next backlog items build this.
+Status: **partly implemented.** Design 2026-10-22. Framework slice 1 (2026-10-23): capabilities +
+`POLICY` table, `invokeCapability` with caller rules and an audit log (`repos/audit.ts`), the
+`google` connector wrapping `GoogleWorkspace` (§8 steps 1, 2, 4: tools, cron scan and briefing all
+call `invokeCapability`; `deps.workspace()` is gone), and the sender registry with
+`lib/connectors/google/send.ts`. Not yet built: `ConnectionStore` + token migration (§7, §8 step 3),
+per-connection enabled capabilities (§4 step 3), Draft `kind`/`readback` (§5), the generic
+connections routes and the Connections screen (§9), the `search_email` tool rename, and remote MCP.
+Slice 1 differences from §2, to settle in the next slice: `email.draft` returns
+`{providerDraftId, threadId?}` and the caller (the `create_email_draft` tool) still creates the
+pending Draft record; `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
 Google `contacts.lookup` slice 1 (2026-10-25): `brain/src/lib/google/contacts.ts` implements the lookup
-(People API, saved + Other contacts) but is not registered as a capability yet; that waits for the
-connector framework. The §2 row reflects its output shape (`id`, `match`, `ambiguous`).
+(People API, saved + Other contacts) but is not registered as a capability on the `google` connector
+yet (next slice). The §2 row reflects its output shape (`id`, `match`, `ambiguous`).
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 
@@ -232,7 +241,7 @@ covers a subject and body containing injected instructions.
 
 ## 6. Keeping the no-send invariant testable
 
-Today `test/no-send.test.ts` enforces that only `lib/google/sender.ts` sends and only the approve
+Before slice 1, `test/no-send.test.ts` enforced that only `lib/google/sender.ts` sent and only the approve
 route reaches it. With many connectors this generalises to:
 
 - Every send implementation lives in a file named `lib/connectors/<id>/send.ts` and exports

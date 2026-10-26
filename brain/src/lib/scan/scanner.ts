@@ -1,6 +1,8 @@
 import type { Deps } from "../deps";
 import { config } from "../env";
 import type { EmailMessage } from "../google/workspace";
+import { GoogleNotConnectedError } from "../google/auth";
+import { readEmail } from "../connectors/invoke";
 import { structuredCall } from "../assistant/llm";
 import { deliverAlert } from "../push/alerts";
 import { formatNow, systemBlocks } from "../assistant/prompt";
@@ -132,8 +134,15 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
     backlog: 0,
   };
 
-  const ws = await deps.workspace();
-  const ownerEmail = await ws.ownerEmail().catch(() => undefined);
+  const cron = { caller: "cron" } as const;
+  // Not connected fails fast (→ 409 in the route); any other profile error just loses the owner hint.
+  const ownerEmail = await readEmail(deps, { op: "account" }, cron).then(
+    (a) => a.email,
+    (err: unknown) => {
+      if (err instanceof GoogleNotConnectedError) throw err;
+      return undefined;
+    },
+  );
   const query = `(in:inbox OR in:sent) after:${Math.floor(fromDate.getTime() / 1000)} -category:promotions -category:social -in:chats`;
   // Gmail lists newest first. Listing only `scanMaxMessages` and then advancing the cursor silently
   // dropped everything older once more than that arrived between runs (and later runs only ever
@@ -141,7 +150,7 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
   // work OLDEST first, and hold the cursor while a backlog remains so the next run continues.
   const maxPerRun = config.scanMaxMessages();
   const listLimit = Math.min(500, maxPerRun * 5);
-  const listed = await ws.listMessageIds(query, listLimit);
+  const listed = await readEmail(deps, { op: "list_ids", query, max: listLimit }, cron);
   const seen = await Promise.all(listed.map((m) => deps.repos.state.isMessageProcessed(m.id)));
   const pending = listed.filter((_, i) => !seen[i]).reverse();
   const ids = pending.slice(0, maxPerRun);
@@ -157,7 +166,7 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
       return;
     }
     try {
-      const msg = await ws.getMessage(id);
+      const msg = await readEmail(deps, { op: "message", id }, cron);
       const raw = await structuredCall(llm, {
         system,
         user: extractionPrompt(msg, ownerEmail),

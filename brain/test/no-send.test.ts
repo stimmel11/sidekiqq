@@ -17,7 +17,8 @@ import { POST as ask } from "@/app/api/ask/route";
 
 const SRC = path.resolve(__dirname, "../src");
 const APPROVE_ROUTE = path.join(SRC, "app/api/drafts/[id]/approve/route.ts");
-const SENDER_MODULE = path.join(SRC, "lib/google/sender.ts");
+const GOOGLE_SEND = path.join(SRC, "lib/connectors/google/send.ts");
+const SENDER_REGISTRY = path.join(SRC, "lib/connectors/senders.ts");
 const DEPS_MODULE = path.join(SRC, "lib/deps.ts");
 
 function walk(dir: string): string[] {
@@ -27,15 +28,69 @@ function walk(dir: string): string[] {
   });
 }
 
-const SEND_PRIMITIVES = [
-  /\bdrafts\s*\.\s*send\b/, // gmail.users.drafts.send
-  /\bmessages\s*\.\s*send\b/, // gmail.users.messages.send
-  /\bsendDraft\s*\(/, // MailSender.sendDraft(...)
-  /\bmailSender\s*\(/, // deps.mailSender()
-  /\bGmailDraftSender\b/,
-  /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
-  /nodemailer|smtp/i,
-];
+function code(file: string): string {
+  return readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "") // strip block comments
+    .replace(/(^|[^:])\/\/.*$/gm, "$1"); // strip line comments
+}
+
+const P = {
+  draftsSend: /\bdrafts\s*\.\s*send\b/, // gmail.users.drafts.send
+  messagesSend: /\bmessages\s*\.\s*send\b/, // gmail.users.messages.send
+  sendDraft: /\bsendDraft\b/, // MailSender.sendDraft
+  // Bare words, not call forms, so destructuring (`const { senders } = deps`) and optional
+  // calls (`deps.senders?.()`) are caught too.
+  senders: /\bsenders\b/, // deps.senders
+  registry: /\bSenderRegistry\b/,
+  executor: /\bDraftExecutor\b/,
+  execute: /\bexecute\b/, // DraftExecutor.execute
+  gmailSender: /\bGmailDraftSender\b/,
+  googleExecutor: /\bgoogleEmailExecutor\b/,
+  buildSenders: /\bbuildSenders\b/,
+  importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
+  smtp: /nodemailer|smtp/i,
+} as const;
+type Prim = keyof typeof P;
+
+/** EXACTLY which send primitives each file contains. Every other source file: none. */
+const ALLOWED: Record<string, Prim[]> = {
+  // `senders` here is its type-only `import type { DraftExecutor } from "../senders"`.
+  [GOOGLE_SEND]: ["draftsSend", "sendDraft", "gmailSender", "googleExecutor", "executor", "execute", "senders"],
+  [SENDER_REGISTRY]: ["googleExecutor", "buildSenders", "registry", "executor", "execute"],
+  // The container constructs the registry (and declares `senders()`), but never calls a sender.
+  [DEPS_MODULE]: ["gmailSender", "buildSenders", "registry", "senders"],
+  [APPROVE_ROUTE]: ["senders", "execute"],
+};
+
+function hits(file: string): Prim[] {
+  const c = code(file);
+  return (Object.keys(P) as Prim[]).filter((k) => P[k].test(c));
+}
+
+/**
+ * Every module specifier a file pulls in at runtime (import, export-from, dynamic import, require),
+ * resolved to an absolute path without extension. `import type` / `export type` are skipped: they
+ * vanish at compile time.
+ */
+function runtimeDeps(file: string, c: string = code(file)): string[] {
+  const specs: string[] = [];
+  const staticRe = /\b(import|export)(\s+type\b)?[^;'"`]*?\bfrom\s*["']([^"']+)["']/g;
+  for (const m of c.matchAll(staticRe)) if (!m[2]) specs.push(m[3]!);
+  for (const m of c.matchAll(/\bimport\s*["']([^"']+)["']/g)) specs.push(m[1]!); // side-effect import
+  for (const m of c.matchAll(/\b(?:import|require)\s*\(\s*["'`]([^"'`]+)["'`]/g)) specs.push(m[1]!);
+  return specs.map((s) => {
+    const abs = s.startsWith("@/") ? path.join(SRC, s.slice(2)) : s.startsWith(".") ? path.resolve(path.dirname(file), s) : s;
+    return abs.replace(/\.(js|ts|tsx|mjs)$/, "");
+  });
+}
+
+function runtimeImporters(target: string): string[] {
+  const t = target.replace(/\.ts$/, "");
+  return walk(SRC)
+    .filter((f) => runtimeDeps(f).includes(t))
+    .map((f) => path.relative(SRC, f))
+    .sort();
+}
 
 describe("no route other than draft-approve can send mail (static)", () => {
   const files = walk(SRC);
@@ -43,36 +98,42 @@ describe("no route other than draft-approve can send mail (static)", () => {
   it("finds the source tree", () => {
     expect(files.length).toBeGreaterThan(20);
     expect(files).toContain(APPROVE_ROUTE);
+    expect(files).toContain(GOOGLE_SEND);
+    expect(files).toContain(SENDER_REGISTRY);
   });
 
   for (const file of walk(SRC)) {
     const rel = path.relative(SRC, file);
     it(`${rel} contains no send primitives unless allowed`, () => {
-      const code = readFileSync(file, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "") // strip block comments
-        .replace(/(^|[^:])\/\/.*$/gm, "$1"); // strip line comments
-      const hits = SEND_PRIMITIVES.filter((re) => re.test(code)).map(String);
-      if (file === SENDER_MODULE) {
-        expect(code).toMatch(/drafts\s*\.\s*send/);
-        expect(code).not.toMatch(/messages\s*\.\s*send/);
-        return;
-      }
-      if (file === APPROVE_ROUTE) {
-        expect(hits.sort()).toEqual([String(/\bmailSender\s*\(/), String(/\bsendDraft\s*\(/)].sort());
-        return;
-      }
-      if (file === DEPS_MODULE) {
-        // The container constructs the sender but must not call it.
-        expect(code).not.toMatch(/\bsendDraft\s*\(|drafts\s*\.\s*send|messages\s*\.\s*send/);
-        return;
-      }
-      expect(hits).toEqual([]);
+      expect(hits(file).sort()).toEqual([...(ALLOWED[file] ?? [])].sort());
     });
   }
 
-  it("only the approve route and deps reference the sender module", () => {
-    const importers = walk(SRC).filter((f) => /google\/sender/.test(readFileSync(f, "utf8")));
-    expect(importers.map((f) => path.relative(SRC, f)).sort()).toEqual(["lib/deps.ts"]);
+  it("the Google send module uses drafts.send only, never messages.send", () => {
+    expect(code(GOOGLE_SEND)).toMatch(P.draftsSend);
+    expect(code(GOOGLE_SEND)).not.toMatch(P.messagesSend);
+  });
+
+
+  it("the import scanner sees re-exports, dynamic imports, require, extensions and relative paths", () => {
+    const fake = path.join(SRC, "lib/connectors/google/index.ts");
+    const resolve = (c: string) => runtimeDeps(fake, c);
+    const target = GOOGLE_SEND.replace(/\.ts$/, "");
+    for (const c of [
+      `export * from "./send";`,
+      `export { GmailDraftSender } from "./send.js";`,
+      `const m = await import("@/lib/connectors/google/send");`,
+      `const m = require("./send");`,
+      `import{GmailDraftSender}from"./send"`,
+    ]) {
+      expect(resolve(c), c).toContain(target);
+    }
+    expect(resolve(`import type { MailSender } from "./send";`)).toEqual([]);
+  });
+
+  it("only deps imports the sender registry; only the registry and deps import the Google send module", () => {
+    expect(runtimeImporters(SENDER_REGISTRY)).toEqual(["lib/deps.ts"]);
+    expect(runtimeImporters(GOOGLE_SEND)).toEqual(["lib/connectors/senders.ts", "lib/deps.ts"]);
   });
 
   it("the Workspace interface exposes no send method", () => {

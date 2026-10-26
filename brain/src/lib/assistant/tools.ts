@@ -1,6 +1,8 @@
 import { z, type ZodType } from "zod";
 import type { Deps } from "../deps";
 import { GoogleNotConnectedError } from "../google/auth";
+import { invokeCapability, readEmail } from "../connectors/invoke";
+import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx } from "../connectors/types";
 import { isPlausibleEmail } from "../google/mime";
 import {
   ConfidenceSchema,
@@ -16,8 +18,9 @@ import { toolSchema, type ToolDef } from "./llm";
  * Tools exposed to Claude in /api/ask. Each tool = zod input schema + handler.
  * Handlers return plain JSON for the model and may emit contract `Action`s for the device.
  *
- * SAFETY: no tool can send email. create_email_draft calls Workspace.createDraft only;
- * the Workspace interface has no send method by design.
+ * SAFETY: no tool can send email. Provider access goes only through invokeCapability
+ * (docs/CONNECTORS.md), whose closed capability list has no send; create_email_draft uses
+ * `email.draft`, which only creates a provider draft.
  */
 
 export interface ToolContext {
@@ -28,6 +31,8 @@ export interface ToolContext {
 }
 
 export class ToolInputError extends Error {}
+
+const conn = (ctx: ToolContext): ConnCtx => ({ caller: "ask", device: ctx.device });
 
 interface ToolSpec<S extends ZodType> {
   name: string;
@@ -55,9 +60,8 @@ const searchGmail = tool({
     query: z.string().trim().min(1).max(500),
     maxResults: z.number().int().min(1).max(25).default(10),
   }),
-  async run(input, { deps }) {
-    const ws = await deps.workspace();
-    return { messages: await ws.searchGmail(input.query, input.maxResults) };
+  async run(input, ctx) {
+    return { messages: await readEmail(ctx.deps, { op: "search", query: input.query, max: input.maxResults }, conn(ctx)) };
   },
 });
 
@@ -65,9 +69,8 @@ const getEmailThread = tool({
   name: "get_email_thread",
   description: "Fetch a full Gmail thread (all messages, plain-text bodies with quoted history trimmed) by threadId.",
   input: z.object({ threadId: z.string().trim().min(1).max(200) }),
-  async run(input, { deps }) {
-    const ws = await deps.workspace();
-    const messages = await ws.getThread(input.threadId);
+  async run(input, ctx) {
+    const messages = await readEmail(ctx.deps, { op: "thread", threadId: input.threadId }, conn(ctx));
     return { threadId: input.threadId, messages };
   },
 });
@@ -82,7 +85,8 @@ const listCalendarEvents = tool({
     query: optStr(200),
     maxResults: z.number().int().min(1).max(50).default(20),
   }),
-  async run(input, { deps, now }) {
+  async run(input, ctx) {
+    const { now } = ctx;
     // Zone-less / date-only bounds are the owner's local day, not UTC (a UTC-midnight "2026-10-20"
     // would start at 6pm the previous evening in Denver).
     const tz = config.ownerTimezone();
@@ -91,13 +95,17 @@ const listCalendarEvents = tool({
     const timeMin = input.start ? new Date(start ?? Number.NaN) : now;
     const timeMax = input.end ? new Date(end ?? Number.NaN) : new Date(timeMin.getTime() + 7 * 86_400_000);
     if (Number.isNaN(timeMin.getTime()) || Number.isNaN(timeMax.getTime())) throw new ToolInputError("start/end must be valid dates");
-    const ws = await deps.workspace();
-    const events = await ws.listCalendarEvents({
-      timeMin: timeMin.toISOString(),
-      timeMax: timeMax.toISOString(),
-      maxResults: input.maxResults,
-      ...(input.query ? { query: input.query } : {}),
-    });
+    const events = await invokeCapability(
+      ctx.deps,
+      "calendar.read",
+      {
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        max: input.maxResults,
+        ...(input.query ? { query: input.query } : {}),
+      },
+      conn(ctx),
+    );
     return { timeMin: timeMin.toISOString(), timeMax: timeMax.toISOString(), events };
   },
 });
@@ -111,9 +119,10 @@ const searchDrive = tool({
     maxResults: z.number().int().min(1).max(10).default(5),
     includeContent: z.boolean().default(false),
   }),
-  async run(input, { deps }) {
-    const ws = await deps.workspace();
-    return { files: await ws.searchDrive(input.query, input.maxResults, input.includeContent) };
+  async run(input, ctx) {
+    return {
+      files: await invokeCapability(ctx.deps, "files.read", { query: input.query, max: input.maxResults, includeContent: input.includeContent }, conn(ctx)),
+    };
   },
 });
 
@@ -242,19 +251,24 @@ const createEmailDraft = tool({
     client: optStr(200),
     followupId: optStr(100).describe("Link the draft to an existing follow-up id"),
   }),
-  async run(input, { deps, actions }) {
+  async run(input, ctx) {
+    const { deps, actions } = ctx;
     const bad = [...input.to, ...(input.cc ?? [])].filter((a) => !isPlausibleEmail(a));
     if (bad.length) throw new ToolInputError(`Not valid email addresses: ${bad.join(", ")}. Look the address up first.`);
-    const ws = await deps.workspace();
-    const created = await ws.createDraft({
-      to: input.to,
-      ...(input.cc?.length ? { cc: input.cc } : {}),
-      subject: input.subject,
-      body: input.body,
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-    });
+    const created = await invokeCapability(
+      deps,
+      "email.draft",
+      {
+        to: input.to,
+        ...(input.cc?.length ? { cc: input.cc } : {}),
+        subject: input.subject,
+        body: input.body,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+      },
+      conn(ctx),
+    );
     const draft = await deps.repos.drafts.create({
-      gmailDraftId: created.gmailDraftId,
+      gmailDraftId: created.providerDraftId,
       to: input.to,
       cc: input.cc ?? [],
       subject: input.subject,
@@ -406,6 +420,7 @@ export async function executeTool(
       return { content: "Google is not connected, so email, calendar and Drive are unavailable. Tell the owner to connect Google from the phone app.", isError: true };
     }
     if (err instanceof ToolInputError) return { content: err.message, isError: true };
+    if (err instanceof CapabilityDeniedError || err instanceof CapabilityUnavailableError) return { content: err.message, isError: true };
     console.error(`[tool ${name}] failed`, err);
     return { content: `Tool ${name} failed: ${(err as Error).message ?? "unknown error"}`, isError: true };
   }
