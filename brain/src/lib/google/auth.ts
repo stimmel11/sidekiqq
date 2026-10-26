@@ -18,6 +18,9 @@ export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/drive.readonly",
+  // contacts.lookup (lib/google/contacts.ts): saved contacts + Gmail's auto-created "Other contacts". Read-only.
+  "https://www.googleapis.com/auth/contacts.readonly",
+  "https://www.googleapis.com/auth/contacts.other.readonly",
 ] as const;
 
 const AAD = "sidekiqq:google-refresh-token:v1";

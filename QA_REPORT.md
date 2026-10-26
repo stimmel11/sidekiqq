@@ -146,8 +146,8 @@ No Kotlin changes were needed.
 - [ ] **Google Cloud OAuth:**
   - Use a Web client.
   - Set the redirect URI to exactly `${APP_URL}/api/google/callback`.
-  - Enable the Gmail, Calendar and Drive APIs.
-  - Consent screen scopes: `gmail.readonly`, `gmail.compose`, `calendar.readonly`, `drive.readonly`, `openid` and `email`.
+  - Enable the Gmail, Calendar, Drive and People APIs.
+  - Consent screen scopes: `gmail.readonly`, `gmail.compose`, `calendar.readonly`, `drive.readonly`, `contacts.readonly`, `contacts.other.readonly`, `openid` and `email`.
   - Publish the app out of "Testing", or refresh tokens expire after 7 days.
   - Connect with `POST /api/google/connect` and open the returned link.
 - [ ] **Upstash:**

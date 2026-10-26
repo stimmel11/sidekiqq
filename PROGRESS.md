@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 264 tests passing. Connector framework slice 1 and task layer slice 1 (`/api/commands`) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 312 tests passing. Connector framework slice 1, task layer slice 1 (`/api/commands`) and the Google Contacts lookup module in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -28,6 +28,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-22: Apple support started (`crew/apple-ios`): `docs/APPLE.md`, the `apple/SideKiqqKit` Swift package with tests, and the SwiftUI iPhone app (pairing, Today, Follow-ups, Commitments, Drafts confirm sheet, Talk voice loop, CoreBluetooth medallion with state restoration, alert polling). The voice read-back now includes recipient, subject and a one-sentence body summary. Not compiled yet (no toolchain in the sandbox).
 - 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 - 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
+- 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 
 ## Backlog (top = next)
 
@@ -47,6 +48,8 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [ ] Slice 3: Reachy app polls `/api/commands` alongside `/api/alerts` and handles `reachy_wake` (chat/brief/dance/game).
   - [ ] Slice 4: FCM data nudge `kind: "command"` to the target device (phone must ignore it as a notification), and handoffs from `invokeCapability` (`user_finishes` tier, after the connector-framework PR lands).
 - [ ] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
+  - [x] Slice 1: `brain/src/lib/google/contacts.ts` (People API lookup of saved + Other contacts, warm-up, name ranking, ambiguity returned, cleaned emails/phones) and the two read-only scopes. Tested with a fake People API.
+  - [ ] Slice 2 (connector framework is now on main): register it as `contacts.lookup` on the `google` connector, add the Claude tool `lookup_contact`, and wire it into `deps`.
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
