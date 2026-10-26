@@ -1,0 +1,57 @@
+# XcodeGen spec for the SideKiqq iPhone app. Generate the project on a Mac:
+#   brew install xcodegen && cd apple && xcodegen generate && open SideKiqq.xcodeproj
+# The .xcodeproj and Info.plist are generated: don't commit them (see .gitignore).
+name: SideKiqq
+options:
+  bundleIdPrefix: com.sidekiqq
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"            # Swift 5 language mode (toolchain 5.10+ / Xcode 15.3+)
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""            # set your Apple Developer Team ID (or pick it in Xcode > Signing)
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  SideKiqqKit:
+    path: SideKiqqKit
+
+targets:
+  SideKiqq:
+    type: application
+    platform: iOS
+    sources:
+      - path: SideKiqq/Sources
+      - path: SideKiqq/Resources
+    dependencies:
+      - package: SideKiqqKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sidekiqq.ios
+        PRODUCT_NAME: SideKiqq
+        TARGETED_DEVICE_FAMILY: "1"   # iPhone
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: SideKiqq/Info.plist
+      properties:
+        CFBundleDisplayName: SideKiqq
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        ITSAppUsesNonExemptEncryption: false
+        # Permission strings (shown in the system prompts).
+        NSMicrophoneUsageDescription: "SideKiqq listens only after you tap Talk, so you can ask your assistant a question. The recording is sent to your SideKiqq brain to be transcribed."
+        NSSpeechRecognitionUsageDescription: "SideKiqq can recognize short replies like \"send it\" on your iPhone so confirmations are fast and stay on the device."
+        NSBluetoothAlwaysUsageDescription: "SideKiqq connects to your SideKiqq medallion over Bluetooth so you can talk to your assistant by pressing it, even when your iPhone is in your pocket."
+        # Background: medallion BLE (with state restoration), speaking replies, alert refresh.
+        UIBackgroundModes: [bluetooth-central, audio, fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.sidekiqq.alerts.refresh]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true   # http:// to a dev brain on the LAN; everything else must be https
+    # Push Notifications (aps-environment) is added once the brain can deliver via APNs. See docs/APPLE.md.
+    scheme: {}
+
