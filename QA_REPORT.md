@@ -8,7 +8,7 @@ Independent review of `/brain` and the contract surface of `/android/shared`, pl
 
 The no-send invariant holds.
 
-- Only `brain/src/lib/google/sender.ts` calls `gmail.users.drafts.send`, and only `brain/src/app/api/drafts/[id]/approve/route.ts` reaches it, through `deps.mailSender()`. A static source scan in `test/no-send.test.ts` enforces this.
+- Only `brain/src/lib/connectors/google/send.ts` calls `gmail.users.drafts.send` (moved from `lib/google/sender.ts` on 2026-10-23), and only `brain/src/app/api/drafts/[id]/approve/route.ts` reaches it, through the sender registry `deps.senders()`. A static source scan in `test/no-send.test.ts` enforces this.
 - None of the 12 Claude tools in `brain/src/lib/assistant/tools.ts` can send. `create_email_draft` only calls `Workspace.createDraft`, and the `Workspace` interface has no send method. If the model names an unknown tool such as `send_email`, it gets an error result.
 - The approve route requires a device token and a draft that is still `pending`. A per-draft NX lock stops a double-tap from sending twice, the status is re-checked under the lock, and a Gmail draft that no longer exists returns 410.
 

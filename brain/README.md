@@ -61,7 +61,7 @@ alerts use high priority.
   them with timeline events and pushes for CRITICAL/HIGH mail and overdue commitments (once per commitment per day).
   Messages are de-duplicated, failures are retried on the next run, and a Redis lock prevents overlapping runs.
 - **Safety**: nothing is sent automatically. The `Workspace` interface (read + draft) has no send method. Sending lives in
-  `src/lib/google/sender.ts` and is reachable only from `/api/drafts/:id/approve`, which checks that the draft exists and
+  `src/lib/connectors/google/send.ts` (registered in the sender registry `src/lib/connectors/senders.ts`) and is reachable only from `/api/drafts/:id/approve`, which checks that the draft exists and
   is `pending`, takes a per-draft lock against double taps, and confirms the Gmail draft still exists.
   `test/no-send.test.ts` fails if any other file gains a send primitive.
 - **Google tokens**: the refresh token is encrypted with AES-256-GCM (`TOKEN_ENCRYPTION_KEY`, AAD-bound) in Redis.

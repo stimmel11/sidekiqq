@@ -3,6 +3,7 @@ import type { Deps } from "../deps";
 import { config } from "../env";
 import { GoogleNotConnectedError } from "../google/auth";
 import type { CalendarEvent } from "../google/workspace";
+import { invokeCapability } from "../connectors/invoke";
 import { structuredCall } from "../assistant/llm";
 import { formatNow, systemBlocks } from "../assistant/prompt";
 import {
@@ -54,8 +55,7 @@ async function snapshot(deps: Deps, kind: BriefKind): Promise<Snapshot> {
 
   let calendar: CalendarEvent[] | null = null;
   try {
-    const ws = await deps.workspace();
-    calendar = await ws.listCalendarEvents({ timeMin: now.toISOString(), timeMax: calEnd.toISOString(), maxResults: 25 });
+    calendar = await invokeCapability(deps, "calendar.read", { timeMin: now.toISOString(), timeMax: calEnd.toISOString(), max: 25 }, { caller: "brief" });
   } catch (err) {
     if (!(err instanceof GoogleNotConnectedError)) console.warn("[brief] calendar unavailable", err);
   }
