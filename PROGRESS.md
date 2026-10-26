@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 242 tests passing. Connector framework slice 1 in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 264 tests passing. Connector framework slice 1 and task layer slice 1 (`/api/commands`) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -27,6 +27,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-22: Connectors design written (`docs/CONNECTORS.md`, branch `crew/connectors-design`): capabilities, brain as MCP client, per-connector encrypted OAuth with minimal scopes, auto/confirm/user-finishes policy; confirm actions become Drafts so approve stays the only executor.
 - 2026-10-22: Apple support started (`crew/apple-ios`): `docs/APPLE.md`, the `apple/SideKiqqKit` Swift package with tests, and the SwiftUI iPhone app (pairing, Today, Follow-ups, Commitments, Drafts confirm sheet, Talk voice loop, CoreBluetooth medallion with state restoration, alert polling). The voice read-back now includes recipient, subject and a one-sentence body summary. Not compiled yet (no toolchain in the sandbox).
 - 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
+- 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
 
 ## Backlog (top = next)
 
@@ -41,6 +42,10 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [ ] Slice 3: Draft `kind`/`connectorId`/`readback` (code-built readback as `Action.summary`), `email.draft` creating the Draft record, `ARCHITECTURE.md` + TS + Kotlin `Draft` model, `GET /api/drafts` fields.
   - [ ] Slice 4: `/api/connections` routes + dashboard Connections screen; `search_email` tool rename with alias.
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.
+  - [x] Slice 1 (brain + contract): per-device queue, `POST/GET /api/commands`, `POST /api/commands/:id/ack`, kinds `open_url` / `call_contact` / `reachy_wake`, URL allowlist, number rules, 15-min expiry, Kotlin models + client (unverified). Delivery is polling only.
+  - [ ] Slice 2: phone app polls `GET /api/commands` (and on app open), shows a hand-off screen (label + number/URL on its own line), opens only on tap (`ACTION_DIAL`, WhatsApp, browser), then acks. Watch: "call <name> on my phone" via `createCommand`.
+  - [ ] Slice 3: Reachy app polls `/api/commands` alongside `/api/alerts` and handles `reachy_wake` (chat/brief/dance/game).
+  - [ ] Slice 4: FCM data nudge `kind: "command"` to the target device (phone must ignore it as a notification), and handoffs from `invokeCapability` (`user_finishes` tier, after the connector-framework PR lands).
 - [ ] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
