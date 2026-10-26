@@ -131,8 +131,8 @@ from its settings page (port 8042); an on-device wake word is optional and off b
 streamed to the cloud. Draft approval uses the same "send it" rule and still goes only through `/api/drafts/:id/approve`.
 
 ## Connectors
-Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (design, not yet
-implemented): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (framework
+slice 1 implemented: every Gmail/Calendar/Drive call goes through `invokeCapability` and its fixed policy table): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
 `/api/drafts/:id/approve` stays the only executor.
 
 ## Auth

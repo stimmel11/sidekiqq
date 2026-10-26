@@ -2,12 +2,12 @@
 
 This file is the build crew's memory. Every session (human or bot) reads it first and updates it last.
 
-## Module status (as of 2026-10-21)
+## Module status (as of 2026-10-22)
 
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 235 tests passing. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 264 tests passing. Connector framework slice 1 and task layer slice 1 (`/api/commands`) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -15,6 +15,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Reachy Mini app (`/reachy`) | Written, tested off-robot | Python `sidekiqq_reachy` ReachyMiniApp (HF Space). 88 pytest tests pass, including integration against the real reachy-mini 1.12.0 SDK classes with a fake robot. `reachy-mini-app-assistant check` passes its structure checks; its venv install step can't run here (PyGObject). Never run on hardware. |
 | Marketing site (`/site`) | Built, not deployed | Astro 7 + Tailwind, static. Home, /devices, /privacy-and-trust, /blog, 404. Copy in `site/src/content/`; see `site/EDITING.md`. |
 | UI framework (`/design` + owner dashboard `brain/src/app/(dashboard)`) | Done, tested | Tokens → CSS vars, Tailwind preset, Compose theme (`design/build.mjs`). Dashboard: login (SESSION_SECRET cookie), Today, Follow-ups, Drafts (approve via the existing approve route), Commitments, Devices. Compose theme not compiled yet. |
+| Apple (`/apple`) | Written, not compiled | `SideKiqqKit` Swift package (client, models, Keychain token store, WAV, medallion protocol + assembler, `DraftConfirmation`, voice loop) with XCTest suites, and the SwiftUI iPhone app (XcodeGen). No Swift toolchain or Xcode in the sandbox, so `swift test` and the app build have not run yet. iPhone pairs as `phone`; alerts via `/api/alerts` polling until APNs. See `docs/APPLE.md`. |
 | QA review | Round 1 done | `QA_REPORT.md`. 8 issues fixed, 6 open (below). |
 
 ## History
@@ -24,6 +25,8 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-21: Marketing site built in `/site` (branch `crew/marketing-site`): Astro + Tailwind, schema-checked content, waitlist with mailto fallback.
 - 2026-10-21: UI framework: `/design` tokens + generator (CSS, Tailwind preset, Compose theme), owner web dashboard in the brain with signed-session login. Tagline changed to "SideKiqq, it goes where you go."
 - 2026-10-22: Connectors design written (`docs/CONNECTORS.md`, branch `crew/connectors-design`): capabilities, brain as MCP client, per-connector encrypted OAuth with minimal scopes, auto/confirm/user-finishes policy; confirm actions become Drafts so approve stays the only executor.
+- 2026-10-22: Apple support started (`crew/apple-ios`): `docs/APPLE.md`, the `apple/SideKiqqKit` Swift package with tests, and the SwiftUI iPhone app (pairing, Today, Follow-ups, Commitments, Drafts confirm sheet, Talk voice loop, CoreBluetooth medallion with state restoration, alert polling). The voice read-back now includes recipient, subject and a one-sentence body summary. Not compiled yet (no toolchain in the sandbox).
+- 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 - 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
 
 ## Backlog (top = next)
@@ -34,6 +37,10 @@ Bots take the first unchecked item that is NOT tagged `[needs-human]`.
 SideKiqq should connect to any email, video and grocery service, and run tasks started from any device.
 - [x] Design `docs/CONNECTORS.md`: capability interfaces (`email.send`, `email.read`, `contacts.lookup`, `video.start`, `grocery.cart`, `calendar.*`), the brain as an MCP client, per-connector OAuth with encrypted token storage and minimal scopes, and a per-capability safety policy enforced by the brain (auto / confirm / user-finishes). No connector can bypass draft approval.
 - [ ] Brain: implement the connector framework from that doc + a "Connections" screen in the dashboard. Move Gmail/Calendar/Drive onto it.
+  - [x] Slice 1 (`crew/connector-framework`): capabilities + `POLICY`, `invokeCapability` (caller rules, audit log), `google` connector, sender registry (`lib/connectors/google/send.ts`), all Gmail/Calendar/Drive callers moved off `deps.workspace()`, no-send scan generalised.
+  - [ ] Slice 2: `ConnectionStore` (AAD per connector, PKCE, key rotation) + Google token migration + per-connection enabled capabilities.
+  - [ ] Slice 3: Draft `kind`/`connectorId`/`readback` (code-built readback as `Action.summary`), `email.draft` creating the Draft record, `ARCHITECTURE.md` + TS + Kotlin `Draft` model, `GET /api/drafts` fields.
+  - [ ] Slice 4: `/api/connections` routes + dashboard Connections screen; `search_email` tool rename with alias.
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.
   - [x] Slice 1 (brain + contract): per-device queue, `POST/GET /api/commands`, `POST /api/commands/:id/ack`, kinds `open_url` / `call_contact` / `reachy_wake`, URL allowlist, number rules, 15-min expiry, Kotlin models + client (unverified). Delivery is polling only.
   - [ ] Slice 2: phone app polls `GET /api/commands` (and on app open), shows a hand-off screen (label + number/URL on its own line), opens only on tap (`ACTION_DIAL`, WhatsApp, browser), then acks. Watch: "call <name> on my phone" via `createCommand`.
@@ -50,11 +57,13 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 
 ### Apple support (owner request, 2026-10-21)
 Same brain and API contract; Apple devices are thin clients like the Android ones. Swift/SwiftUI in a new `/apple` folder (one Xcode project, shared `SideKiqqKit` Swift package mirroring `android/shared`).
-- [ ] Design `docs/APPLE.md`: targets, shared Swift client + models generated or mirrored from `ARCHITECTURE.md`, pairing, push, which Android features map to which Apple APIs, and App Store / TestFlight path.
-- [ ] Brain: Apple push (APNs) alongside FCM, either via FCM's APNs bridge or direct APNs with a token-based key. Device kinds for `iphone`, `apple_watch`, `mac` in TS + Kotlin models + `ARCHITECTURE.md`.
-- [ ] `SideKiqqKit` Swift package: API client, models, Keychain token store, and unit tests (runs on macOS CI).
-- [ ] iPhone app: pairing, Today/Top 5, follow-ups, commitments, drafts with confirm-to-send, push alerts, and the voice loop (record → `/api/transcribe` → `/api/ask` → spoken reply via AirPods or speaker).
-- [ ] iPhone: medallion support over CoreBluetooth (same GATT protocol as the Android phone), including background BLE restoration.
+- [x] Design `docs/APPLE.md`: targets, shared Swift client + models generated or mirrored from `ARCHITECTURE.md`, pairing, push, which Android features map to which Apple APIs, and App Store / TestFlight path.
+- [ ] Brain: `iphone` device kind (later `apple_watch`, `mac`) in `DEVICE_KINDS` (TS), the Kotlin `Device` enum and `ARCHITECTURE.md`; keep accepting `phone` from already-paired iPhones. Then switch `DeviceKind.thisIPhone` in `apple/SideKiqqKit` to `"iphone"`. See `docs/APPLE.md` › What the brain needs.
+- [ ] Brain: APNs delivery alongside FCM in `lib/push` (`deliverAlert`). Recommended: direct APNs over HTTP/2 with a token-based `.p8` key (`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID=com.sidekiqq.ios`, `APNS_ENV`). Register via `POST /api/devices/register` (decide `fcmToken` → `pushToken` or add `transport: "apns"`), clear tokens on 410, with tests. Then switch the iPhone from `LocalNotificationsOnly` to `APNsPushRegistrar`. Until then the iPhone polls `/api/alerts`.
+- [ ] Brain (optional): `GET /api/drafts/:id` so devices can fetch one draft for the voice read-back instead of listing all pending drafts.
+- [ ] `SideKiqqKit` Swift package: API client, models, Keychain token store, and unit tests (runs on macOS CI). **Partial (2026-10-22):** written with XCTest suites (models vs brain-shaped fixtures, client vs a mock URLProtocol, WAV, assembler, `DraftConfirmation`, voice loop); not yet run, since the sandbox can't download a Swift toolchain. Remaining: run `swift test` on a Mac or Linux with Swift 5.10+, fix what breaks, and add a CI job.
+- [ ] iPhone app: pairing, Today/Top 5, follow-ups, commitments, drafts with confirm-to-send, push alerts, and the voice loop (record → `/api/transcribe` → `/api/ask` → spoken reply via AirPods or speaker). **Partial (2026-10-22):** all screens and the voice loop written in `apple/SideKiqq` (XcodeGen `project.yml`); alerts come from `/api/alerts` polling + local notifications until APNs exists. Never compiled. Remaining: first Xcode build on a real iPhone (`[needs-human]` item below), app icon.
+- [ ] iPhone: medallion support over CoreBluetooth (same GATT protocol as the Android phone), including background BLE restoration. **Partial (2026-10-22):** `MedallionManager` written (scan by service UUID, notifications, reassembly, 0x10/0x11/0x12, state restoration, reconnect). Remaining: test with real hardware, especially press-to-talk from the lock screen and starting audio playback from the background.
 - [ ] Siri + Shortcuts via App Intents: "Hey Siri, ask SideKiqq…", "…what's my brief", "…who do I need to follow up with". Drafts still need an explicit confirmation step.
 - [ ] Apple Watch app: Top 5, follow-ups, dictate a question, approve drafts with two taps, complications and Smart Stack widget, haptic for CRITICAL alerts.
 - [ ] CarPlay: communication-style experience with voice-first alerts and replies, plus the same driving-mode rules as Android Auto.

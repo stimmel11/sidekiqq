@@ -1,5 +1,6 @@
 import type { KV } from "../kv";
 import { AlertsRepo } from "./alerts";
+import { AuditRepo } from "./audit";
 import { ClientsRepo } from "./clients";
 import { CommandsRepo } from "./commands";
 import { CommitmentsRepo } from "./commitments";
@@ -25,6 +26,7 @@ export interface Repos {
   state: StateRepo;
   alerts: AlertsRepo;
   commands: CommandsRepo;
+  audit: AuditRepo;
 }
 
 export interface RepoOptions {
@@ -51,7 +53,8 @@ export function createRepos(kv: KV, o: RepoOptions): Repos {
     state: new StateRepo(kv, o.prefix),
     alerts: new AlertsRepo(kv, o.prefix, clock, o.alertRetentionDays ?? 7),
     commands: new CommandsRepo(kv, o.prefix, clock),
+    audit: new AuditRepo(kv, o.prefix, clock),
   };
 }
 
-export { AlertsRepo, ClientsRepo, CommandsRepo, CommitmentsRepo, ConversationsRepo, DecisionsRepo, DevicesRepo, DraftsRepo, FollowUpsRepo, PairingRepo, StateRepo, TimelineRepo };
+export { AlertsRepo, AuditRepo, ClientsRepo, CommandsRepo, CommitmentsRepo, ConversationsRepo, DecisionsRepo, DevicesRepo, DraftsRepo, FollowUpsRepo, PairingRepo, StateRepo, TimelineRepo };
