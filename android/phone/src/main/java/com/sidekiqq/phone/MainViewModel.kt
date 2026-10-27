@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.sidekiqq.phone.handoff.CommandInbox
 import com.sidekiqq.phone.push.SideKiqqMessagingService
 import com.sidekiqq.shared.SideKiqqApiException
 import com.sidekiqq.shared.SideKiqqClient
@@ -12,11 +13,14 @@ import com.sidekiqq.shared.model.AskResponse
 import com.sidekiqq.shared.model.Brief
 import com.sidekiqq.shared.model.BriefKind
 import com.sidekiqq.shared.model.Commitment
+import com.sidekiqq.shared.model.CommandResult
 import com.sidekiqq.shared.model.CommitmentStatus
 import com.sidekiqq.shared.model.Device
+import com.sidekiqq.shared.model.DeviceCommand
 import com.sidekiqq.shared.model.FollowUp
 import com.sidekiqq.shared.model.Top5Response
 import com.sidekiqq.shared.wear.WearReply
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +44,8 @@ data class UiState(
     val lastAnswer: AskResponse? = null,
     val lastQuestion: String? = null,
     val snackbar: String? = null,
+    /** Hand-offs queued for this phone (GET /api/commands), oldest first. Shown; acted on only after a tap. */
+    val handoffs: List<DeviceCommand> = emptyList(),
 )
 
 enum class TalkState { Idle, Listening, Thinking, Speaking }
@@ -52,6 +58,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private var conversationId: String? = null
+
+    private val inbox = CommandInbox()
+    private var lastPolledCommands: List<DeviceCommand> = emptyList()
+    private var pollJob: Job? = null
 
     init {
         if (store.isPaired) refreshAll()
@@ -103,6 +113,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         store.clear()
         viewModelScope.launch { app.wearRelay.clearConfig() }
         conversationId = null
+        pollJob?.cancel()
+        lastPolledCommands = emptyList()
         _ui.value = UiState(paired = false)
     }
 
@@ -121,8 +133,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val (t, f, cm) = Triple(top.await(), fus.await(), cms.await())
                     _ui.update { it.copy(top5 = t, followUps = f, commitments = cm, loading = false) }
                 }
+                pollCommands()
             } catch (e: Exception) {
                 fail(e, "Refresh")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ device commands (hand-offs)
+
+    /**
+     * Polls GET /api/commands. Called on app start/resume and every 30 s while the app is visible
+     * (MainActivity). Polling only shows hand-offs; nothing is opened until the owner taps.
+     * Failures are logged, not shown: a missed poll just means the next one picks it up.
+     */
+    fun pollCommands() {
+        val c = client() ?: return
+        if (pollJob?.isActive == true) return
+        pollJob = viewModelScope.launch {
+            try {
+                val polled = c.commands()
+                lastPolledCommands = polled
+                _ui.update { it.copy(handoffs = inbox.visible(polled)) }
+            } catch (e: Exception) {
+                Log.w(TAG, "Poll commands", e)
+            }
+        }
+    }
+
+    /**
+     * Claims a hand-off the owner just tapped (open or dismiss) and hides it at once. Returns false
+     * if it was already handled, so a double tap can't open it twice. Call before acting on it.
+     */
+    fun claimHandoff(cmd: DeviceCommand): Boolean {
+        val first = inbox.markHandled(cmd.id)
+        _ui.update { it.copy(handoffs = inbox.visible(lastPolledCommands)) }
+        return first
+    }
+
+    /**
+     * Acks a claimed hand-off. MainActivity sends OPENED only after the owner tapped the open
+     * button and the intent started, FAILED if no app could open it, DISMISSED for Dismiss.
+     */
+    fun ackHandoff(cmd: DeviceCommand, result: CommandResult) {
+        val c = client() ?: return
+        viewModelScope.launch {
+            try {
+                c.ackCommand(cmd.id, result)
+            } catch (e: SideKiqqApiException) {
+                // 404 gone/not ours, 409 already acked differently, 410 expired: nothing to do.
+                Log.w(TAG, "Ack command ${cmd.id} -> ${e.status}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Ack command ${cmd.id}", e)
             }
         }
     }
