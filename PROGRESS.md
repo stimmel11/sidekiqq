@@ -28,6 +28,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-22: Apple support started (`crew/apple-ios`): `docs/APPLE.md`, the `apple/SideKiqqKit` Swift package with tests, and the SwiftUI iPhone app (pairing, Today, Follow-ups, Commitments, Drafts confirm sheet, Talk voice loop, CoreBluetooth medallion with state restoration, alert polling). The voice read-back now includes recipient, subject and a one-sentence body summary. Not compiled yet (no toolchain in the sandbox).
 - 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 - 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
+- 2026-10-27: Task layer slice 2a (`crew/phone-handoffs`): phone polls device commands and shows tap-to-act hand-offs (dialer/WhatsApp/browser) with acks. Android unverified; 9 handoff JVM tests pass via kotlinc.
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 
 ## Backlog (top = next)
@@ -44,7 +45,8 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [ ] Slice 4: `/api/connections` routes + dashboard Connections screen; `search_email` tool rename with alias.
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.
   - [x] Slice 1 (brain + contract): per-device queue, `POST/GET /api/commands`, `POST /api/commands/:id/ack`, kinds `open_url` / `call_contact` / `reachy_wake`, URL allowlist, number rules, 15-min expiry, Kotlin models + client (unverified). Delivery is polling only.
-  - [ ] Slice 2: phone app polls `GET /api/commands` (and on app open), shows a hand-off screen (label + number/URL on its own line), opens only on tap (`ACTION_DIAL`, WhatsApp, browser), then acks. Watch: "call <name> on my phone" via `createCommand`.
+  - [x] Slice 2a (`crew/phone-handoffs`, unverified: Android not compiled): phone polls `GET /api/commands` on open and every 30 s while visible, shows a hand-off dialog (label + number/URL on its own line), opens only on tap (`ACTION_DIAL`, WhatsApp `wa.me`, browser), then acks; re-checks number/URL allowlist on the phone, re-sends lost acks, clears stale hand-offs when backgrounded or offline > 60 s, tap guard. Pure logic in `phone/handoff/HandoffPlan.kt` with JVM tests.
+  - [ ] Slice 2b: Watch "call <name> on my phone" via `createCommand` (needs the number: wait for `contacts.lookup` slice 2, or a spoken number). Optional: persist handled ids across process death; percent-encode `{ } | ^` in query strings that `java.net.URI` rejects.
   - [ ] Slice 3: Reachy app polls `/api/commands` alongside `/api/alerts` and handles `reachy_wake` (chat/brief/dance/game).
   - [ ] Slice 4: FCM data nudge `kind: "command"` to the target device (phone must ignore it as a notification), and handoffs from `invokeCapability` (`user_finishes` tier, after the connector-framework PR lands).
 - [ ] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.

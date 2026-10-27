@@ -1,6 +1,7 @@
 package com.sidekiqq.phone
 
 import android.app.Application
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -62,6 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val inbox = CommandInbox()
     private var lastPolledCommands: List<DeviceCommand> = emptyList()
     private var pollJob: Job? = null
+    private var lastOkPollAt = 0L // SystemClock.elapsedRealtime(), not the wall clock
 
     init {
         if (store.isPaired) refreshAll()
@@ -154,19 +156,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val polled = c.commands()
                 lastPolledCommands = polled
+                lastOkPollAt = SystemClock.elapsedRealtime()
                 _ui.update { it.copy(handoffs = inbox.visible(polled)) }
+                // Handled here but still listed: the earlier ack was lost. Same result again is a no-op.
+                inbox.unackedHandled(polled).forEach { (id, result) -> sendAck(c, id, result) }
             } catch (e: Exception) {
                 Log.w(TAG, "Poll commands", e)
+                // Liveness comes from the brain. If we can't confirm it for a while, stop showing them.
+                if (SystemClock.elapsedRealtime() - lastOkPollAt > STALE_COMMANDS_MS) clearCommands()
             }
         }
+    }
+
+    /** The app went to the background: hand-offs shown later must come from a fresh poll. */
+    fun onCommandsHidden() {
+        pollJob?.cancel()
+        clearCommands()
+    }
+
+    private fun clearCommands() {
+        lastPolledCommands = emptyList()
+        _ui.update { it.copy(handoffs = emptyList()) }
     }
 
     /**
      * Claims a hand-off the owner just tapped (open or dismiss) and hides it at once. Returns false
      * if it was already handled, so a double tap can't open it twice. Call before acting on it.
      */
-    fun claimHandoff(cmd: DeviceCommand): Boolean {
-        val first = inbox.markHandled(cmd.id)
+    fun claimHandoff(cmd: DeviceCommand, intended: CommandResult): Boolean {
+        val first = inbox.markHandled(cmd.id, intended)
         _ui.update { it.copy(handoffs = inbox.visible(lastPolledCommands)) }
         return first
     }
@@ -176,15 +194,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * button and the intent started, FAILED if no app could open it, DISMISSED for Dismiss.
      */
     fun ackHandoff(cmd: DeviceCommand, result: CommandResult) {
+        inbox.setResult(cmd.id, result)
         val c = client() ?: return
+        sendAck(c, cmd.id, result)
+    }
+
+    private fun sendAck(c: SideKiqqClient, id: String, result: CommandResult) {
         viewModelScope.launch {
             try {
-                c.ackCommand(cmd.id, result)
+                c.ackCommand(id, result)
             } catch (e: SideKiqqApiException) {
                 // 404 gone/not ours, 409 already acked differently, 410 expired: nothing to do.
-                Log.w(TAG, "Ack command ${cmd.id} -> ${e.status}")
+                Log.w(TAG, "Ack command $id -> ${e.status}")
             } catch (e: Exception) {
-                Log.w(TAG, "Ack command ${cmd.id}", e)
+                // Network: re-sent on the next poll while the brain still lists it.
+                Log.w(TAG, "Ack command $id", e)
             }
         }
     }
@@ -306,5 +330,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private companion object { const val TAG = "SideKiqqVM" }
+    private companion object {
+        const val TAG = "SideKiqqVM"
+        const val STALE_COMMANDS_MS = 60_000L
+    }
 }

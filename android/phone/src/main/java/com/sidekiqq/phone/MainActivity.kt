@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -42,6 +43,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -92,9 +94,14 @@ class MainActivity : ComponentActivity() {
         // Delivery is polling only for now (FCM nudge is a later slice).
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (isActive) {
-                    vm.pollCommands()
-                    delay(COMMAND_POLL_MS)
+                try {
+                    while (isActive) {
+                        vm.pollCommands()
+                        delay(COMMAND_POLL_MS)
+                    }
+                } finally {
+                    // Never show a hand-off from before the app was backgrounded; wait for a fresh poll.
+                    vm.onCommandsHidden()
                 }
             }
         }
@@ -117,6 +124,8 @@ class MainActivity : ComponentActivity() {
         private const val COMMAND_POLL_MS = 30_000L
     }
 }
+
+private const val HANDOFF_TAP_GUARD_MS = 600L
 
 enum class Tab(val label: String) { HOME("Home"), FOLLOWUPS("Follow-ups"), COMMITMENTS("Commitments"), BRIEF("Brief") }
 
@@ -259,19 +268,33 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
         )
     }
     // ---- Hand-offs: shown one at a time; opened ONLY from the dialog's button ----
-    state.handoffs.firstOrNull()?.let { cmd ->
-        val plan = Handoffs.planFor(cmd)
-        HandoffDialog(
-            command = cmd,
-            plan = plan,
-            onOpen = open@{
-                if (!vm.claimHandoff(cmd)) return@open
-                val opened = openHandoff(ctx, plan)
-                vm.ackHandoff(cmd, if (opened) CommandResult.OPENED else CommandResult.FAILED)
-                if (!opened) scope.launch { snackbar.showSnackbar("No app on this phone could open that.") }
-            },
-            onDismiss = { if (vm.claimHandoff(cmd)) vm.ackHandoff(cmd, CommandResult.DISMISSED) },
-        )
+    // Not while a send-confirm dialog is open, so a tap meant for one can't land on the other.
+    val handoff = state.handoffs.firstOrNull()
+    if (handoff != null && approveFollowUp == null && approveAction == null) {
+        key(handoff.id) {
+            val cmd = handoff
+            val plan = remember { Handoffs.planFor(cmd) }
+            // Ignore taps right after a dialog appears (a pop-up under the finger, or the next
+            // queued hand-off replacing the one just tapped).
+            val shownAt = remember { SystemClock.uptimeMillis() }
+            val settled = { SystemClock.uptimeMillis() - shownAt >= HANDOFF_TAP_GUARD_MS }
+            HandoffDialog(
+                command = cmd,
+                plan = plan,
+                onOpen = open@{
+                    if (!settled() || !vm.claimHandoff(cmd, CommandResult.OPENED)) return@open
+                    val opened = openHandoff(ctx, plan)
+                    vm.ackHandoff(cmd, if (opened) CommandResult.OPENED else CommandResult.FAILED)
+                    if (!opened) scope.launch { snackbar.showSnackbar("No app on this phone could open that.") }
+                },
+                onDismiss = dismiss@{
+                    if (!settled()) return@dismiss
+                    // A hand-off this phone can't run is reported as failed, not as the owner's choice.
+                    val result = if (plan is HandoffPlan.CantOpen) CommandResult.FAILED else CommandResult.DISMISSED
+                    if (vm.claimHandoff(cmd, result)) vm.ackHandoff(cmd, result)
+                },
+            )
+        }
     }
     approveAction?.let { a ->
         ApproveDraftDialog(

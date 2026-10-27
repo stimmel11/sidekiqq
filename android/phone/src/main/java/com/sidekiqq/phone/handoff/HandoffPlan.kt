@@ -2,6 +2,7 @@ package com.sidekiqq.phone.handoff
 
 import com.sidekiqq.shared.model.CallApp
 import com.sidekiqq.shared.model.CommandKind
+import com.sidekiqq.shared.model.CommandResult
 import com.sidekiqq.shared.model.DeviceCommand
 import java.net.URI
 
@@ -94,16 +95,34 @@ object Handoffs {
  * still be in flight, or failed and the brain still lists them) and drops kinds the phone doesn't run.
  */
 class CommandInbox(private val maxRemembered: Int = 200) {
-    private val handled = LinkedHashSet<String>()
+    /** id -> what the owner chose, so a failed ack can be re-sent. Insertion-ordered for the cap. */
+    private val handled = LinkedHashMap<String, CommandResult>()
 
-    /** Marks [id] handled. Returns false if it already was (a second tap must not open it again). */
+    /**
+     * Marks [id] handled with [result]. Returns false if it already was (a second tap must not act
+     * again; the first result stands).
+     */
     @Synchronized
-    fun markHandled(id: String): Boolean {
+    fun markHandled(id: String, result: CommandResult): Boolean {
         if (id in handled) return false
-        handled.add(id)
-        while (handled.size > maxRemembered) handled.remove(handled.first())
+        handled[id] = result
+        while (handled.size > maxRemembered) handled.remove(handled.keys.first())
         return true
     }
+
+    /** Sets the result of an already-claimed id (e.g. OPENED turned out FAILED: no app could open it). */
+    @Synchronized
+    fun setResult(id: String, result: CommandResult) {
+        if (id in handled) handled[id] = result
+    }
+
+    /**
+     * Acks to (re-)send: handled commands the brain still lists, so their earlier ack was lost.
+     * Re-sending the same result is a no-op on the brain.
+     */
+    @Synchronized
+    fun unackedHandled(polled: List<DeviceCommand>): List<Pair<String, CommandResult>> =
+        polled.mapNotNull { c -> handled[c.id]?.let { c.id to it } }.distinctBy { it.first }
 
     @Synchronized
     fun isHandled(id: String): Boolean = id in handled

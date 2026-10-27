@@ -1,5 +1,6 @@
 package com.sidekiqq.phone.handoff
 
+import com.sidekiqq.shared.model.CommandResult
 import com.sidekiqq.shared.model.DeviceCommand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -80,8 +81,8 @@ class HandoffPlanTest {
         val b = cmd("open_url", id = "b", url = "https://zoom.us/j/1")
         val r = cmd("reachy_wake", id = "r")
         assertEquals(listOf(a, b), inbox.visible(listOf(a, r, b, a)))
-        assertTrue(inbox.markHandled("a"))
-        assertFalse("second tap must not act again", inbox.markHandled("a"))
+        assertTrue(inbox.markHandled("a", CommandResult.OPENED))
+        assertFalse("second tap must not act again", inbox.markHandled("a", CommandResult.DISMISSED))
         assertTrue(inbox.isHandled("a"))
         assertEquals(listOf(b), inbox.visible(listOf(a, b)))
         // The brain is the source of truth: a command it stops listing is gone.
@@ -91,9 +92,26 @@ class HandoffPlanTest {
     @Test
     fun inboxForgetsOldestBeyondCap() {
         val inbox = CommandInbox(maxRemembered = 2)
-        inbox.markHandled("1"); inbox.markHandled("2"); inbox.markHandled("3")
+        inbox.markHandled("1", CommandResult.OPENED)
+        inbox.markHandled("2", CommandResult.OPENED)
+        inbox.markHandled("3", CommandResult.OPENED)
         assertFalse(inbox.isHandled("1"))
         assertTrue(inbox.isHandled("2"))
         assertTrue(inbox.isHandled("3"))
+    }
+
+    @Test
+    fun handledCommandsStillListedGetTheirAckResent() {
+        val inbox = CommandInbox()
+        val a = cmd("call_contact", id = "a", number = "5551234")
+        val b = cmd("open_url", id = "b", url = "https://zoom.us/j/1")
+        val c = cmd("open_url", id = "c", url = "https://zoom.us/j/2")
+        inbox.markHandled("a", CommandResult.OPENED)
+        inbox.markHandled("b", CommandResult.DISMISSED)
+        inbox.setResult("a", CommandResult.FAILED)
+        inbox.setResult("zzz", CommandResult.OPENED) // unknown id: ignored
+        assertFalse(inbox.isHandled("zzz"))
+        assertEquals(listOf("a" to CommandResult.FAILED, "b" to CommandResult.DISMISSED), inbox.unackedHandled(listOf(a, b, c, a)))
+        assertEquals(emptyList<Pair<String, CommandResult>>(), inbox.unackedHandled(listOf(c)))
     }
 }
