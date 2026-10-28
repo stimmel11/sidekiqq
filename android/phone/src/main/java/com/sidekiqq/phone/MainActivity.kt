@@ -1,10 +1,14 @@
 package com.sidekiqq.phone
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -39,6 +43,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,14 +53,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.sidekiqq.phone.glasses.GlassesActivity
 import com.sidekiqq.phone.glasses.GlassesSessionService
+import com.sidekiqq.phone.handoff.HandoffPlan
+import com.sidekiqq.phone.handoff.Handoffs
 import com.sidekiqq.phone.medallion.MedallionService
 import com.sidekiqq.phone.ui.ApproveDraftDialog
 import com.sidekiqq.phone.ui.BriefScreen
 import com.sidekiqq.phone.ui.CommitmentsScreen
 import com.sidekiqq.phone.ui.FollowUpsScreen
+import com.sidekiqq.phone.ui.HandoffDialog
 import com.sidekiqq.phone.ui.HomeScreen
 import com.sidekiqq.phone.ui.PairingScreen
 import com.sidekiqq.phone.ui.SectionCard
@@ -63,7 +74,10 @@ import com.sidekiqq.phone.ui.theme.SideKiqqTheme
 import com.sidekiqq.phone.voice.AudioCapture
 import com.sidekiqq.phone.voice.SpeechInput
 import com.sidekiqq.shared.model.Action
+import com.sidekiqq.shared.model.CommandResult
 import com.sidekiqq.shared.model.FollowUp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -76,6 +90,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         initialTab = tabFrom(intent)
         setContent { SideKiqqTheme { App(vm, initialTab) } }
+        // Hand-offs from other devices: poll on open/resume and every 30 s while visible.
+        // Delivery is polling only for now (FCM nudge is a later slice).
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                try {
+                    while (isActive) {
+                        vm.pollCommands()
+                        delay(COMMAND_POLL_MS)
+                    }
+                } finally {
+                    // Never show a hand-off from before the app was backgrounded; wait for a fresh poll.
+                    vm.onCommandsHidden()
+                }
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -92,8 +121,11 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_TAB = "open_tab"
+        private const val COMMAND_POLL_MS = 30_000L
     }
 }
+
+private const val HANDOFF_TAP_GUARD_MS = 600L
 
 enum class Tab(val label: String) { HOME("Home"), FOLLOWUPS("Follow-ups"), COMMITMENTS("Commitments"), BRIEF("Brief") }
 
@@ -235,6 +267,35 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
             onDismiss = { approveFollowUp = null },
         )
     }
+    // ---- Hand-offs: shown one at a time; opened ONLY from the dialog's button ----
+    // Not while a send-confirm dialog is open, so a tap meant for one can't land on the other.
+    val handoff = state.handoffs.firstOrNull()
+    if (handoff != null && approveFollowUp == null && approveAction == null) {
+        key(handoff.id) {
+            val cmd = handoff
+            val plan = remember { Handoffs.planFor(cmd) }
+            // Ignore taps right after a dialog appears (a pop-up under the finger, or the next
+            // queued hand-off replacing the one just tapped).
+            val shownAt = remember { SystemClock.uptimeMillis() }
+            val settled = { SystemClock.uptimeMillis() - shownAt >= HANDOFF_TAP_GUARD_MS }
+            HandoffDialog(
+                command = cmd,
+                plan = plan,
+                onOpen = open@{
+                    if (!settled() || !vm.claimHandoff(cmd, CommandResult.OPENED)) return@open
+                    val opened = openHandoff(ctx, plan)
+                    vm.ackHandoff(cmd, if (opened) CommandResult.OPENED else CommandResult.FAILED)
+                    if (!opened) scope.launch { snackbar.showSnackbar("No app on this phone could open that.") }
+                },
+                onDismiss = dismiss@{
+                    if (!settled()) return@dismiss
+                    // A hand-off this phone can't run is reported as failed, not as the owner's choice.
+                    val result = if (plan is HandoffPlan.CantOpen) CommandResult.FAILED else CommandResult.DISMISSED
+                    if (vm.claimHandoff(cmd, result)) vm.ackHandoff(cmd, result)
+                },
+            )
+        }
+    }
     approveAction?.let { a ->
         ApproveDraftDialog(
             recipient = null,
@@ -242,6 +303,26 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
             onConfirm = { vm.approveAnswerDraftConfirmed(a.id, a.summary); approveAction = null },
             onDismiss = { approveAction = null },
         )
+    }
+}
+
+/**
+ * Starts the app for a hand-off plan. Called only from the hand-off dialog's open button.
+ * Calls use ACTION_DIAL (the dialer opens pre-filled; the owner still taps Call), never ACTION_CALL.
+ * Returns false if nothing could handle it.
+ */
+private fun openHandoff(ctx: Context, plan: HandoffPlan): Boolean {
+    val intent = when (plan) {
+        is HandoffPlan.Dial -> Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", plan.number, null))
+        is HandoffPlan.WhatsApp -> Intent(Intent.ACTION_VIEW, Uri.parse(plan.url)).addCategory(Intent.CATEGORY_BROWSABLE)
+        is HandoffPlan.Browser -> Intent(Intent.ACTION_VIEW, Uri.parse(plan.url)).addCategory(Intent.CATEGORY_BROWSABLE)
+        is HandoffPlan.CantOpen -> return false
+    }
+    return try {
+        ctx.startActivity(intent)
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
     }
 }
 
