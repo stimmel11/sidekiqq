@@ -2,6 +2,7 @@ import type { Deps } from "../deps";
 import { config } from "../env";
 import type { EmailMessage } from "../google/workspace";
 import { GoogleNotConnectedError } from "../google/auth";
+import { ConnectionUnusableError } from "../connectors/types";
 import { readEmail } from "../connectors/invoke";
 import { structuredCall } from "../assistant/llm";
 import { deliverAlert } from "../push/alerts";
@@ -135,11 +136,11 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
   };
 
   const cron = { caller: "cron" } as const;
-  // Not connected fails fast (→ 409 in the route); any other profile error just loses the owner hint.
+  // Not connected / needs reconnect / email.read turned off fails fast (→ 409 in the route); any other profile error just loses the owner hint.
   const ownerEmail = await readEmail(deps, { op: "account" }, cron).then(
     (a) => a.email,
     (err: unknown) => {
-      if (err instanceof GoogleNotConnectedError) throw err;
+      if (err instanceof GoogleNotConnectedError || err instanceof ConnectionUnusableError) throw err;
       return undefined;
     },
   );

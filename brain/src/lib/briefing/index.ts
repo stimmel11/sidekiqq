@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Deps } from "../deps";
 import { config } from "../env";
 import { GoogleNotConnectedError } from "../google/auth";
+import { ConnectionUnusableError } from "../connectors/types";
 import type { CalendarEvent } from "../google/workspace";
 import { invokeCapability } from "../connectors/invoke";
 import { structuredCall } from "../assistant/llm";
@@ -57,7 +58,7 @@ async function snapshot(deps: Deps, kind: BriefKind): Promise<Snapshot> {
   try {
     calendar = await invokeCapability(deps, "calendar.read", { timeMin: now.toISOString(), timeMax: calEnd.toISOString(), max: 25 }, { caller: "brief" });
   } catch (err) {
-    if (!(err instanceof GoogleNotConnectedError)) console.warn("[brief] calendar unavailable", err);
+    if (!(err instanceof GoogleNotConnectedError || err instanceof ConnectionUnusableError)) console.warn("[brief] calendar unavailable", err);
   }
 
   const [all, followups, timeline, drafts] = await Promise.all([

@@ -14,7 +14,8 @@ import {
   type In,
   type Out,
 } from "./capabilities";
-import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx, type Connector } from "./types";
+import { effectiveCapabilities } from "./store";
+import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableError, type ConnCtx, type Connector } from "./types";
 
 /**
  * THE ONLY CALLER OF `Connector.invoke` (docs/CONNECTORS.md §4). Enforced by test/connectors.test.ts.
@@ -25,9 +26,13 @@ import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx, type C
  *  4. `confirm` and `user_finishes` never run here. Their prepare/handoff paths arrive with the
  *     calendar and device-queue items; until then they fail closed.
  *  5. Input is validated against the capability's schema before any connector sees it.
- *  6. Every attempted call that reaches a connector writes an audit row (best effort).
- *
- * Not yet enforced (next slice, with ConnectionStore): per-connection enabled capabilities.
+ *  6. The stored connection must be usable for this capability (§4 step 3): not `needs_reauth`,
+ *     the capability enabled by the owner, and its scopes granted. With no stored connection the
+ *     connector itself fails (e.g. GoogleNotConnectedError), as before.
+ *  7. Every attempted call that reaches a connector writes an audit row (best effort).
+ *  8. A refresh failure (`invalid_grant`) marks the connection `needs_reauth` (§7). The one owner
+ *     alert §7 asks for needs a new alert kind in the device contract and lands with the
+ *     Connections screen (slice 4); until then the assistant speaks the reconnect message.
  */
 
 function implemented(cap: CapabilityId): cap is ImplementedCapability {
@@ -86,6 +91,16 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     throw new CapabilityDeniedError(cap, `invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
   }
 
+  const stored = await deps.connections.load(connector.id);
+  if (stored) {
+    if (stored.status === "needs_reauth") {
+      throw new ConnectionUnusableError(cap, connector.id, "needs_reauth", `${connector.displayName} needs to be reconnected before SideKiqq can use it. Ask the owner to reconnect it.`);
+    }
+    if (!effectiveCapabilities(connector, stored).includes(cap)) {
+      throw new ConnectionUnusableError(cap, connector.id, "disabled", `${cap} is turned off for ${connector.displayName}, or its permission was not granted. The owner can turn it on by reconnecting.`);
+    }
+  }
+
   const audit = async (ok: boolean, error?: string) => {
     await deps.repos.audit
       .add({
@@ -108,8 +123,21 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     return out;
   } catch (err) {
     await audit(false, (err as Error)?.message ?? String(err));
+    if (stored && isInvalidGrant(err)) {
+      await deps.connections
+        .markNeedsReauth(connector.id, "The provider rejected the stored sign-in (invalid_grant).", stored.secret)
+        .catch((e: unknown) => console.warn("[connections] could not mark needs_reauth", e));
+    }
     throw err;
   }
+}
+
+/** OAuth refresh failure: the stored refresh token was revoked or expired (Google: `invalid_grant`). */
+export function isInvalidGrant(err: unknown): boolean {
+  const e = err as { message?: unknown; response?: { data?: { error?: unknown } } } | null;
+  if (e?.response?.data?.error === "invalid_grant") return true;
+  // google-auth-library sometimes rewrites the message to the JSON error body.
+  return typeof e?.message === "string" && (e.message === "invalid_grant" || /"error"\s*:\s*"invalid_grant"/.test(e.message));
 }
 
 /** Typed helper for the multi-op `email.read` capability. */
