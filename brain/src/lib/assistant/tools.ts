@@ -442,7 +442,7 @@ export async function executeTool(
     return { content: truncate(JSON.stringify(result), MAX_RESULT_CHARS), isError: false };
   } catch (err) {
     if (err instanceof GoogleNotConnectedError) {
-      return { content: "Google is not connected, so email, calendar and Drive are unavailable. Tell the owner to connect Google from the phone app.", isError: true };
+      return { content: "Google is not connected, so email, calendar, Drive and contacts are unavailable. Tell the owner to connect Google from the phone app.", isError: true };
     }
     if (err instanceof ToolInputError) return { content: err.message, isError: true };
     if (err instanceof ContactQueryError || err instanceof ContactsAccessError || err instanceof ContactsUnavailableError) {

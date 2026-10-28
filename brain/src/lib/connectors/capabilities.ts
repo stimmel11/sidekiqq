@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isPlausibleEmail } from "../google/mime";
 import type { CalendarEvent, DriveFile, EmailMessage, EmailSummary } from "../google/workspace";
 import type { ContactLookup } from "../google/contacts";
+import { CONTACT_NAME_MAX_CHARS, CONTACT_NAME_RE, CONTACTS_MAX } from "../google/contacts-rules";
 
 /**
  * Capability interfaces (docs/CONNECTORS.md §2).
@@ -93,15 +94,10 @@ export const FilesReadInput = z.object({
   includeContent: z.boolean(),
 });
 
-/**
- * Name to resolve. The provider module re-validates the characters (letters, spaces, . ' -) and
- * reports a plain-words error; this schema only bounds the size. The bounds equal
- * CONTACT_NAME_MAX_CHARS / CONTACTS_MAX in lib/google/contacts.ts (checked by a test); they are
- * literals here so this module never pulls `googleapis` in at runtime.
- */
+/** Name to resolve: letters, spaces and . ' - only (same rules the provider module applies). */
 export const ContactsLookupInput = z.object({
-  name: z.string().trim().min(1).max(80),
-  max: z.number().int().min(1).max(10),
+  name: z.string().trim().min(1).max(CONTACT_NAME_MAX_CHARS).regex(CONTACT_NAME_RE, "a contact name can only contain letters, spaces, and . ' -"),
+  max: z.number().int().min(1).max(CONTACTS_MAX),
 });
 
 export type EmailReadIn = z.infer<typeof EmailReadInput>;

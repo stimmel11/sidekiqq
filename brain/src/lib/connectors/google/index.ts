@@ -1,7 +1,7 @@
 import type { ContactLookup, ContactQuery } from "../../google/contacts";
 import type { Workspace } from "../../google/workspace";
 import type { CapabilityId, ImplementedCapability, In, Out } from "../capabilities";
-import type { Connector } from "../types";
+import { CapabilityUnavailableError, type Connector } from "../types";
 
 /**
  * The built-in Google connector: Gmail, Calendar, Drive and Contacts (docs/CONNECTORS.md §8 step 1).
@@ -47,7 +47,7 @@ export class GoogleConnector implements Connector {
 
   async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<Out<C>> {
     if (cap === "contacts.lookup") {
-      if (!this.contacts) throw new Error("google connector was built without contacts");
+      if (!this.contacts) throw new CapabilityUnavailableError("contacts.lookup");
       const i = input as In<"contacts.lookup">;
       const out: Out<"contacts.lookup"> = await (await this.contacts()).lookup({ name: i.name, max: i.max });
       return out as Out<C>;

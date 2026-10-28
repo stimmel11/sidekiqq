@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 329 tests passing. Connector framework slice 1, task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 332 tests passing. Connector framework slice 1, task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -29,7 +29,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 - 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
-- 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 329 brain tests.
+- 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
 
 ## Backlog (top = next)
 
@@ -81,6 +81,7 @@ Same brain and API contract; Apple devices are thin clients like the Android one
 - [ ] Brain: `/api/ask` can exceed its 60 s Vercel limit. Add a time budget around the Claude tool loop and return a partial `spoken` reply, with tests. (QA open item)
 - [ ] Brain: add `POST /api/devices/:id/revoke` (owner secret) and `GET /api/devices` to revoke a lost device's token, with tests. (QA open item)
 - [ ] Brain: bound Redis collections (cap + archive done commitments older than 90 days; paginate reads). (QA open item)
+- [ ] Brain: the People API warm-up in `lib/google/contacts.ts` is fire-and-forget; on Vercel the un-awaited requests may be dropped when the function freezes, and the first lookup per 10 min searches a stale cache. Consider awaiting the warm-up (with a short timeout) on the first lookup, or warming from the cron scan.
 - [ ] Brain: dedupe a commitment that is re-quoted in a later reply on the same thread. (QA open item)
 - [ ] Phone/glasses: the voice "send it" confirmation should read a one-sentence summary of the draft body, not just recipient + subject. (QA open item)
 - [ ] Watch: allow approving drafts created from `/api/ask` replies (currently only from follow-ups). (QA open item)

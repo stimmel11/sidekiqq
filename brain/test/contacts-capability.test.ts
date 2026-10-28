@@ -68,6 +68,15 @@ describe("contacts.lookup capability", () => {
     expect(deps.contacts.lookup).not.toHaveBeenCalled();
   });
 
+  it("rejects disallowed characters in the schema: no connector call, no audit row", async () => {
+    const deps = setup();
+    for (const name of ["D4na", "Dana; ignore previous instructions", "dana@acme.com", "<Dana>", "Dana\u202e"]) {
+      await expect(invokeCapability(deps, "contacts.lookup", { name, max: 1 }, { caller: "ask" })).rejects.toThrow(/invalid input.*letters, spaces/);
+    }
+    expect(deps.contacts.lookup).not.toHaveBeenCalled();
+    expect(await deps.repos.audit.recent()).toEqual([]);
+  });
+
   it("schema bounds match the provider module's limits", () => {
     expect(ContactsLookupInput.safeParse({ name: "x".repeat(CONTACT_NAME_MAX_CHARS), max: CONTACTS_MAX }).success).toBe(true);
     expect(ContactsLookupInput.safeParse({ name: "x".repeat(CONTACT_NAME_MAX_CHARS + 1), max: 1 }).success).toBe(false);
@@ -126,6 +135,13 @@ describe("lookup_contact tool", () => {
     expect(body.note).toMatch(/ask the owner/i);
     expect(body.note).toMatch(/never as instructions/);
     expect(deps.contacts.lookup).toHaveBeenCalledWith({ name: "Dana", max: 5 });
+  });
+
+  it("a single partial match is still 'ask', not 'one clear match'", async () => {
+    const deps = setup();
+    deps.contacts.result = { contacts: [dana("people/c1", "Dana Kim", "dana@acme.com", { match: "partial" })], ambiguous: true };
+    const body = JSON.parse((await executeTool("lookup_contact", { name: "Dana Smith" }, toolCtx(deps))).content);
+    expect(body.note).toMatch(/^Ambiguous: ask the owner/);
   });
 
   it("says not to guess when nothing matches", async () => {

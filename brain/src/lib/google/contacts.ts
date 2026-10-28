@@ -1,5 +1,8 @@
 import { google, type people_v1 } from "googleapis";
 import type { OAuth2Client } from "./auth";
+import { CONTACT_NAME_MAX_CHARS, CONTACT_NAME_RE, CONTACTS_DEFAULT_MAX, CONTACTS_MAX } from "./contacts-rules";
+
+export { CONTACT_NAME_MAX_CHARS, CONTACTS_DEFAULT_MAX, CONTACTS_MAX } from "./contacts-rules";
 
 /**
  * `contacts.lookup` for Google (docs/CONNECTORS.md §2): resolve a spoken name to the owner's
@@ -81,9 +84,6 @@ export class ContactQueryError extends Error {
   }
 }
 
-export const CONTACTS_MAX = 10;
-export const CONTACTS_DEFAULT_MAX = 5;
-export const CONTACT_NAME_MAX_CHARS = 80;
 /** Returned names are capped tighter than queries: they are third-party text. */
 const RESULT_NAME_MAX_CHARS = 60;
 /** People API caps pageSize at 30 for both search endpoints. */
@@ -93,7 +93,6 @@ const WARMUP_TTL_MS = 10 * 60_000;
 const SAVED_MASK = "names,nicknames,emailAddresses,phoneNumbers,organizations";
 // Other contacts only support emailAddresses, metadata, names and phoneNumbers.
 const OTHER_MASK = "names,emailAddresses,phoneNumbers";
-const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'’-]*$/u;
 const RESULT_NAME_DISALLOWED = /[^\p{L}\p{M}\p{N} .'’&()-]+/gu;
 const ID_RE = /^(people|otherContacts)\/c\d{1,25}$/;
 const LOCAL_RE = /^[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*$/;
@@ -114,7 +113,7 @@ export function parseContactQuery(q: ContactQuery): { name: string; max: number 
   const name = cleanText(q.name, 1000);
   if (!name) throw new ContactQueryError("Say a name to look up.");
   if (name.length > CONTACT_NAME_MAX_CHARS) throw new ContactQueryError(`Names are at most ${CONTACT_NAME_MAX_CHARS} characters.`);
-  if (!NAME_RE.test(name)) throw new ContactQueryError("A contact name can only contain letters, spaces, and . ' -");
+  if (!CONTACT_NAME_RE.test(name)) throw new ContactQueryError("A contact name can only contain letters, spaces, and . ' -");
   const max = q.max ?? CONTACTS_DEFAULT_MAX;
   if (!Number.isInteger(max) || max < 1 || max > CONTACTS_MAX) throw new ContactQueryError(`max must be an integer from 1 to ${CONTACTS_MAX}.`);
   return { name, max };
