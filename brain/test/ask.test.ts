@@ -43,7 +43,7 @@ describe("/api/ask tool loop", () => {
     expect(sys[0]!.text).toBe(await loadOperatingSystem());
     expect(sys[1]!.text).toContain("Device for this request: watch");
     expect((first.tools ?? []).map((t) => (t as { name: string }).name)).toEqual([
-      "search_gmail", "get_email_thread", "list_calendar_events", "search_drive", "lookup_contact", "get_client_timeline", "list_commitments",
+      "search_email", "get_email_thread", "list_calendar_events", "search_drive", "lookup_contact", "get_client_timeline", "list_commitments",
       "add_commitment", "update_commitment", "list_followups", "create_email_draft", "record_decision", "upsert_client_profile", "respond",
     ]);
 
@@ -105,7 +105,7 @@ describe("/api/ask tool loop", () => {
 
   it("reports Google-not-connected to the model as a tool error instead of failing", async () => {
     const llm = new ScriptedLLM([
-      () => msg([toolUse("search_gmail", { query: "from:dana" })]),
+      () => msg([toolUse("search_email", { query: "from:dana" })]),
       (p) => {
         const r = (p.messages.at(-1)!.content as { is_error?: boolean; content: string }[])[0]!;
         expect(r.is_error).toBe(true);

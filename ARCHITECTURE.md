@@ -55,9 +55,17 @@ Pairing / owner endpoints (not device-token auth):
 |---|---|---|---|
 | POST | /api/devices/pair-code | owner secret header | `{ "label"?: string }` → `{ "code": "123456", "expiresAt": string, "ttlSeconds": number }` |
 | POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "name"?: string }` → `{ "token": string, "deviceId": string, "device": string }` |
-| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link) |
+| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link). Alias of the connections route below for one release |
+| GET | /api/connections | owner secret header or dashboard session | → `{ "items": Connection[] }` |
+| POST | /api/connections/:connectorId/connect | owner secret header or dashboard session | → `{ "url": string, "expiresAt": string }` (single-use 5-min link; `GET` on it starts the provider sign-in) |
+| GET | /api/connections/:connectorId/callback | none (single-use OAuth `state` + PKCE) | redirects to `/dashboard/connections?connect=<code>` |
+| POST | /api/connections/:connectorId/disconnect | owner secret header or dashboard session | → `{ "ok": true, "revoked": boolean }` (provider revoke is best effort; the stored sign-in is always deleted) |
+| POST | /api/connections/:connectorId/capabilities | owner secret header or dashboard session | `{ "enabled": CapabilityId[] }` → `Connection`. Only that connector's own capabilities; tiers are fixed in code |
 
-Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"), optional
+Device tokens are never accepted on `/api/connections*` (a device token plus a session cookie is refused too). `Connection`
+is defined in `docs/CONNECTORS.md` §9. Devices get no connector endpoints.
+
+Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"\|"connection_needs_reauth"), optional
 `importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
 Every alert is also written to a 7-day alert log (`lib/push/alerts.ts` → `deliverAlert`), so `GET /api/alerts`
 returns exactly the same title/body/data as the push.
@@ -76,7 +84,8 @@ interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
-  kind: "email"|"commitment_overdue"; importance?: Importance; priority: "high"|"normal";
+  kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
+  importance?: Importance; priority: "high"|"normal";
   client?: string; messageId?: string; threadId?: string; commitmentId?: string; }
 type CommandKind = "open_url"|"call_contact"|"reachy_wake";   // clients must ignore kinds they don't know
 interface DeviceCommand { id: string; at: string; expiresAt: string /* at + 15 min */; kind: CommandKind;
@@ -132,7 +141,9 @@ streamed to the cloud. Draft approval uses the same "send it" rule and still goe
 
 ## Connectors
 Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (framework
-slice 1 implemented: every Gmail/Calendar/Drive call goes through `invokeCapability` and its fixed policy table): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+slices 1, 2 and 4 implemented: every Gmail/Calendar/Drive/Contacts call goes through `invokeCapability` and its fixed policy table;
+the owner manages connections on the dashboard Connections screen; a refresh failure marks the connection `needs_reauth` and raises
+one `connection_needs_reauth` alert): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
 `/api/drafts/:id/approve` stays the only executor.
 
 ## Auth

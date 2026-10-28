@@ -145,3 +145,20 @@ export const TIER_LABEL: Record<Tier, string> = {
   confirm: "asks you first",
   user_finishes: "you finish on your phone",
 };
+
+/** What each capability does, in plain words (Connections screen). None of them sends anything. */
+export const CAPABILITY_LABEL: Record<CapabilityId, string> = {
+  "email.read": "Read and search your email",
+  "email.draft": "Write email drafts (sending always waits for your approval)",
+  "contacts.lookup": "Look up people in your contacts",
+  "calendar.read": "Read your calendar",
+  "calendar.hold.prepare": "Prepare holds on your own calendar",
+  "calendar.invite.prepare": "Prepare calendar invites",
+  "files.read": "Search and read your files",
+  "video.create_room": "Create video meeting rooms",
+  "grocery.search": "Search groceries",
+  "grocery.cart.add": "Add groceries to your cart",
+  "grocery.checkout": "Check out a grocery order",
+  "device.call": "Start a phone call",
+  "device.open_url": "Open a link on your phone",
+};

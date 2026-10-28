@@ -168,6 +168,15 @@ export class ConnectionStore {
   }
 
   /**
+   * True when some credential record exists (new or, for Google, legacy), whether or not it can be
+   * read. With `load()` returning null it means "stored but unreadable" (wrong key or corrupt).
+   */
+  async hasRecord(connectorId: string): Promise<boolean> {
+    if ((await this.kv.get(this.tokenKey(connectorId))) !== null) return true;
+    return connectorId === "google" && (await this.kv.get(this.legacyGoogleKey())) !== null;
+  }
+
+  /**
    * Deletes the stored credentials (and, for Google, the legacy record, so it can't be re-migrated).
    * Revoking at the provider is the caller's job (disconnect route, slice 4).
    */
