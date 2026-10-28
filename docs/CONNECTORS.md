@@ -10,9 +10,10 @@ connections routes and the Connections screen (§9), the `search_email` tool ren
 Slice 1 differences from §2, to settle in the next slice: `email.draft` returns
 `{providerDraftId, threadId?}` and the caller (the `create_email_draft` tool) still creates the
 pending Draft record; `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
-Google `contacts.lookup` slice 1 (2026-10-25): `brain/src/lib/google/contacts.ts` implements the lookup
-(People API, saved + Other contacts) but is not registered as a capability on the `google` connector
-yet (next slice). The §2 row reflects its output shape (`id`, `match`, `ambiguous`).
+Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
+the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
+connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
+row reflects its output shape (`id`, `match`, `ambiguous`).
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 

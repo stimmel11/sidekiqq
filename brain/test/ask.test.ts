@@ -43,7 +43,7 @@ describe("/api/ask tool loop", () => {
     expect(sys[0]!.text).toBe(await loadOperatingSystem());
     expect(sys[1]!.text).toContain("Device for this request: watch");
     expect((first.tools ?? []).map((t) => (t as { name: string }).name)).toEqual([
-      "search_gmail", "get_email_thread", "list_calendar_events", "search_drive", "get_client_timeline", "list_commitments",
+      "search_gmail", "get_email_thread", "list_calendar_events", "search_drive", "lookup_contact", "get_client_timeline", "list_commitments",
       "add_commitment", "update_commitment", "list_followups", "create_email_draft", "record_decision", "upsert_client_profile", "respond",
     ]);
 

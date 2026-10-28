@@ -4,6 +4,7 @@ import { UpstashKV, type KV } from "./kv";
 import { createRepos, type Repos } from "./repos";
 import { GoogleTokenStore } from "./google/auth";
 import { GoogleWorkspace } from "./google/workspace";
+import { GoogleContacts, googlePeopleApi } from "./google/contacts";
 import { GoogleConnector } from "./connectors/google";
 import { GmailDraftSender } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
@@ -25,7 +26,7 @@ export interface Deps {
   llm(): LLM;
   googleTokens: GoogleTokenStore;
   /**
-   * Connectors (Gmail/Calendar/Drive today). Only lib/connectors/invoke.ts may call
+   * Connectors (Gmail/Calendar/Drive/Contacts today). Only lib/connectors/invoke.ts may call
    * `Connector.invoke`; everything else goes through `invokeCapability`.
    */
   connectors(): readonly Connector[];
@@ -53,6 +54,7 @@ export function buildDeps(kv: KV): Deps {
   let llm: LLM | null = null;
   let push: PushSender | null = null;
   const googleWorkspace = async () => new GoogleWorkspace(await googleTokens.authorizedClient());
+  const googleContacts = async () => new GoogleContacts(googlePeopleApi(await googleTokens.authorizedClient()));
   let connectors: Connector[] | null = null;
   let senders: SenderRegistry | null = null;
   return {
@@ -61,7 +63,7 @@ export function buildDeps(kv: KV): Deps {
     clock,
     llm: () => (llm ??= llmFromEnv()),
     googleTokens,
-    connectors: () => (connectors ??= [new GoogleConnector(googleWorkspace)]),
+    connectors: () => (connectors ??= [new GoogleConnector(googleWorkspace, googleContacts)]),
     senders: () =>
       (senders ??= buildSenders({
         google: { workspace: googleWorkspace, mailer: async () => new GmailDraftSender(await googleTokens.authorizedClient()) },

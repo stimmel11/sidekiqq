@@ -8,7 +8,8 @@ import type { Deps } from "@/lib/deps";
 import { GoogleTokenStore } from "@/lib/google/auth";
 import type { CalendarEvent, DraftInput, EmailMessage, Workspace } from "@/lib/google/workspace";
 import type { MailSender } from "@/lib/connectors/google/send";
-import { GoogleConnector } from "@/lib/connectors/google";
+import { GoogleConnector, type ContactsLookup } from "@/lib/connectors/google";
+import type { ContactLookup, ContactQuery } from "@/lib/google/contacts";
 import { buildSenders } from "@/lib/connectors/senders";
 import type { CreateParams, LLM } from "@/lib/assistant/llm";
 import type { PushMessage, PushSender } from "@/lib/push";
@@ -111,6 +112,16 @@ export class FakeWorkspace implements Workspace {
   }
 }
 
+/** contacts.lookup fake. Set `result` or `error`; calls are recorded on `lookup`. */
+export class FakeContacts implements ContactsLookup {
+  result: ContactLookup = { contacts: [], ambiguous: false };
+  error: unknown;
+  lookup = vi.fn(async (_q: ContactQuery): Promise<ContactLookup> => {
+    if (this.error) throw this.error;
+    return this.result;
+  });
+}
+
 export class SpyMailSender implements MailSender {
   sendDraft = vi.fn(async (gmailDraftId: string) => ({ messageId: `msg_for_${gmailDraftId}` }));
 }
@@ -160,6 +171,7 @@ export function text(t: string): Anthropic.TextBlock {
 export interface TestDeps extends Deps {
   kv: MemoryKV;
   ws: FakeWorkspace;
+  contacts: FakeContacts;
   sender: SpyMailSender;
   pushFake: FakePush;
   setNow(d: Date): void;
@@ -172,6 +184,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
   const repos = createRepos(kv, { prefix: "t", clock, conversationTtlSeconds: 3600, conversationMaxMessages: 20 });
   const key = randomBytes(32);
   const ws = new FakeWorkspace();
+  const contacts = new FakeContacts();
   const sender = new SpyMailSender();
   const pushFake = new FakePush();
   const connected = opts.googleConnected ?? true;
@@ -182,6 +195,13 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
     }
     return ws;
   };
+  const contactsFactory = async (): Promise<ContactsLookup> => {
+    if (!connected) {
+      const { GoogleNotConnectedError } = await import("@/lib/google/auth");
+      throw new GoogleNotConnectedError();
+    }
+    return contacts;
+  };
   return {
     kv,
     repos,
@@ -191,7 +211,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
       return opts.llm;
     },
     googleTokens: new GoogleTokenStore(kv, "t", () => key),
-    connectors: () => [new GoogleConnector(workspace)],
+    connectors: () => [new GoogleConnector(workspace, contactsFactory)],
     senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
     push: () => pushFake,
     transcriber: () =>
@@ -205,6 +225,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
         synthesize: async () => ({ wav: pcm16ToWav(new Uint8Array(4800), 24000), sampleRate: 24000 }),
       },
     ws,
+    contacts,
     sender,
     pushFake,
     setNow: (d: Date) => {

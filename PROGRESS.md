@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 312 tests passing. Connector framework slice 1, task layer slice 1 (`/api/commands`) and the Google Contacts lookup module in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 332 tests passing. Connector framework slice 1, task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -29,6 +29,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-23: Connector framework slice 1 (`crew/connector-framework`): capability layer + fixed policy + audit log, Google wrapped as a connector, sender registry; tools/scan/brief go through `invokeCapability`. 242 brain tests.
 - 2026-10-24: Task layer slice 1 (`crew/device-commands`): per-device command queue `POST/GET /api/commands` + ack (open_url / call_contact / reachy_wake hand-offs, tap-to-act only), contract + Kotlin client.
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
+- 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
 
 ## Backlog (top = next)
 
@@ -47,9 +48,9 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [ ] Slice 2: phone app polls `GET /api/commands` (and on app open), shows a hand-off screen (label + number/URL on its own line), opens only on tap (`ACTION_DIAL`, WhatsApp, browser), then acks. Watch: "call <name> on my phone" via `createCommand`.
   - [ ] Slice 3: Reachy app polls `/api/commands` alongside `/api/alerts` and handles `reachy_wake` (chat/brief/dance/game).
   - [ ] Slice 4: FCM data nudge `kind: "command"` to the target device (phone must ignore it as a notification), and handoffs from `invokeCapability` (`user_finishes` tier, after the connector-framework PR lands).
-- [ ] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
+- [x] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
   - [x] Slice 1: `brain/src/lib/google/contacts.ts` (People API lookup of saved + Other contacts, warm-up, name ranking, ambiguity returned, cleaned emails/phones) and the two read-only scopes. Tested with a fake People API.
-  - [ ] Slice 2 (connector framework is now on main): register it as `contacts.lookup` on the `google` connector, add the Claude tool `lookup_contact`, and wire it into `deps`.
+  - [x] Slice 2 (connector framework is now on main): register it as `contacts.lookup` on the `google` connector, add the Claude tool `lookup_contact`, and wire it into `deps`. Done 2026-10-28 (`crew/contacts-capability`).
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
@@ -80,6 +81,7 @@ Same brain and API contract; Apple devices are thin clients like the Android one
 - [ ] Brain: `/api/ask` can exceed its 60 s Vercel limit. Add a time budget around the Claude tool loop and return a partial `spoken` reply, with tests. (QA open item)
 - [ ] Brain: add `POST /api/devices/:id/revoke` (owner secret) and `GET /api/devices` to revoke a lost device's token, with tests. (QA open item)
 - [ ] Brain: bound Redis collections (cap + archive done commitments older than 90 days; paginate reads). (QA open item)
+- [ ] Brain: the People API warm-up in `lib/google/contacts.ts` is fire-and-forget; on Vercel the un-awaited requests may be dropped when the function freezes, and the first lookup per 10 min searches a stale cache. Consider awaiting the warm-up (with a short timeout) on the first lookup, or warming from the cron scan.
 - [ ] Brain: dedupe a commitment that is re-quoted in a later reply on the same thread. (QA open item)
 - [ ] Phone/glasses: the voice "send it" confirmation should read a one-sentence summary of the draft body, not just recipient + subject. (QA open item)
 - [ ] Watch: allow approving drafts created from `/api/ask` replies (currently only from follow-ups). (QA open item)
