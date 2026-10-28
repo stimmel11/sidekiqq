@@ -127,10 +127,18 @@ def _people(addresses: list[str]) -> str:
     return f"{names[0]}, {names[1]} and {len(names) - 2} more"
 
 
-def draft_summary(to: list[str], subject: str, body: str) -> str:
-    """Recipient + subject + a one-sentence body summary, for the spoken read-back."""
-    s = f"email to {_people(to) or 'unknown recipient'}, subject {subject.strip() or '(no subject)'}"
+def draft_summary(to: list[str], subject: str, body: str, readback: str = "") -> str:
+    """Recipient + subject + a one-sentence body summary, for the spoken read-back.
+
+    Prefers the brain's ``readback`` (GET /api/drafts): it is built in code from the stored fields,
+    with every recipient address in full, so text in the email can't disguise who receives it.
+    Older brains don't send it; then recipients and subject are read from the fields.
+    """
+    rb = " ".join((readback or "").split()).rstrip(".?!")
+    s = rb or f"email to {_people(to) or 'unknown recipient'}, subject {subject.strip() or '(no subject)'}"
     gist = one_sentence(body)
     if gist:
-        s += f". It says: {gist.rstrip('.?!')}"
+        # With the brain's readback, an explicit marker keeps body text from sounding like part
+        # of the recipient line.
+        s += f". {'Message begins' if rb else 'It says'}: {gist.rstrip('.?!')}"
     return s

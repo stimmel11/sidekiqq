@@ -211,7 +211,9 @@ class Assistant:
         try:
             for d in client.pending_drafts():
                 if d.get("id") == draft_id:
-                    summary = draft_summary(list(d.get("to") or []), str(d.get("subject", "")), str(d.get("body", "")))
+                    summary = draft_summary(
+                        list(d.get("to") or []), str(d.get("subject", "")), str(d.get("body", "")), str(d.get("readback") or "")
+                    )
                     break
         except (BrainError, BrainUnavailable) as e:
             log.info("could not fetch draft body (%s); reading recipient and subject only", e)

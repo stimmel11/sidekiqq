@@ -38,7 +38,9 @@ the thinking.
 | GET | /api/followups | – | `{ "items": FollowUp[] }` |
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval |
+| GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation |
+| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
+| POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
 | POST | /api/commands | `CreateCommandRequest` | `201 { "command": DeviceCommand, "deviceId": string, "device": DeviceKind }`. Queues a command started on this device to run on another. 400 bad fields/URL/number, 404 unknown `target.deviceId`, 409 no device that can run it (`no_target_device`, `wrong_target`), 429 `queue_full` |
@@ -48,6 +50,14 @@ the thinking.
 | POST | /api/cron/scan | (Vercel Cron, secret header) | scans Gmail, extracts commitments, pushes alerts |
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
+
+Drafts: every action the owner must confirm is a stored Draft (`docs/CONNECTORS.md` §5). Today only `kind: "email"`
+is created; calendar kinds are in the model but are not created or approvable until the phone's confirm dialog
+depends on `kind`. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
+(replaces `gmailDraftId`), `providerMessageId` (replaces `gmailMessageId`), `threadId`, `followupId` and `sentAt`;
+records written before these fields existed are upgraded on read, so old pending drafts still list and approve.
+Recipients are strict bare ASCII addresses (`name@example.com`, IDN only as `xn--` punycode; no display names,
+lists or groups), at most 5 To and 5 Cc.
 
 Pairing / owner endpoints (not device-token auth):
 
@@ -72,7 +82,16 @@ interface Commitment { id; who: string; what: string; madeAt: string; dueAt?: st
 interface FollowUp { id; person: string; client?: string; reason: string; daysQuiet?: number;
   importance: Importance; suggestedMessage?: string; draftId?: string; }
 interface TopItem { id; title: string; why: string; importance: Importance; dueAt?: string; }
-interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id: string; summary: string; }
+interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id: string;
+  summary: string /* for draft_created: the draft's `readback` */; }
+type DraftKind = "email"|"calendar_invite"|"calendar_hold";  // clients must not offer to approve kinds they don't know
+interface DraftItem { id: string; kind: DraftKind /* absent from older brains = "email" */;
+  to: string[] /* recipients, or attendees for calendar_invite; empty for calendar_hold */; cc: string[];
+  subject: string /* or event title */; body: string /* or event description */;
+  readback: string /* ONE sentence (<= 1000 chars), built by the brain in code, never by the model: kind, every
+                      address in full, the time for calendar kinds, then "with the subject: <subject>." Absent from
+                      older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
+  when?: { start: string; end: string } /* calendar kinds only */; client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
@@ -132,7 +151,8 @@ streamed to the cloud. Draft approval uses the same "send it" rule and still goe
 
 ## Connectors
 Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (framework
-slice 1 implemented: every Gmail/Calendar/Drive call goes through `invokeCapability` and its fixed policy table): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+slices 1–3 implemented: every Gmail/Calendar/Drive/Contacts call goes through `invokeCapability` and its fixed policy
+table; `email.draft` creates the pending Draft with its code-built `readback`): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
 `/api/drafts/:id/approve` stays the only executor.
 
 ## Auth

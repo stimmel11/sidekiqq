@@ -2,6 +2,7 @@ import { z, type ZodType } from "zod";
 import type { Deps } from "../deps";
 import { GoogleNotConnectedError } from "../google/auth";
 import { invokeCapability, readEmail } from "../connectors/invoke";
+import { EMAIL_CC_MAX, EMAIL_TO_MAX } from "../connectors/capabilities";
 import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx } from "../connectors/types";
 import { isPlausibleEmail } from "../google/mime";
 import { ContactQueryError, ContactsAccessError, ContactsUnavailableError, CONTACTS_DEFAULT_MAX, CONTACTS_MAX } from "../google/contacts";
@@ -267,8 +268,8 @@ const createEmailDraft = tool({
   description:
     "Create a Gmail DRAFT for the owner to review. This NEVER sends. The owner approves sending from a device. Pass threadId to reply in an existing thread. Write in the owner's voice: concise, direct, human, with a clear ask.",
   input: z.object({
-    to: z.array(z.string().trim().min(3).max(320)).min(1).max(10),
-    cc: z.array(z.string().trim().min(3).max(320)).max(10).optional(),
+    to: z.array(z.string().trim().min(3).max(256)).min(1).max(EMAIL_TO_MAX).describe("Plain addresses only (name@example.com), one per item: no display names"),
+    cc: z.array(z.string().trim().min(3).max(256)).max(EMAIL_CC_MAX).optional(),
     subject: z.string().trim().min(1).max(250),
     body: z.string().trim().min(1).max(20_000),
     threadId: optStr(200),
@@ -278,7 +279,10 @@ const createEmailDraft = tool({
   async run(input, ctx) {
     const { deps, actions } = ctx;
     const bad = [...input.to, ...(input.cc ?? [])].filter((a) => !isPlausibleEmail(a));
-    if (bad.length) throw new ToolInputError(`Not valid email addresses: ${bad.join(", ")}. Look the address up first.`);
+    if (bad.length) {
+      throw new ToolInputError(`Not single plain email addresses: ${bad.join(" | ")}. Use one address per item (name@example.com), no names or lists. Look the address up first.`);
+    }
+    // `email.draft` creates the Gmail draft AND the pending Draft record with its code-built readback.
     const created = await invokeCapability(
       deps,
       "email.draft",
@@ -288,29 +292,20 @@ const createEmailDraft = tool({
         subject: input.subject,
         body: input.body,
         ...(input.threadId ? { threadId: input.threadId } : {}),
+        ...(input.client ? { client: input.client } : {}),
+        ...(input.followupId ? { followupId: input.followupId } : {}),
       },
       conn(ctx),
     );
-    const draft = await deps.repos.drafts.create({
-      gmailDraftId: created.providerDraftId,
-      to: input.to,
-      cc: input.cc ?? [],
-      subject: input.subject,
-      body: input.body,
-      ...(created.threadId ?? input.threadId ? { threadId: (created.threadId ?? input.threadId) as string } : {}),
-      ...(input.client ? { client: input.client } : {}),
-      ...(input.followupId ? { followupId: input.followupId } : {}),
-    });
-    if (input.followupId) await deps.repos.followups.attachDraft(input.followupId, draft.id);
-    actions.push({
-      type: "draft_created",
-      id: draft.id,
-      summary: truncate(`Draft to ${input.to.join(", ")}: ${input.subject}`, 200),
-    });
+    if (input.followupId) await deps.repos.followups.attachDraft(input.followupId, created.draftId);
+    // Devices speak Action.summary before asking for "send it": it is the readback (built in code,
+    // every recipient in full), never text the model wrote (docs/CONNECTORS.md §5).
+    actions.push({ type: "draft_created", id: created.draftId, summary: created.readback });
     return {
-      draftId: draft.id,
+      draftId: created.draftId,
       status: "pending_approval",
-      note: "Draft saved in Gmail. It will only be sent if the owner approves it on a device.",
+      readback: created.readback,
+      note: "Draft saved in Gmail. It will only be sent if the owner approves it on a device. The device reads the readback to the owner before asking.",
     };
   },
 });

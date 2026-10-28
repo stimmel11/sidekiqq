@@ -13,7 +13,9 @@ import {
   type ImplementedCapability,
   type In,
   type Out,
+  type ProviderOut,
 } from "./capabilities";
+import { buildReadback, READBACK_MAX_CHARS, ReadbackTooLongError } from "./readback";
 import { effectiveCapabilities } from "./store";
 import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableError, type ConnCtx, type Connector } from "./types";
 
@@ -30,6 +32,8 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *     the capability enabled by the owner, and its scopes granted. With no stored connection the
  *     connector itself fails (e.g. GoogleNotConnectedError), as before.
  *  7. Every attempted call that reaches a connector writes an audit row (best effort).
+ *  7a. `email.draft` also creates the pending Draft record with its code-built read-back
+ *      (recordEmailDraft below). It still sends nothing; only the approve route executes drafts.
  *  8. A refresh failure (`invalid_grant`) marks the connection `needs_reauth` (§7). The one owner
  *     alert §7 asks for needs a new alert kind in the device contract and lands with the
  *     Connections screen (slice 4); until then the assistant speaks the reconnect message.
@@ -91,6 +95,13 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     throw new CapabilityDeniedError(cap, `invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
   }
 
+  if (cap === "email.draft") {
+    // Refuse BEFORE a provider draft exists: a read-back the devices can't speak is never truncated.
+    const i = parsed.data as In<"email.draft">;
+    const rb = buildReadback({ kind: "email", to: i.to, cc: i.cc ?? [], subject: i.subject });
+    if (rb.length > READBACK_MAX_CHARS) throw new CapabilityDeniedError(cap, new ReadbackTooLongError(rb.length).message);
+  }
+
   const stored = await deps.connections.load(connector.id);
   if (stored) {
     if (stored.status === "needs_reauth") {
@@ -118,7 +129,8 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
   };
 
   try {
-    const out = await connector.invoke(cap, parsed.data as In<typeof cap>, ctx);
+    const provided = await connector.invoke(cap, parsed.data as In<typeof cap>, ctx);
+    const out = cap === "email.draft" ? await recordEmailDraft(deps, connector.id, parsed.data as In<"email.draft">, provided as ProviderOut<"email.draft">) : provided;
     await audit(true);
     return out;
   } catch (err) {
@@ -130,6 +142,32 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     }
     throw err;
   }
+}
+
+/**
+ * `email.draft` creates the provider draft (the connector) AND the pending Draft record (here),
+ * so every connector gets the same record and the same code-built read-back (docs/CONNECTORS.md
+ * §2, §5). The read-back is built by DraftsRepo.create from the structured fields; nothing the
+ * model wrote is used for it except the subject, which is flattened and quoted.
+ */
+async function recordEmailDraft(deps: Deps, connectorId: string, input: In<"email.draft">, provided: ProviderOut<"email.draft">): Promise<Out<"email.draft">> {
+  if (typeof provided?.providerDraftId !== "string" || !provided.providerDraftId) {
+    throw new Error(`${connectorId} did not return a provider draft id`);
+  }
+  const threadId = provided.threadId ?? input.threadId;
+  const draft = await deps.repos.drafts.create({
+    kind: "email",
+    connectorId,
+    providerDraftId: provided.providerDraftId,
+    to: input.to,
+    cc: input.cc ?? [],
+    subject: input.subject,
+    body: input.body,
+    ...(threadId ? { threadId } : {}),
+    ...(input.client ? { client: input.client } : {}),
+    ...(input.followupId ? { followupId: input.followupId } : {}),
+  });
+  return { draftId: draft.id, providerDraftId: provided.providerDraftId, readback: draft.readback };
 }
 
 /** OAuth refresh failure: the stored refresh token was revoked or expired (Google: `invalid_grant`). */
