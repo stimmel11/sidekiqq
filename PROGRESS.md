@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 366 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 388 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) and slice 2b (`call_on_phone`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -32,6 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
+- 2026-10-28: Task layer slice 2b (`crew/watch-call`): `/api/ask` tool `call_on_phone` queues a tap-to-dial hand-off on the phone; number only from a clear `lookup_contact` match in the same request or digits the owner said. 388 brain tests.
 
 ## Backlog (top = next)
 
@@ -48,7 +49,7 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [ ] Brain: task layer + device routing. Commands started on any device can run on another device (per-device command queue delivered via FCM or `/api/alerts`-style polling). Commands: `device.call_contact`, `reachy.wake`, `open_url`.
   - [x] Slice 1 (brain + contract): per-device queue, `POST/GET /api/commands`, `POST /api/commands/:id/ack`, kinds `open_url` / `call_contact` / `reachy_wake`, URL allowlist, number rules, 15-min expiry, Kotlin models + client (unverified). Delivery is polling only.
   - [x] Slice 2a (`crew/phone-handoffs`, unverified: Android not compiled): phone polls `GET /api/commands` on open and every 30 s while visible, shows a hand-off dialog (label + number/URL on its own line), opens only on tap (`ACTION_DIAL`, WhatsApp `wa.me`, browser), then acks; re-checks number/URL allowlist on the phone, re-sends lost acks, clears stale hand-offs when backgrounded or offline > 60 s, tap guard. Pure logic in `phone/handoff/HandoffPlan.kt` with JVM tests.
-  - [ ] Slice 2b: Watch "call <name> on my phone" via `createCommand` (needs the number: wait for `contacts.lookup` slice 2, or a spoken number). Optional: persist handled ids across process death; percent-encode `{ } | ^` in query strings that `java.net.URI` rejects.
+  - [x] Slice 2b (`crew/watch-call`): "call <name> on my phone" said to the watch (or any device) goes through `/api/ask`; Claude's tool `call_on_phone` queues a `call_contact` hand-off for the phone. The number is bound in code (`lib/commands/call.ts`): the clear match of a `lookup_contact` in the same request (ambiguous → refused, ask which one; several numbers → ask which) or digits literally in the owner's request text, never a number from email/files. One call per request, audited as `device.call`, `from` = the authenticated device. No watch code change: the watch already asks `/api/ask` and speaks the reply; the phone shows the hand-off via slice 2a. Not done (optional): persist handled ids across process death; percent-encode `{ } | ^` in query strings that `java.net.URI` rejects. Numbers spoken as words ("three oh three") aren't matched.
   - [ ] Slice 3: Reachy app polls `/api/commands` alongside `/api/alerts` and handles `reachy_wake` (chat/brief/dance/game).
   - [ ] Slice 4: FCM data nudge `kind: "command"` to the target device (phone must ignore it as a notification), and handoffs from `invokeCapability` (`user_finishes` tier, after the connector-framework PR lands).
 - [x] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
