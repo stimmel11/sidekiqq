@@ -41,6 +41,9 @@ class Settings:
     #: Alerts older than this are not announced (e.g. after the robot was off overnight).
     alert_max_age_minutes: int = 120
     alert_cursor: str = ""
+    #: Device commands this robot already acted on: id -> ack result ("opened"/"dismissed"/"failed").
+    #: Persisted so a restart never repeats a wake the brain still lists (its ack may have been lost).
+    handled_commands: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -52,6 +55,7 @@ class Settings:
         d = asdict(self)
         d.pop("token", None)
         d.pop("extra", None)
+        d.pop("handled_commands", None)
         d["paired"] = self.paired
         return d
 
@@ -121,8 +125,13 @@ class ConfigStore:
                 return Settings()
             except (OSError, ValueError):
                 return Settings()
+            if not isinstance(raw, dict):
+                return Settings()
             known = {f.name for f in fields(Settings)}
-            return Settings(**{k: v for k, v in raw.items() if k in known})
+            s = Settings(**{k: v for k, v in raw.items() if k in known})
+            if not isinstance(s.handled_commands, dict):
+                s.handled_commands = {}
+            return s
 
     def save(self, s: Settings) -> None:
         with self._lock:
