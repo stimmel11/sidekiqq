@@ -1,6 +1,7 @@
 import { requireCron } from "@/lib/auth";
 import { getDeps } from "@/lib/deps";
 import { GoogleNotConnectedError } from "@/lib/google/auth";
+import { ConnectionUnusableError } from "@/lib/connectors/types";
 import { config } from "@/lib/env";
 import { errorResponse, json } from "@/lib/http";
 import { runScan } from "@/lib/scan/scanner";
@@ -25,7 +26,7 @@ async function handle(req: Request): Promise<Response> {
       const result = await runScan(deps);
       return json({ ok: true, ...result });
     } catch (err) {
-      if (err instanceof GoogleNotConnectedError) return json({ ok: false, error: err.message }, { status: 409 });
+      if (err instanceof GoogleNotConnectedError || err instanceof ConnectionUnusableError) return json({ ok: false, error: err.message }, { status: 409 });
       throw err;
     } finally {
       await deps.kv.del(lockKey);

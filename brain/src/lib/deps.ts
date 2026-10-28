@@ -1,11 +1,12 @@
 import { config } from "./env";
-import { encryptionKeyFromEnv } from "./crypto";
+import { keyRingFromEnv } from "./crypto";
 import { UpstashKV, type KV } from "./kv";
 import { createRepos, type Repos } from "./repos";
 import { GoogleTokenStore } from "./google/auth";
 import { GoogleWorkspace } from "./google/workspace";
 import { GoogleContacts, googlePeopleApi } from "./google/contacts";
 import { GoogleConnector } from "./connectors/google";
+import { ConnectionStore } from "./connectors/store";
 import { GmailDraftSender } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
 import type { Connector } from "./connectors/types";
@@ -24,6 +25,9 @@ export interface Deps {
   repos: Repos;
   clock: () => Date;
   llm(): LLM;
+  /** Encrypted per-connector credentials, status and enabled capabilities (docs/CONNECTORS.md §7). */
+  connections: ConnectionStore;
+  /** Google's view of `connections`, used by the Google OAuth routes. */
   googleTokens: GoogleTokenStore;
   /**
    * Connectors (Gmail/Calendar/Drive/Contacts today). Only lib/connectors/invoke.ts may call
@@ -50,7 +54,8 @@ export function buildDeps(kv: KV): Deps {
     conversationMaxMessages: config.conversationMaxMessages(),
     alertRetentionDays: config.alertLogDays(),
   });
-  const googleTokens = new GoogleTokenStore(kv, prefix, encryptionKeyFromEnv);
+  const connections = new ConnectionStore(kv, prefix, keyRingFromEnv);
+  const googleTokens = new GoogleTokenStore(connections);
   let llm: LLM | null = null;
   let push: PushSender | null = null;
   const googleWorkspace = async () => new GoogleWorkspace(await googleTokens.authorizedClient());
@@ -62,6 +67,7 @@ export function buildDeps(kv: KV): Deps {
     repos,
     clock,
     llm: () => (llm ??= llmFromEnv()),
+    connections,
     googleTokens,
     connectors: () => (connectors ??= [new GoogleConnector(googleWorkspace, googleContacts)]),
     senders: () =>

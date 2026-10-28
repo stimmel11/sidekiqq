@@ -168,6 +168,24 @@ describe("lookup_contact tool", () => {
     expect(res.content).toMatch(re);
   });
 
+  it("a Google grant from before the contacts scopes denies lookup and says to reconnect", async () => {
+    const deps = setup();
+    const G = "https://www.googleapis.com/auth/";
+    await deps.connections.save("google", {
+      secret: "1//refresh",
+      secretKind: "refresh_token",
+      account: "owner@example.com",
+      grantedScopes: [`${G}gmail.readonly`, `${G}gmail.compose`, `${G}calendar.readonly`, `${G}drive.readonly`],
+      connectedAt: "2026-10-01T00:00:00.000Z",
+    });
+    const res = await executeTool("lookup_contact", { name: "Dana" }, toolCtx(deps));
+    expect(res.isError).toBe(true);
+    expect(res.content).toMatch(/reconnect/);
+    expect(deps.contacts.lookup).not.toHaveBeenCalled();
+    // Gmail still works on the same grant.
+    expect((await executeTool("search_gmail", { query: "from:dana" }, toolCtx(deps))).isError).toBe(false);
+  });
+
   it("reports Google not connected", async () => {
     const deps = setup({ googleConnected: false });
     const res = await executeTool("lookup_contact", { name: "Dana" }, toolCtx(deps));

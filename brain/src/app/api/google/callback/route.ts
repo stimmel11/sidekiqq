@@ -25,10 +25,11 @@ export async function GET(req: Request): Promise<Response> {
 
   try {
     const deps = getDeps();
-    if (!(await deps.googleTokens.consumeState(state))) return page(400, "Link expired", "Start again from /api/google/connect.");
+    const codeVerifier = await deps.googleTokens.consumeState(state);
+    if (!codeVerifier) return page(400, "Link expired", "Start again from /api/google/connect.");
 
     const client = createOAuthClient();
-    const { tokens } = await client.getToken(code);
+    const { tokens } = await client.getToken({ code, codeVerifier });
     let refreshToken = tokens.refresh_token ?? undefined;
     if (!refreshToken) {
       const existing = await deps.googleTokens.load();

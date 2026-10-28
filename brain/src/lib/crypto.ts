@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { required } from "./env";
+import { optional, required } from "./env";
 
 const ALG = "aes-256-gcm";
 const VERSION = "v1";
@@ -14,6 +14,15 @@ export function decodeKey(raw: string): Buffer {
 
 export function encryptionKeyFromEnv(): Buffer {
   return decodeKey(required("TOKEN_ENCRYPTION_KEY"));
+}
+
+/**
+ * Current key plus, during a rotation, the previous one (`TOKEN_ENCRYPTION_KEY_PREV`, decrypt only).
+ * Used by the connection store (docs/CONNECTORS.md §7), which re-encrypts on read with the old key.
+ */
+export function keyRingFromEnv(): { current: Buffer; previous?: Buffer } {
+  const prev = optional("TOKEN_ENCRYPTION_KEY_PREV");
+  return { current: encryptionKeyFromEnv(), ...(prev ? { previous: decodeKey(prev) } : {}) };
 }
 
 /** AES-256-GCM; output `v1.<iv>.<tag>.<ciphertext>` (base64url). `aad` binds the ciphertext to its purpose. */
@@ -48,4 +57,15 @@ export function safeEqual(a: string, b: string): boolean {
 
 export function randomToken(bytes = 32): string {
   return randomBytes(bytes).toString("base64url");
+}
+
+/** PKCE S256 challenge for a code verifier (RFC 7636 §4.2). */
+export function pkceChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier, "ascii").digest("base64url");
+}
+
+/** A fresh PKCE pair: 43-char base64url verifier (32 random bytes) and its S256 challenge. */
+export function pkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomToken(32);
+  return { verifier, challenge: pkceChallenge(verifier) };
 }
