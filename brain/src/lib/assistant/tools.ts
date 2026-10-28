@@ -53,10 +53,10 @@ const isoish = z.string().describe("ISO-8601 date or datetime, e.g. 2026-10-20 o
 // Google lookups
 // ---------------------------------------------------------------------------------------
 
-const searchGmail = tool({
-  name: "search_gmail",
+const searchEmail = tool({
+  name: "search_email",
   description:
-    "Search the owner's Gmail using Gmail search syntax (from:, to:, subject:, newer_than:7d, is:unread, etc.). Returns message summaries (id, threadId, from, to, subject, date, snippet).",
+    "Search the owner's email (Gmail) using Gmail search syntax (from:, to:, subject:, newer_than:7d, is:unread, etc.). Returns message summaries (id, threadId, from, to, subject, date, snippet).",
   input: z.object({
     query: z.string().trim().min(1).max(500),
     maxResults: z.number().int().min(1).max(25).default(10),
@@ -172,7 +172,7 @@ const getClientTimeline = tool({
       repos.decisions.list({ client: input.client }),
     ]);
     if (!profile && !timeline.length && !commitments.length && !followups.length && !decisions.length) {
-      return { client: input.client, found: false, note: "No stored history for this client. Try search_gmail." };
+      return { client: input.client, found: false, note: "No stored history for this client. Try search_email." };
     }
     return { client: input.client, found: true, profile, timeline, commitments, followups, decisions };
   },
@@ -380,7 +380,7 @@ const upsertClientProfile = tool({
 });
 
 export const ALL_TOOLS = [
-  searchGmail,
+  searchEmail,
   getEmailThread,
   listCalendarEvents,
   searchDrive,
@@ -408,6 +408,12 @@ export const RESPOND_TOOL = "respond";
 
 export const TOOL_NAMES = [...ALL_TOOLS.map((t) => t.name), RESPOND_TOOL];
 
+/**
+ * Old tool names still accepted by executeTool for one release (docs/CONNECTORS.md §8 step 4), so a
+ * stored conversation that used them keeps working. Not offered to the model.
+ */
+export const TOOL_ALIASES: Readonly<Record<string, string>> = Object.freeze({ search_gmail: "search_email" });
+
 export function toolDefinitions(): ToolDef[] {
   return [
     ...ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: toolSchema(t.input) })),
@@ -428,7 +434,7 @@ export async function executeTool(
   rawInput: unknown,
   ctx: ToolContext,
 ): Promise<{ content: string; isError: boolean }> {
-  const spec = ALL_TOOLS.find((t) => t.name === name) as ToolSpec<ZodType> | undefined;
+  const spec = ALL_TOOLS.find((t) => t.name === (Object.hasOwn(TOOL_ALIASES, name) ? TOOL_ALIASES[name] : name)) as ToolSpec<ZodType> | undefined;
   if (!spec) return { content: `Unknown tool "${name}".`, isError: true };
   const parsed = spec.input.safeParse(rawInput ?? {});
   if (!parsed.success) {

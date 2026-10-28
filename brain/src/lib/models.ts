@@ -112,7 +112,7 @@ export type AskResponse = z.infer<typeof AskResponseSchema>;
  * A proactive alert. Same content as the FCM data push (title, body, kind and the string data keys),
  * kept in a short log so devices without FCM (Reachy Mini) can poll GET /api/alerts.
  */
-export const AlertKindSchema = z.enum(["email", "commitment_overdue"]);
+export const AlertKindSchema = z.enum(["email", "commitment_overdue", "connection_needs_reauth"]);
 export const AlertSchema = z.object({
   /** Monotonic sequence number as a string; also usable as a cursor. */
   id: z.string(),

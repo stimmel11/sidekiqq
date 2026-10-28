@@ -34,6 +34,12 @@ export const icons = {
       <path d="M11 18.5h2" />
     </svg>
   ),
+  connections: (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden {...p}>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </svg>
+  ),
 };
 
 export type IconName = keyof typeof icons;
