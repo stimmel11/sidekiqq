@@ -102,8 +102,14 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   `number` on its own line, not only inside `label`.
 - Liveness: a device treats a command as live only while `GET /api/commands` returns it. An `opened` ack is accepted up
   to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
-- This endpoint is the owner-device path. Hand-offs created later from `/api/ask` or connectors go through
-  `invokeCapability` with the caller rules and per-capability allowlists in `docs/CONNECTORS.md` §4.4.
+- `POST /api/commands` is the owner-device path. "Call Dana on my phone" said to any device goes through `/api/ask`:
+  Claude's `call_on_phone` tool queues a `call_contact` for the phone (`from` = the asking device). Its number comes only
+  from the clear match of a `lookup_contact` in the same request (a saved contact's id, plus which of its numbers when
+  it has several; any candidate of an ambiguous lookup, and Google "Other contacts", are refused so the assistant asks)
+  or from a whole number span in the owner's request text; never a number the model typed from email, files or
+  calendar (`lib/commands/call.ts`). One call per request; every attempt, refusals included, is audited as
+  `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
+  phone. Other connector hand-offs will go through `invokeCapability` with the caller rules in `docs/CONNECTORS.md` §4.4.
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`) for now;
   an FCM nudge is a later slice.
 

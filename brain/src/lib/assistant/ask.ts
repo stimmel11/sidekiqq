@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Deps } from "../deps";
 import { config } from "../env";
-import type { Action, AskRequest, AskResponse } from "../models";
+import type { Action, AskRequest, AskResponse, DeviceKind } from "../models";
 import { newId } from "../util";
 import { runtimeContext, systemBlocks } from "./prompt";
 import { enforceSpoken } from "./spoken";
@@ -15,7 +15,7 @@ import { executeTool, RESPOND_TOOL, RespondSchema, toolDefinitions, type ToolCon
  *     we force that tool so the loop always terminates with a structured answer.
  *  4. `spoken` is length-guarded server-side regardless of what the model produced.
  */
-export async function runAsk(deps: Deps, req: AskRequest): Promise<AskResponse> {
+export async function runAsk(deps: Deps, req: AskRequest, origin?: { deviceId: string; deviceKind: DeviceKind }): Promise<AskResponse> {
   const now = deps.clock();
   const conversationId = req.conversationId ?? newId("conv");
   const history = await deps.repos.conversations.load(conversationId);
@@ -28,7 +28,14 @@ export async function runAsk(deps: Deps, req: AskRequest): Promise<AskResponse> 
   const system = await systemBlocks(runtimeContext({ now, device: req.device }));
   const tools = toolDefinitions();
   const actions: Action[] = [];
-  const ctx: ToolContext = { deps, now, device: req.device, actions };
+  // `request` binds call_on_phone to this owner request: its text and the asking device.
+  const ctx: ToolContext = {
+    deps,
+    now,
+    device: req.device,
+    actions,
+    ...(origin ? { request: { text: req.text, deviceId: origin.deviceId, deviceKind: origin.deviceKind }, lookedUp: new Map() } : {}),
+  };
   const maxIterations = config.maxToolIterations();
   const llm = deps.llm();
 

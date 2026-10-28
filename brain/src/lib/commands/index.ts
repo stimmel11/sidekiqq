@@ -30,10 +30,10 @@ export const COMMAND_TARGETS: Record<CommandKind, readonly DeviceKind[]> = {
  * `open_url` host allowlist (CONNECTORS.md §2 `device.open_url`): meeting join links and grocery
  * cart pages only. Exact hosts, plus registrable domains whose subdomains are allowed.
  *
- * This slice serves the owner-device path only (POST /api/commands from a paired device). When
- * hand-offs are created from `/api/ask` or connectors, they go through invokeCapability with the
- * §4.4 caller rules and a per-capability allowlist (cart pages for grocery.checkout, join links the
- * brain created), and call numbers come only from contacts.lookup or digits the owner spoke.
+ * POST /api/commands serves the owner-device path. From `/api/ask`, the `call_on_phone` tool queues
+ * call_contact hand-offs with the number bound by ./call.ts (contacts.lookup in the same request or
+ * digits the owner spoke). Connector hand-offs (grocery.checkout, join links) will go through
+ * invokeCapability with the §4.4 caller rules and a per-capability allowlist.
  */
 export const OPEN_URL_HOSTS: readonly string[] = ["meet.google.com", "www.kroger.com", "www.kingsoopers.com"];
 export const OPEN_URL_DOMAINS: readonly string[] = ["zoom.us"];
