@@ -1,9 +1,10 @@
+import type { ContactLookup, ContactQuery } from "../../google/contacts";
 import type { Workspace } from "../../google/workspace";
 import type { CapabilityId, ImplementedCapability, In, Out } from "../capabilities";
 import type { Connector } from "../types";
 
 /**
- * The built-in Google connector: Gmail, Calendar and Drive (docs/CONNECTORS.md §8 step 1).
+ * The built-in Google connector: Gmail, Calendar, Drive and Contacts (docs/CONNECTORS.md §8 step 1).
  * A thin wrapper over `Workspace`, so behaviour is unchanged. It has NO send path: sending a
  * Gmail draft lives only in ./send.ts, registered in the sender registry.
  */
@@ -13,24 +14,44 @@ const SCOPES: Partial<Record<CapabilityId, string[]>> = {
   "email.draft": ["https://www.googleapis.com/auth/gmail.compose"],
   "calendar.read": ["https://www.googleapis.com/auth/calendar.readonly"],
   "files.read": ["https://www.googleapis.com/auth/drive.readonly"],
+  "contacts.lookup": ["https://www.googleapis.com/auth/contacts.readonly", "https://www.googleapis.com/auth/contacts.other.readonly"],
 };
 
-export const GOOGLE_CAPABILITIES = ["email.read", "email.draft", "calendar.read", "files.read"] as const satisfies readonly CapabilityId[];
+export const GOOGLE_CAPABILITIES = ["email.read", "email.draft", "calendar.read", "files.read", "contacts.lookup"] as const satisfies readonly CapabilityId[];
+
+/** What the connector needs from lib/google/contacts.ts (`GoogleContacts`). Read-only. */
+export interface ContactsLookup {
+  lookup(q: ContactQuery): Promise<ContactLookup>;
+}
 
 export class GoogleConnector implements Connector {
   readonly id = "google";
-  readonly displayName = "Google (Gmail, Calendar, Drive)";
+  readonly displayName = "Google (Gmail, Calendar, Drive, Contacts)";
   readonly firstParty = true;
-  readonly capabilities = GOOGLE_CAPABILITIES;
+  readonly capabilities: readonly CapabilityId[];
 
-  /** `workspace` throws GoogleNotConnectedError when Google isn't connected. */
-  constructor(private readonly workspace: () => Promise<Workspace>) {}
+  /**
+   * Both factories throw GoogleNotConnectedError when Google isn't connected. Without a
+   * `contacts` factory the connector does not offer `contacts.lookup`.
+   */
+  constructor(
+    private readonly workspace: () => Promise<Workspace>,
+    private readonly contacts?: () => Promise<ContactsLookup>,
+  ) {
+    this.capabilities = contacts ? GOOGLE_CAPABILITIES : GOOGLE_CAPABILITIES.filter((c) => c !== "contacts.lookup");
+  }
 
   scopesFor(caps: readonly CapabilityId[]): string[] {
     return [...new Set(caps.flatMap((c) => SCOPES[c] ?? []))];
   }
 
   async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<Out<C>> {
+    if (cap === "contacts.lookup") {
+      if (!this.contacts) throw new Error("google connector was built without contacts");
+      const i = input as In<"contacts.lookup">;
+      const out: Out<"contacts.lookup"> = await (await this.contacts()).lookup({ name: i.name, max: i.max });
+      return out as Out<C>;
+    }
     const ws = await this.workspace();
     switch (cap) {
       case "email.read": {

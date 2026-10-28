@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isPlausibleEmail } from "../google/mime";
 import type { CalendarEvent, DriveFile, EmailMessage, EmailSummary } from "../google/workspace";
+import type { ContactLookup } from "../google/contacts";
 
 /**
  * Capability interfaces (docs/CONNECTORS.md §2).
@@ -92,6 +93,17 @@ export const FilesReadInput = z.object({
   includeContent: z.boolean(),
 });
 
+/**
+ * Name to resolve. The provider module re-validates the characters (letters, spaces, . ' -) and
+ * reports a plain-words error; this schema only bounds the size. The bounds equal
+ * CONTACT_NAME_MAX_CHARS / CONTACTS_MAX in lib/google/contacts.ts (checked by a test); they are
+ * literals here so this module never pulls `googleapis` in at runtime.
+ */
+export const ContactsLookupInput = z.object({
+  name: z.string().trim().min(1).max(80),
+  max: z.number().int().min(1).max(10),
+});
+
 export type EmailReadIn = z.infer<typeof EmailReadInput>;
 export type EmailReadOutput<I extends EmailReadIn> = I extends { op: "search" }
   ? EmailSummary[]
@@ -117,6 +129,7 @@ export interface CapabilityIO {
   "email.draft": { in: z.infer<typeof EmailDraftInput>; out: EmailDraftOutput };
   "calendar.read": { in: z.infer<typeof CalendarReadInput>; out: CalendarEvent[] };
   "files.read": { in: z.infer<typeof FilesReadInput>; out: DriveFile[] };
+  "contacts.lookup": { in: z.infer<typeof ContactsLookupInput>; out: ContactLookup };
 }
 export type ImplementedCapability = keyof CapabilityIO;
 export type In<C extends ImplementedCapability> = CapabilityIO[C]["in"];
@@ -127,6 +140,7 @@ export const INPUT_SCHEMAS: { [C in ImplementedCapability]: z.ZodType<In<C>> } =
   "email.draft": EmailDraftInput,
   "calendar.read": CalendarReadInput,
   "files.read": FilesReadInput,
+  "contacts.lookup": ContactsLookupInput,
 };
 
 /** Plain words for the owner (Connections screen). */

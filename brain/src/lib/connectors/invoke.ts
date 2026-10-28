@@ -45,6 +45,8 @@ function summarize(cap: CapabilityId, input: unknown): string {
       return `${String(i.timeMin)} → ${String(i.timeMax)}`;
     case "files.read":
       return `search "${String(i.query)}"`;
+    case "contacts.lookup":
+      return `lookup "${String(i.name)}"`;
     default:
       return cap;
   }
