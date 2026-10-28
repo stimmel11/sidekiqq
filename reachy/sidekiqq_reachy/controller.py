@@ -41,6 +41,7 @@ class Controller:
             if "brain_url" in updates and s.brain_url != self._settings.brain_url:
                 # A different brain means the old token and cursor are meaningless.
                 s.token, s.device_id, s.alert_cursor = "", "", ""
+                s.handled_commands = {}
             self.store.save(s)
             self._settings = s
         self.settings_changed.set()
@@ -59,7 +60,7 @@ class Controller:
         except BrainError as e:
             raise SettingsError(f"Pairing failed: {e.message}") from None
         with self._lock:
-            s = replace(self._settings, brain_url=url, token=out["token"], device_id=out.get("deviceId", ""), alert_cursor="")
+            s = replace(self._settings, brain_url=url, token=out["token"], device_id=out.get("deviceId", ""), alert_cursor="", handled_commands={})
             self.store.save(s)
             self._settings = s
             self.auth_failed = False
@@ -69,7 +70,7 @@ class Controller:
 
     def unpair(self) -> dict[str, Any]:
         with self._lock:
-            s = replace(self._settings, token="", device_id="", alert_cursor="")
+            s = replace(self._settings, token="", device_id="", alert_cursor="", handled_commands={})
             self.store.save(s)
             self._settings = s
         self.settings_changed.set()
@@ -89,6 +90,16 @@ class Controller:
             if cursor == self._settings.alert_cursor:
                 return
             self._settings.alert_cursor = cursor
+            self.store.save(self._settings)
+
+    def load_handled_commands(self) -> dict[str, str]:
+        return dict(self.settings.handled_commands)
+
+    def save_handled_commands(self, handled: dict[str, str]) -> None:
+        with self._lock:
+            if handled == self._settings.handled_commands:
+                return
+            self._settings.handled_commands = dict(handled)
             self.store.save(self._settings)
 
     def mark_unauthorized(self) -> None:

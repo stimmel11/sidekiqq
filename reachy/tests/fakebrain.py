@@ -23,6 +23,11 @@ class FakeBrain:
         self.alerts: list[dict[str, Any]] = []
         self.drafts: list[dict[str, Any]] = []
         self.approved: list[str] = []
+        #: Device commands for this robot (DeviceCommand dicts). Listed until acked; set
+        #: "expired": True on one to stop listing it (the brain's 15-min expiry).
+        self.commands: list[dict[str, Any]] = []
+        #: (id, result) for every ack request that reached the handler (incl. no-ops and 409s).
+        self.acks: list[tuple[str, str]] = []
         #: path prefix -> status (fails once) or (status, times)
         self.fail: dict[str, Any] = {}
         self.brief = {"kind": "daily", "generatedAt": "2026-10-21T12:00:00Z", "sections": [], "top5": []}
@@ -79,6 +84,22 @@ class FakeBrain:
                     latest = max([int(a["id"]) for a in brain.alerts] + [since])
                     cursor = page[-1]["id"] if more else str(latest)
                     return self._json(200, {"items": page, "cursor": cursor, "more": more})
+                if u.path == "/api/commands" and method == "GET":
+                    live = [{k: v for k, v in c.items() if k not in ("status", "expired")} for c in brain.commands if not c.get("status") and not c.get("expired")]
+                    return self._json(200, {"items": live})
+                if u.path.startswith("/api/commands/") and u.path.endswith("/ack") and method == "POST":
+                    cid = u.path.split("/")[3]
+                    result = json.loads(raw).get("result")
+                    brain.acks.append((cid, result))
+                    c = next((x for x in brain.commands if x["id"] == cid), None)
+                    if c is None:
+                        return self._json(404, {"error": "no such command", "code": "not_found"})
+                    if c.get("status") == result:
+                        return self._json(200, {"ok": True})
+                    if c.get("status"):
+                        return self._json(409, {"error": "already acked", "code": "already_acked"})
+                    c["status"] = result
+                    return self._json(200, {"ok": True})
                 if u.path == "/api/brief":
                     return self._json(200, brain.brief)
                 if u.path == "/api/drafts" and method == "GET":

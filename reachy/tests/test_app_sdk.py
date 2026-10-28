@@ -136,3 +136,87 @@ def test_voice_loop_end_to_end_with_fake_robot(brain, tmp_path):
     assert paths.index("/api/transcribe") < paths.index("/api/ask") < paths.index("/api/speak")
     assert robot.gotos > 0
     assert not media.recording
+
+
+# ---------------------------------------------------------------------- device commands (reachy_wake)
+
+
+def _wake_cmd(i, activity):
+    return {"id": f"cmd_{i}", "at": "2026-10-28T12:00:00.000Z", "expiresAt": "2026-10-28T12:15:00.000Z", "kind": "reachy_wake", "label": f"Wake Reachy {activity}", "from": "phone", "activity": activity}
+
+
+def _loop(brain, tmp_path, script=None, confirmation=None):
+    media = FakeMedia(script if script is not None else np.zeros(16000, np.float32))
+    robot = FakeRobot(media)
+    stop = threading.Event()
+    ctl = Controller(ConfigStore(tmp_path / "c.json"))
+    ctl.pair(brain.url, "123456")
+    body = RobotBody(robot, stop)
+    assistant = Assistant(ctl.client, body, voice=lambda: ctl.settings.voice, on_unauthorized=ctl.mark_unauthorized, on_status=ctl.set_status, confirmation=confirmation)
+    loop = VoiceLoop(media, body, assistant, ctl, stop)
+    return media, robot, stop, ctl, assistant, loop
+
+
+def _wait(cond, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline and not cond():
+        time.sleep(0.05)
+    return cond()
+
+
+def test_dance_wake_runs_once_and_acks(brain, tmp_path):
+    brain.commands = [_wake_cmd(1, "dance"), {**_wake_cmd(2, "dance"), "kind": "open_url"}]
+    media, robot, stop, ctl, _, loop = _loop(brain, tmp_path)
+    th = threading.Thread(target=loop.run, daemon=True)
+    th.start()
+    assert _wait(lambda: ("cmd_1", "opened") in brain.acks)
+    stop.set()
+    th.join(timeout=5)
+    assert not th.is_alive()
+    assert media.played.count("dance1.wav") == 1
+    assert robot.gotos >= 8
+    assert brain.acks == [("cmd_1", "opened")]  # the open_url isn't Reachy's: ignored, not acked
+    assert ctl.load_handled_commands() == {"cmd_1": "opened"}
+    assert "/api/speak" not in brain.paths()
+
+
+def test_wake_waits_for_a_pending_send_it_and_never_approves(brain, tmp_path):
+    """Mid-conversation: a draft is waiting for "send it". The wake must not interrupt or answer it."""
+    from sidekiqq_reachy.confirm import DraftConfirmation
+
+    brain.commands = [_wake_cmd(1, "dance")]
+    conf = DraftConfirmation(window_s=1.2)
+    media, robot, stop, ctl, assistant, loop = _loop(brain, tmp_path, confirmation=conf)
+    conf.offer("d1", "an email to Dana")
+    th = threading.Thread(target=loop.run, daemon=True)
+    th.start()
+    assert _wait(lambda: ("cmd_1", "opened") in brain.acks)
+    stop.set()
+    th.join(timeout=5)
+    # Silence cancelled the draft (spoken "not sent") before the dance started.
+    assert brain.approved == []
+    spoken = [i for i, p in enumerate(media.played) if "sidekiqq_reachy_" in p and not p.endswith("chime.wav")]
+    assert spoken and spoken[0] < media.played.index("dance1.wav")
+    assert "/api/transcribe" not in brain.paths()
+
+
+def test_chat_wake_greets_then_listens_for_one_turn(brain, tmp_path):
+    rate = 16000
+    t = np.arange(int(rate * 1.0)) / rate
+    speech = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    quiet = np.zeros(int(rate * 1.2), np.float32) + 0.0005
+    brain.commands = [_wake_cmd(1, "chat")]
+    brain.transcripts = ["what's next"]
+    brain.ask_replies = [{"reply": "Call Dana.", "spoken": "Call Dana."}]
+    media, robot, stop, ctl, _, loop = _loop(brain, tmp_path, script=np.concatenate([quiet[:4800], speech, quiet]))
+    th = threading.Thread(target=loop.run, daemon=True)
+    th.start()
+    assert _wait(lambda: ctl.state == "listening")
+    assert "wake_up.wav" in media.played
+    assert _wait(lambda: ("cmd_1", "opened") in brain.acks)
+    media.gate.set()
+    assert _wait(lambda: "/api/ask" in brain.paths())
+    stop.set()
+    th.join(timeout=5)
+    paths = brain.paths()
+    assert paths.index("/api/speak") < paths.index("/api/transcribe") < paths.index("/api/ask")

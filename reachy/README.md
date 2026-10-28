@@ -25,6 +25,20 @@ your words to your brain, speaks the answer, and reacts to urgent alerts.
   items it makes an attention gesture and plays a short chime. It reads them aloud only if you
   turn on "Speak urgent alerts".
 - **Brief me** speaks your daily briefing (`GET /api/brief?kind=daily`).
+- **Wake from another device.** "Wake Reachy to chat / read my brief / dance / play a game" on
+  your phone or watch queues a `reachy_wake` command. The robot polls `GET /api/commands` on the
+  alert thread (every 30 s, or the alert interval if shorter, with the same backoff) and then:
+  - **chat:** wake-up sound and a greeting, then one listen, exactly like pressing **Talk**.
+  - **brief:** the daily brief, like **Brief me**.
+  - **dance:** a short dance (motion and the SDK's dance sound, no network).
+  - **game:** there is no game yet, so it says games are coming soon (acked `failed`).
+
+  It acks each one (`POST /api/commands/:id/ack`: `opened`, or `failed` if it couldn't run).
+  A wake never interrupts anything: if the robot is mid-turn, listening, speaking or waiting
+  for "send it", the wake waits and runs once it is idle. If it waited more than 2 minutes it is
+  dropped and acked `dismissed`, so a chat never opens the mic long after you asked; if the brain
+  stops listing it (expired), it is dropped without acting. Handled ids are saved in the config file, so a re-delivered
+  command or a restart never repeats a wake. Other command kinds are ignored and not acked.
 - **Voice-confirmed drafts.** When a reply creates an email draft, the robot reads back the
   recipient, the subject and a one-sentence summary of the body. It sends only if your next words
   are exactly **"send it"** within 30 seconds. Anything else, silence or the Cancel button leaves
@@ -84,6 +98,8 @@ set by name or path.
 | `POST /api/ask` | `{text, device: "reachy", conversationId?}` → `{reply, spoken, actions}` |
 | `POST /api/speak` | `{text, voice?}` → `audio/wav`: PCM16 mono, 24 kHz (rate is in the header). Max 1000 chars; longer replies are split at sentences |
 | `GET /api/alerts?since=` | Same alerts as the phone's FCM pushes, plus a cursor (saved locally) |
+| `GET /api/commands` | `reachy_wake` hand-offs from your other devices, deduped by id |
+| `POST /api/commands/:id/ack` | `{result: "opened"\|"dismissed"\|"failed"}` after running (or dropping) a wake |
 | `GET /api/brief?kind=daily` | Daily briefing |
 | `GET /api/drafts` | Read-only: draft body for the one-sentence read-back |
 | `POST /api/drafts/:id/approve` | Only after an exact "send it" |
@@ -98,7 +114,13 @@ reachy-mini-daemon --sim  # then: python -m sidekiqq_reachy.main
 ```
 
 The pure logic is unit-tested without a robot: endpointing, WAV framing, the confirmation state
-machine, the alert cursor, speech splitting and the API client against a fake brain.
+machine, the alert cursor, the command poller (dedupe, liveness, acks, wake modes), speech
+splitting and the API client against a fake brain.
+
+If PyGObject won't build (no GStreamer dev headers), `tests/test_app_sdk.py` can still run: make
+the venv with a Python that has a system `gi` (`python3.12 -m venv --system-site-packages`), then
+`pip install --no-deps reachy-mini==1.12.0` plus its other dependencies, and
+`pip install --no-deps -e ".[dev]"`.
 
 ## Publish to Hugging Face
 
@@ -123,6 +145,7 @@ reachy/
 │   ├── confirm.py      # "send it" state machine (mirror of DraftConfirmation.kt)
 │   ├── audio.py        # mic conversion, energy endpointing, WAV framing, chime
 │   ├── alerts.py       # /api/alerts poller with persisted cursor and backoff
+│   ├── commands.py     # /api/commands poller (dedupe, liveness, acks) + reachy_wake activities
 │   ├── api.py          # brain HTTP client (stdlib)
 │   ├── config.py       # settings + 0600 config file
 │   ├── controller.py   # state shared with the settings page

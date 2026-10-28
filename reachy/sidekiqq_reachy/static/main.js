@@ -4,6 +4,7 @@ const STATES = {
   listening: "Listening…",
   thinking: "Thinking…",
   briefing: "Preparing your brief…",
+  dancing: "Dancing…",
   awaiting_confirm: "Waiting for “send it” (30 s)",
   error: "Problem",
   not_paired: "Not paired",
