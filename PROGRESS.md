@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 397 tests passing. Connector framework slices 1, 2 and 4 (encrypted `ConnectionStore`, `/api/connections` + dashboard Connections screen), task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 401 tests passing. Connector framework slices 1, 2 and 4 (encrypted `ConnectionStore`, `/api/connections` + dashboard Connections screen), task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -31,7 +31,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-27: Task layer slice 2a (`crew/phone-handoffs`): phone polls device commands and shows tap-to-act hand-offs (dialer/WhatsApp/browser) with acks. Android unverified; 9 handoff JVM tests pass via kotlinc.
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
-- 2026-10-28: Connector framework slice 4 (`crew/connections-screen`): `/api/connections` routes + dashboard Connections screen, `search_email` rename (alias kept), provider revoke on disconnect, `connection_needs_reauth` alert. 397 brain tests.
+- 2026-10-28: Connector framework slice 4 (`crew/connections-screen`): `/api/connections` routes + dashboard Connections screen, `search_email` rename (alias kept), provider revoke on disconnect, `connection_needs_reauth` alert. 401 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
 
 ## Backlog (top = next)

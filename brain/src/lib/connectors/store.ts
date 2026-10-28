@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { KV } from "../kv";
-import { decrypt, encrypt, randomToken } from "../crypto";
+import { decrypt, encrypt, randomToken, sha256 } from "../crypto";
 import { CAPABILITY_IDS, type CapabilityId } from "./capabilities";
 import type { Connector } from "./types";
 
@@ -202,8 +202,13 @@ export class ConnectionStore {
     const cur = await this.load(connectorId);
     if (!cur || cur.status === "needs_reauth") return false;
     if (failedSecret !== undefined && cur.secret !== failedSecret) return false;
+    // The read above and the write below aren't atomic, so two concurrent failures could both see
+    // "connected". Both write the same status; a SET NX per credential picks the one that returns
+    // true (the caller alerts once). Keyed by a hash of the secret, so a reconnect with a new
+    // credential gets a fresh key.
+    const once = `${this.prefix}:conn:${ConnectorIdSchema.parse(connectorId)}:reauth:${sha256(cur.secret).slice(0, 32)}`;
     await this.save(connectorId, { ...cur, status: "needs_reauth", lastError: reason.slice(0, 300) });
-    return true;
+    return this.kv.set(once, "1", { nx: true, exSeconds: 7 * 24 * 3600 });
   }
 
   /**

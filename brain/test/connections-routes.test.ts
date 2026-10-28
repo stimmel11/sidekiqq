@@ -10,7 +10,7 @@ import { POST as disconnectPost } from "@/app/api/connections/[connectorId]/disc
 import { POST as capabilitiesPost } from "@/app/api/connections/[connectorId]/capabilities/route";
 import { POLICY, type ImplementedCapability, type Out } from "@/lib/connectors/capabilities";
 import { invokeCapability, readEmail } from "@/lib/connectors/invoke";
-import type { Connection } from "@/lib/connectors/manage";
+import { setCapability, type Connection } from "@/lib/connectors/manage";
 import { ConnectionUnusableError, type Connector } from "@/lib/connectors/types";
 import { executeTool, TOOL_ALIASES, toolDefinitions } from "@/lib/assistant/tools";
 import { connectionActions, connectionsNotice, STATUS_PRESENTATION } from "@/lib/dashboard/connections";
@@ -89,7 +89,7 @@ describe("connections routes: owner only (docs/CONNECTORS.md §9)", () => {
       P("google"),
     );
     expect(ok.status).toBe(200);
-    const crossSite: Record<string, string>[] = [{ origin: "https://evil.example" }, { "sec-fetch-site": "cross-site" }];
+    const crossSite: Record<string, string>[] = [{ origin: "https://evil.example" }, { "sec-fetch-site": "cross-site" }, { "sec-fetch-site": "same-site" }];
     for (const h of crossSite) {
       const bad = await capabilitiesPost(req("POST", "/api/connections/google/capabilities", { headers: { cookie, ...h }, body: { enabled: [] } }), P("google"));
       expect(bad.status).toBe(403);
@@ -369,5 +369,69 @@ describe("Connections screen presentation", () => {
     expect(connectionsNotice({ done: "disconnected_local" })?.text).toMatch(/didn't confirm/);
     expect(connectionsNotice({ error: "connect" })).toMatchObject({ tone: "danger" });
     expect(connectionsNotice({ connect: "<b>hi</b>", done: "nope", error: "x" })).toBeNull();
+  });
+});
+
+describe("review fixes: disconnect order, alert dedupe, stale ids", () => {
+  const invalidGrant: Connector = {
+    id: "google",
+    displayName: "Google",
+    firstParty: true,
+    capabilities: ["email.read"],
+    scopesFor: () => [],
+    invoke: async <C extends ImplementedCapability>(): Promise<Out<C>> => {
+      throw Object.assign(new Error("invalid_grant"), { response: { data: { error: "invalid_grant" } } });
+    },
+  };
+
+  it("a call failing with invalid_grant during the revoke raises no alert and leaves nothing stored", async () => {
+    const deps = makeDeps();
+    setDeps(deps);
+    await connectGoogle(deps);
+    const d = { ...deps, connectors: () => [invalidGrant] };
+    vi.spyOn(google.auth.OAuth2.prototype, "revokeToken").mockImplementation((async () => {
+      await expect(readEmail(d, { op: "account" }, { caller: "cron" })).rejects.toThrow(/invalid_grant/);
+      return { data: {} };
+    }) as never);
+    const res = await disconnectPost(req("POST", "/api/connections/google/disconnect", { headers: OWNER }), P("google"));
+    expect(await res.json()).toEqual({ ok: true, revoked: true });
+    expect(await deps.connections.load("google")).toBeNull();
+    expect((await deps.repos.alerts.since(null)).items).toHaveLength(0);
+  });
+
+  it("needs_reauth: no revoke call; a revoke answering invalid_token counts as revoked", async () => {
+    const deps = makeDeps();
+    setDeps(deps);
+    await connectGoogle(deps, { status: "needs_reauth" });
+    const revoke = vi.spyOn(google.auth.OAuth2.prototype, "revokeToken").mockImplementation((async () => {
+      throw Object.assign(new Error("invalid_token"), { response: { data: { error: "invalid_token" } } });
+    }) as never);
+    let res = await disconnectPost(req("POST", "/api/connections/google/disconnect", { headers: OWNER }), P("google"));
+    expect(await res.json()).toEqual({ ok: true, revoked: true });
+    expect(revoke).not.toHaveBeenCalled();
+
+    await connectGoogle(deps);
+    res = await disconnectPost(req("POST", "/api/connections/google/disconnect", { headers: OWNER }), P("google"));
+    expect(await res.json()).toEqual({ ok: true, revoked: true });
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("concurrent invalid_grant failures mark needs_reauth but alert once", async () => {
+    const deps = makeDeps();
+    await connectGoogle(deps, { grantedScopes: [] });
+    const results = await Promise.all([1, 2, 3].map(() => deps.connections.markNeedsReauth("google", "invalid_grant", "1//refresh-SECRET")));
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect((await deps.connections.load("google"))?.status).toBe("needs_reauth");
+    // A reconnect with a new credential can alert again.
+    await connectGoogle(deps, { secret: "1//new-SECRET" });
+    expect(await deps.connections.markNeedsReauth("google", "invalid_grant", "1//new-SECRET")).toBe(true);
+  });
+
+  it("a stale stored id the connector no longer offers doesn't block toggles", async () => {
+    const deps = makeDeps();
+    await connectGoogle(deps, { enabled: ["email.read", "grocery.search"] });
+    const c = await setCapability(deps, "google", "calendar.read", true);
+    expect(c.capabilities.filter((x) => x.ownerEnabled).map((x) => x.id)).toEqual(["email.read", "calendar.read"]);
+    expect((await deps.connections.load("google"))?.enabled).toEqual(["email.read", "calendar.read"]);
   });
 });

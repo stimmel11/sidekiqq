@@ -127,18 +127,24 @@ export async function setCapability(deps: Deps, connectorId: string, cap: string
   const connector = findConnector(deps, connectorId);
   const stored = await deps.connections.load(connector.id);
   if (!stored) throw new HttpError(409, `${connector.displayName} is not connected.`, "not_connected");
-  const current = stored.enabled ?? [...connector.capabilities];
+  // Drop stale ids (e.g. a capability the connector no longer offers) so they can't block every toggle.
+  const current = (stored.enabled ?? [...connector.capabilities]).filter((c) => connector.capabilities.includes(c));
   const next = on ? [...current, cap] : current.filter((c) => c !== cap);
   return setCapabilities(deps, connector.id, next);
 }
 
 /**
- * Disconnect (§7): revoke at the provider where it has an endpoint (best effort), then delete the
- * stored credential. The local delete happens even when the revoke fails.
+ * Disconnect (§7): delete the stored credential first, then revoke it at the provider where it has
+ * an endpoint (best effort, with the secret read before the delete). Deleting first means a call
+ * that fails mid-revoke finds no stored connection, so it can't mark it needs_reauth or alert the
+ * owner, and a failed delete never leaves a dead credential behind a "couldn't disconnect" error.
+ * A connection that already needs reauth is not revoked: its grant is already dead.
  */
 export async function disconnect(deps: Deps, connectorId: string): Promise<{ ok: true; revoked: boolean }> {
   const connector = findConnector(deps, connectorId);
   const stored = await deps.connections.load(connector.id);
+  await deps.connections.clear(connector.id);
+  if (stored?.status === "needs_reauth") return { ok: true, revoked: true };
   let revoked = false;
   const flow = oauthFlow(connector.id);
   if (stored && stored.secretKind === "refresh_token" && flow?.revoke) {
@@ -146,10 +152,14 @@ export async function disconnect(deps: Deps, connectorId: string): Promise<{ ok:
       await flow.revoke(stored.secret);
       revoked = true;
     } catch (err) {
-      console.warn(`[connections] ${connector.id}: provider revoke failed; deleting the local credential anyway`, (err as Error)?.message);
+      // Google answers invalid_token / invalid_grant for a token that is already revoked or expired.
+      if (/invalid_(token|grant)/.test(String((err as { response?: { data?: { error?: unknown } } })?.response?.data?.error ?? (err as Error)?.message))) {
+        revoked = true;
+      } else {
+        console.warn(`[connections] ${connector.id}: provider revoke failed; the local credential was deleted`, (err as Error)?.message);
+      }
     }
   }
-  await deps.connections.clear(connector.id);
   return { ok: true, revoked };
 }
 
