@@ -135,7 +135,8 @@ streamed to the cloud. Draft approval uses the same "send it" rule and still goe
 backoff) and runs a wake only while the latest successful GET lists it: `chat` = greeting + one Talk-style listen,
 `brief` = daily brief, `dance` = motion only, `game` = not built yet (spoken "coming soon", acked `failed`); an unknown
 `activity` does nothing and is acked `failed`. A wake never interrupts a turn, listening, speech or a pending "send it":
-it waits for an idle robot, and is acked `dismissed` without acting if it waited more than 2 minutes. Handled ids are
+it waits for an idle robot, and is acked `dismissed` without acting if it waited more than 2 minutes (a `chat`, which
+opens the mic, also if its `at` is more than 2 minutes + 60 s clock skew old). Handled ids are
 claimed and persisted before acting, so re-delivery, lost acks or a restart never repeat one (lost acks are re-sent
 while the command is still listed). Kinds Reachy doesn't run are ignored and not acked.
 

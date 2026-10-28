@@ -12,7 +12,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
 | Medallion firmware + hardware guide (`/medallion`) | Done, untested on hardware | Compiles and links for ESP32-S3; 31 native tests pass. See `medallion/HARDWARE.md`. |
-| Reachy Mini app (`/reachy`) | Written, tested off-robot | Python `sidekiqq_reachy` ReachyMiniApp (HF Space). 116 pytest tests pass, including integration against the real reachy-mini 1.12.0 SDK classes with a fake robot. Polls `/api/commands` for `reachy_wake`. `reachy-mini-app-assistant check` passes its structure checks; its venv install step can't run here (PyGObject). Never run on hardware. |
+| Reachy Mini app (`/reachy`) | Written, tested off-robot | Python `sidekiqq_reachy` ReachyMiniApp (HF Space). 121 pytest tests pass, including integration against the real reachy-mini 1.12.0 SDK classes with a fake robot. Polls `/api/commands` for `reachy_wake`. `reachy-mini-app-assistant check` passes its structure checks; its venv install step can't run here (PyGObject). Never run on hardware. |
 | Marketing site (`/site`) | Built, not deployed | Astro 7 + Tailwind, static. Home, /devices, /privacy-and-trust, /blog, 404. Copy in `site/src/content/`; see `site/EDITING.md`. |
 | UI framework (`/design` + owner dashboard `brain/src/app/(dashboard)`) | Done, tested | Tokens → CSS vars, Tailwind preset, Compose theme (`design/build.mjs`). Dashboard: login (SESSION_SECRET cookie), Today, Follow-ups, Drafts (approve via the existing approve route), Commitments, Devices. Compose theme not compiled yet. |
 | Apple (`/apple`) | Written, not compiled | `SideKiqqKit` Swift package (client, models, Keychain token store, WAV, medallion protocol + assembler, `DraftConfirmation`, voice loop) with XCTest suites, and the SwiftUI iPhone app (XcodeGen). No Swift toolchain or Xcode in the sandbox, so `swift test` and the app build have not run yet. iPhone pairs as `phone`; alerts via `/api/alerts` polling until APNs. See `docs/APPLE.md`. |
@@ -32,7 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
-- 2026-10-28: Task layer slice 3 (`crew/reachy-commands`): Reachy polls `GET /api/commands`, runs `reachy_wake` (chat/brief/dance/game stub) once per id with persisted dedupe and acks, queued while busy. 116 Reachy tests.
+- 2026-10-28: Task layer slice 3 (`crew/reachy-commands`): Reachy polls `GET /api/commands`, runs `reachy_wake` (chat/brief/dance/game stub) once per id with persisted dedupe and acks, queued while busy. 121 Reachy tests.
 
 ## Backlog (top = next)
 

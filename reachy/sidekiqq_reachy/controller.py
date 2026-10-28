@@ -93,7 +93,8 @@ class Controller:
             self.store.save(self._settings)
 
     def load_handled_commands(self) -> dict[str, str]:
-        return dict(self.settings.handled_commands)
+        h = self.settings.handled_commands
+        return dict(h) if isinstance(h, dict) else {}
 
     def save_handled_commands(self, handled: dict[str, str]) -> None:
         with self._lock:

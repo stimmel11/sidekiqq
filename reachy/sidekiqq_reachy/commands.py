@@ -14,7 +14,9 @@ Rules (kept in step with the phone's CommandInbox in android/phone/.../handoff/H
 - Busy robot: a wake that arrives mid-turn, while listening, while speaking or while a draft waits
   for "send it" is queued, and runs once the robot is idle. If it has waited more than
   ``QUEUE_MAX_S`` it is dropped and acked "dismissed" instead, so a "chat" never opens the mic
-  minutes after the owner asked.
+  minutes after the owner asked. A chat is also dismissed when the brain's ``at`` is older than
+  ``QUEUE_MAX_S`` + ``CLOCK_SKEW_S`` (the robot was offline when the owner asked).
+- Unpair, re-pair or a new brain resets all state, so old ids are never written back.
 - Nothing here sends a message. A chat is an ordinary voice turn; drafts still need "send it".
 """
 
@@ -24,6 +26,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
 from .api import BrainClient, BrainError, BrainUnavailable
@@ -35,6 +38,8 @@ ACTIVITIES = ("chat", "brief", "dance", "game")
 QUEUE_MAX_S = 120.0
 #: Handled ids remembered (commands expire after 15 min and at most 20 are pending per device).
 MAX_REMEMBERED = 100
+#: Clock skew allowed between the brain's `at` and this robot's wall clock (chat age guard).
+CLOCK_SKEW_S = 60.0
 #: The phone polls every 30 s; the robot polls commands at least that often.
 MAX_INTERVAL_S = 30.0
 
@@ -49,6 +54,18 @@ class Wake:
     label: str
     #: monotonic time this robot first saw it (for QUEUE_MAX_S).
     seen_at: float
+    #: The brain's `at` (epoch seconds), or None if unparseable. Used only for the chat age guard.
+    created_at: float | None = None
+
+
+def _parse_at(raw: Any) -> float | None:
+    try:
+        at = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return at.timestamp()
 
 
 @dataclass
@@ -82,8 +99,11 @@ class CommandPoller:
         interval_s: Callable[[], float] = lambda: MAX_INTERVAL_S,
         monotonic: Callable[[], float] = time.monotonic,
         queue_max_s: float = QUEUE_MAX_S,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._client_factory = client_factory
+        self._load_handled = load_handled
+        self._wall = wall_clock
         self._save_handled = save_handled
         self._interval_s = interval_s
         self._mono = monotonic
@@ -100,6 +120,9 @@ class CommandPoller:
         self._listed_at: float | None = None
         self._next_at = 0.0
         self.failures = 0
+        #: (brain_url, token) the state above belongs to. Unpair / re-pair / a new brain resets it.
+        self._key: tuple[str, str] | None = None
+        self._key_known = False
 
     # ------------------------------------------------------------------ cadence
 
@@ -125,10 +148,9 @@ class CommandPoller:
 
     def poll(self) -> CommandPollResult:
         client = self._client_factory()
+        with self._lock:
+            self._sync_pairing(client)
         if client is None:
-            with self._lock:
-                self._queued.clear()
-                self._listed, self._listed_at = set(), None
             self._next_at = self._mono() + self.interval()
             return CommandPollResult(error="not paired")
         try:
@@ -145,6 +167,10 @@ class CommandPoller:
         now = self._mono()
         new: list[Wake] = []
         with self._lock:
+            if not self._sync_pairing(client):
+                # Re-paired while the GET was in flight: this listing belongs to the old pairing.
+                self._next_at = self._mono()
+                return CommandPollResult()
             ids = [str(c.get("id")) for c in items if isinstance(c.get("id"), str) and c.get("id")]
             self._listed, self._listed_at = set(ids), now
             # Not listed any more: expired, or acked elsewhere. Drop it without acting.
@@ -158,7 +184,7 @@ class CommandPoller:
                 if cid in self._handled or cid in self._queued:
                     continue
                 activity = c.get("activity") or "chat"
-                w = Wake(id=cid, activity=str(activity), label=str(c.get("label", "")), seen_at=now)
+                w = Wake(id=cid, activity=str(activity), label=str(c.get("label", "")), seen_at=now, created_at=_parse_at(c.get("at")))
                 self._queued[cid] = w
                 new.append(w)
         for cid, result in resend:
@@ -175,14 +201,25 @@ class CommandPoller:
         with self._lock:
             if not self._queued:
                 return None
+        client = self._client_factory()  # cheap: no network
+        with self._lock:
+            self._sync_pairing(client)
+            if not self._queued:
+                return None
             now = self._mono()
+            wall = self._wall()
             changed = False
             for qid, w in list(self._queued.items()):
-                if now - w.seen_at > self._queue_max_s:
+                too_old = now - w.seen_at > self._queue_max_s
+                # A chat opens the mic, so it also must not run long after the owner asked, even if
+                # this robot only just saw it (it was offline). Uses the brain's `at` with skew slack.
+                if w.activity == "chat" and w.created_at is not None and wall - w.created_at > self._queue_max_s + CLOCK_SKEW_S:
+                    too_old = True
+                if too_old:
                     del self._queued[qid]
                     self._remember(qid, "dismissed")
                     changed = True
-                    log.info("command %s waited too long for an idle robot; dismissed", qid)
+                    log.info("command %s is too old to run; dismissed", qid)
             picked: Wake | None = None
             fresh = self._listed_at is not None and now - self._listed_at <= self._live_window_s()
             if fresh:
@@ -209,16 +246,35 @@ class CommandPoller:
     def complete(self, wake: Wake, result: str) -> bool:
         """Record the final result of a claimed wake and ack it. Returns True once the brain
         has the ack (or it is moot). A failed ack is re-sent by poll() while the brain lists it."""
+        client = self._client_factory()
         with self._lock:
+            if not self._sync_pairing(client) or wake.id not in self._inflight:
+                return False  # unpaired / re-paired meanwhile: the old pairing's state is gone
             self._remember(wake.id, result)
             self._inflight.discard(wake.id)
             self._persist()
-        client = self._client_factory()
         if client is None:
             return False
         return self._send_ack(client, wake.id, result)
 
     # ------------------------------------------------------------------ helpers
+
+    def _sync_pairing(self, client: BrainClient | None) -> bool:
+        """Call with the lock held. If the pairing changed (unpair, re-pair, another brain), drop
+        all state and reload the handled ids from the store (which the controller cleared), so
+        old ids are never written back. Returns False if it reset."""
+        key = (client.base_url, client.token) if client is not None else None
+        if self._key_known and key == self._key:
+            return True
+        first = not self._key_known
+        self._key, self._key_known = key, True
+        if first:
+            return True
+        self._handled = _clean_handled(self._load_handled()) if key is not None else {}
+        self._inflight.clear()
+        self._queued.clear()
+        self._listed, self._listed_at = set(), None
+        return False
 
     def _remember(self, cid: str, result: str) -> None:
         self._handled.pop(cid, None)

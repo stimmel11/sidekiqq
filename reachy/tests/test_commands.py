@@ -44,7 +44,10 @@ class Store:
         self.saves += 1
 
 
-def make(brain, store=None, mono=None, token=TOKEN, interval=60.0, queue_max_s=120.0):
+NOW = 1793188860.0  # 2026-10-28T12:01:00Z, one minute after wake()'s `at`
+
+
+def make(brain, store=None, mono=None, token=TOKEN, interval=60.0, queue_max_s=120.0, wall=lambda: NOW):
     store = store or Store()
     mono = mono or Mono()
     p = CommandPoller(
@@ -54,6 +57,7 @@ def make(brain, store=None, mono=None, token=TOKEN, interval=60.0, queue_max_s=1
         interval_s=lambda: interval,
         monotonic=mono,
         queue_max_s=queue_max_s,
+        wall_clock=wall,
     )
     return p, store, mono
 
@@ -357,3 +361,58 @@ def test_no_wake_mode_touches_drafts(brain):
         run_wake(W(act), a, FakeBody(), lambda: None)
     assert brain.approved == []
     assert not any("/approve" in p for p in brain.paths())
+
+
+# ---------------------------------------------------------------------- review fixes
+
+
+def test_old_chat_is_dismissed_even_if_just_seen(brain):
+    """Robot was offline when the owner asked: a chat must not open the mic 10 minutes later."""
+    brain.commands = [wake(1, "chat"), wake(2, "dance")]
+    p, store, _ = make(brain, wall=lambda: NOW + 9 * 60)
+    p.poll()
+    w = p.take()
+    assert w is not None and w.id == "cmd_2"  # a dance is fine; the chat is too old
+    assert store.handled["cmd_1"] == "dismissed"
+    p.poll()
+    assert ("cmd_1", "dismissed") in brain.acks
+
+
+def test_recent_chat_runs_with_some_clock_skew(brain):
+    brain.commands = [wake(1, "chat")]
+    p, _, _ = make(brain, wall=lambda: NOW + 120)  # 3 min after `at`: inside 120 s + 60 s skew
+    p.poll()
+    assert p.take().activity == "chat"
+
+
+def test_wrong_typed_handled_commands_in_config_are_ignored(brain, tmp_path):
+    for bad in ('"x"', "null", "[1, 2]"):
+        path = tmp_path / "c.json"
+        path.write_text('{"brain_url": "' + brain.url + '", "token": "' + TOKEN + '", "handled_commands": ' + bad + "}")
+        ctl = Controller(ConfigStore(path))
+        assert ctl.load_handled_commands() == {}
+        p = CommandPoller(ctl.client, ctl.load_handled_commands, ctl.save_handled_commands, monotonic=Mono())
+        brain.commands = [wake(1)]
+        assert [w.id for w in p.poll().new] == ["cmd_1"]
+    (tmp_path / "c.json").write_text("[]")
+    assert ConfigStore(tmp_path / "c.json").load().handled_commands == {}
+
+
+def test_unpair_and_repair_do_not_write_old_ids_back(brain, tmp_path):
+    ctl = Controller(ConfigStore(tmp_path / "c.json"))
+    ctl.pair(brain.url, "123456")
+    brain.commands = [wake(1), wake(2)]
+    p = CommandPoller(ctl.client, ctl.load_handled_commands, ctl.save_handled_commands, monotonic=Mono())
+    p.poll()
+    w1 = p.take()
+    assert ctl.load_handled_commands() == {"cmd_1": "opened"}
+    ctl.unpair()
+    assert p.complete(w1, "opened") is False  # old pairing's wake: not recorded, not acked
+    assert ctl.load_handled_commands() == {}
+    ctl.pair(brain.url, "123456")
+    assert p.take() is None  # the queued cmd_2 belonged to the old pairing state
+    brain.commands = [wake(3)]
+    p.poll()
+    p.take()
+    assert ctl.load_handled_commands() == {"cmd_3": "opened"}
+    assert brain.acks == []

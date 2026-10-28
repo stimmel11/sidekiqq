@@ -142,7 +142,9 @@ def test_voice_loop_end_to_end_with_fake_robot(brain, tmp_path):
 
 
 def _wake_cmd(i, activity):
-    return {"id": f"cmd_{i}", "at": "2026-10-28T12:00:00.000Z", "expiresAt": "2026-10-28T12:15:00.000Z", "kind": "reachy_wake", "label": f"Wake Reachy {activity}", "from": "phone", "activity": activity}
+    now = time.time()
+    iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
+    return {"id": f"cmd_{i}", "at": iso(now), "expiresAt": iso(now + 900), "kind": "reachy_wake", "label": f"Wake Reachy {activity}", "from": "phone", "activity": activity}
 
 
 def _loop(brain, tmp_path, script=None, confirmation=None):
@@ -220,3 +222,21 @@ def test_chat_wake_greets_then_listens_for_one_turn(brain, tmp_path):
     th.join(timeout=5)
     paths = brain.paths()
     assert paths.index("/api/speak") < paths.index("/api/transcribe") < paths.index("/api/ask")
+
+
+def test_cancel_stops_a_requested_listen(brain, tmp_path):
+    """Cancel pressed while a chat wake's greeting plays: the listen it requested must not start."""
+    media, robot, stop, ctl, _, loop = _loop(brain, tmp_path)
+    ctl.request_talk()
+    ctl.request_cancel()
+    states = []
+    th = threading.Thread(target=loop.run, daemon=True)
+    th.start()
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        states.append(ctl.state)
+        time.sleep(0.02)
+    stop.set()
+    th.join(timeout=5)
+    assert "listening" not in states
+    assert not ctl.talk_requested.is_set() and not ctl.cancel_requested.is_set()

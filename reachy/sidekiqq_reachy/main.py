@@ -230,6 +230,8 @@ class VoiceLoop:
 
                 if self.ctl.cancel_requested.is_set():
                     self.ctl.cancel_requested.clear()
+                    # Also stops a listen that was requested but hasn't started (e.g. by a chat wake).
+                    self.ctl.talk_requested.clear()
                     if self.endpointer is not None and not self.assistant.awaiting_confirm:
                         self.endpointer = None
                         self.body.neutral()

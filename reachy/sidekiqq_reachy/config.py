@@ -125,8 +125,13 @@ class ConfigStore:
                 return Settings()
             except (OSError, ValueError):
                 return Settings()
+            if not isinstance(raw, dict):
+                return Settings()
             known = {f.name for f in fields(Settings)}
-            return Settings(**{k: v for k, v in raw.items() if k in known})
+            s = Settings(**{k: v for k, v in raw.items() if k in known})
+            if not isinstance(s.handled_commands, dict):
+                s.handled_commands = {}
+            return s
 
     def save(self, s: Settings) -> None:
         with self._lock:

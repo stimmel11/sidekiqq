@@ -36,9 +36,11 @@ your words to your brain, speaks the answer, and reacts to urgent alerts.
   It acks each one (`POST /api/commands/:id/ack`: `opened`, or `failed` if it couldn't run).
   A wake never interrupts anything: if the robot is mid-turn, listening, speaking or waiting
   for "send it", the wake waits and runs once it is idle. If it waited more than 2 minutes it is
-  dropped and acked `dismissed`, so a chat never opens the mic long after you asked; if the brain
-  stops listing it (expired), it is dropped without acting. Handled ids are saved in the config file, so a re-delivered
-  command or a restart never repeats a wake. Other command kinds are ignored and not acked.
+  dropped and acked `dismissed`, so a chat never opens the mic long after you asked (a chat is
+  also dismissed if the brain created it more than 3 minutes ago, e.g. the robot was offline).
+  If the brain stops listing it (expired), it is dropped without acting. **Cancel** also stops
+  a chat's pending listen. Handled ids are saved in the config file, so a re-delivered command
+  or a restart never repeats a wake. Other command kinds are ignored and not acked.
 - **Voice-confirmed drafts.** When a reply creates an email draft, the robot reads back the
   recipient, the subject and a one-sentence summary of the body. It sends only if your next words
   are exactly **"send it"** within 30 seconds. Anything else, silence or the Cancel button leaves
