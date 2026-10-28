@@ -15,6 +15,7 @@ import {
   type Out,
   type ProviderOut,
 } from "./capabilities";
+import { buildReadback, READBACK_MAX_CHARS, ReadbackTooLongError } from "./readback";
 import { effectiveCapabilities } from "./store";
 import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableError, type ConnCtx, type Connector } from "./types";
 
@@ -92,6 +93,13 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
   const parsed = INPUT_SCHEMAS[cap].safeParse(input);
   if (!parsed.success) {
     throw new CapabilityDeniedError(cap, `invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
+  }
+
+  if (cap === "email.draft") {
+    // Refuse BEFORE a provider draft exists: a read-back the devices can't speak is never truncated.
+    const i = parsed.data as In<"email.draft">;
+    const rb = buildReadback({ kind: "email", to: i.to, cc: i.cc ?? [], subject: i.subject });
+    if (rb.length > READBACK_MAX_CHARS) throw new CapabilityDeniedError(cap, new ReadbackTooLongError(rb.length).message);
   }
 
   const stored = await deps.connections.load(connector.id);

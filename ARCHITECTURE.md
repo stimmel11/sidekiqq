@@ -39,7 +39,7 @@ the thinking.
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
 | GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 not pending / in progress, 410 the provider draft is gone (marked discarded), 422 `unsupported_kind` (no executor for this kind yet; nothing sent) |
+| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
 | POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
@@ -56,6 +56,8 @@ is created; calendar kinds are in the model but are not created or approvable un
 depends on `kind`. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
 (replaces `gmailDraftId`), `providerMessageId` (replaces `gmailMessageId`), `threadId`, `followupId` and `sentAt`;
 records written before these fields existed are upgraded on read, so old pending drafts still list and approve.
+Recipients are strict bare ASCII addresses (`name@example.com`, IDN only as `xn--` punycode; no display names,
+lists or groups), at most 5 To and 5 Cc.
 
 Pairing / owner endpoints (not device-token auth):
 
@@ -86,8 +88,9 @@ type DraftKind = "email"|"calendar_invite"|"calendar_hold";  // clients must not
 interface DraftItem { id: string; kind: DraftKind /* absent from older brains = "email" */;
   to: string[] /* recipients, or attendees for calendar_invite; empty for calendar_hold */; cc: string[];
   subject: string /* or event title */; body: string /* or event description */;
-  readback: string /* ONE sentence, built by the brain in code, never by the model: kind, every address in full,
-                      subject, and the time for calendar kinds. Absent from older brains */;
+  readback: string /* ONE sentence (<= 1000 chars), built by the brain in code, never by the model: kind, every
+                      address in full, the time for calendar kinds, then "with the subject: <subject>." Absent from
+                      older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
   when?: { start: string; end: string } /* calendar kinds only */; client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";

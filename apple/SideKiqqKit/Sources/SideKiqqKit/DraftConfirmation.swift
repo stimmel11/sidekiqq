@@ -144,7 +144,10 @@ public struct DraftConfirmation: Sendable {
             parts.append("Subject: \(subject.isEmpty ? "no subject" : stripTrailingPunctuation(subject))")
         }
         let summary = bodySummary(draft.body)
-        parts.append(summary.isEmpty ? "The message is empty" : "It says: \(stripTrailingPunctuation(summary))")
+        // With the brain's readback, an explicit marker keeps body text from sounding like part of
+        // the recipient line.
+        let lead = brainReadback.isEmpty ? "It says" : "Message begins"
+        parts.append(summary.isEmpty ? "The message is empty" : "\(lead): \(stripTrailingPunctuation(summary))")
         return parts.joined(separator: ". ") + "."
     }
 

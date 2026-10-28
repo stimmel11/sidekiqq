@@ -164,11 +164,11 @@ def test_draft_read_back_prefers_brain_readback(brain):
     brain.transcripts = ["reply to dana"]
     brain.ask_replies = [draft_reply()]
     brain.drafts = [{"id": "dr_1", "kind": "email", "to": ['"Dana Lee" <dana@acme.com>'], "subject": "Proposal",
-                     "body": "Hi Dana,\nThe proposal is attached.", "readback": "Email to dana@acme.com, subject 'Proposal'"}]
+                     "body": "Hi Dana,\nThe proposal is attached.", "readback": "Email to dana@acme.com, with the subject: Proposal."}]
     a, _, _, _ = make(brain)
     assert a.handle_utterance(SPEECH) is Outcome.AWAITING_CONFIRM
     assert spoken_texts(brain)[-1] == (
-        "Send this: Email to dana@acme.com, subject 'Proposal'. It says: The proposal is attached? "
+        "Send this: Email to dana@acme.com, with the subject: Proposal. Message begins: The proposal is attached? "
         "Say 'send it' to confirm, or anything else to cancel."
     )
 

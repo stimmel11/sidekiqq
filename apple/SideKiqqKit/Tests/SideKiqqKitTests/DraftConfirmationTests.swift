@@ -135,9 +135,9 @@ final class DraftConfirmationTests: XCTestCase {
 
     func testReadbackPrefersTheBrainsReadback() {
         var d = dana
-        d.readback = "Email to dana@acme.com, subject 'Revised proposal'"
+        d.readback = "Email to dana@acme.com, with the subject: Revised proposal."
         XCTAssertEqual(DraftConfirmation.readback(for: d),
-                       "Email to dana@acme.com, subject 'Revised proposal'. It says: The revised proposal is attached with the updated pricing.")
+                       "Email to dana@acme.com, with the subject: Revised proposal. Message begins: The revised proposal is attached with the updated pricing.")
     }
 
     func testOfferDraftArmsWithItsId() {

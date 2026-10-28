@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isPlausibleEmail } from "../google/mime";
+import { ADDRESS_MAX, normalizeAddress } from "../address";
 import type { CalendarEvent, DriveFile, EmailMessage, EmailSummary } from "../google/workspace";
 import type { ContactLookup } from "../google/contacts";
 import { CONTACT_NAME_MAX_CHARS, CONTACT_NAME_RE, CONTACTS_MAX } from "../google/contacts-rules";
@@ -71,11 +71,32 @@ export const EmailReadInput = z.discriminatedUnion("op", [
   z.object({ op: z.literal("account") }),
 ]);
 
-const address = z.string().trim().min(3).max(320).refine(isPlausibleEmail, "not a valid email address");
+/**
+ * One bare ASCII address, normalised (lib/address.ts). The connector, the Draft record and the
+ * read-back all get this same normalised list, so they can't disagree about who receives it.
+ */
+const address = z
+  .string()
+  .max(ADDRESS_MAX + 2)
+  .transform((s, ctx) => {
+    const a = normalizeAddress(s);
+    if (a === null) {
+      ctx.addIssue({ code: "custom", message: "must be one plain email address (name@example.com): no names, lists or non-ASCII" });
+      return z.NEVER;
+    }
+    return a;
+  });
+
+/**
+ * Recipient caps. With 254-character addresses the read-back could still pass READBACK_MAX_CHARS;
+ * that case is refused before any provider draft is made (invokeCapability), never truncated.
+ */
+export const EMAIL_TO_MAX = 5;
+export const EMAIL_CC_MAX = 5;
 
 export const EmailDraftInput = z.object({
-  to: z.array(address).min(1).max(10),
-  cc: z.array(address).max(10).optional(),
+  to: z.array(address).min(1).max(EMAIL_TO_MAX),
+  cc: z.array(address).max(EMAIL_CC_MAX).optional(),
   subject: z.string().trim().min(1).max(250),
   body: z.string().trim().min(1).max(20_000),
   threadId: id.optional(),

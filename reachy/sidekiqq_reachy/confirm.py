@@ -138,5 +138,7 @@ def draft_summary(to: list[str], subject: str, body: str, readback: str = "") ->
     s = rb or f"email to {_people(to) or 'unknown recipient'}, subject {subject.strip() or '(no subject)'}"
     gist = one_sentence(body)
     if gist:
-        s += f". It says: {gist.rstrip('.?!')}"
+        # With the brain's readback, an explicit marker keeps body text from sounding like part
+        # of the recipient line.
+        s += f". {'Message begins' if rb else 'It says'}: {gist.rstrip('.?!')}"
     return s

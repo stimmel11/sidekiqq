@@ -99,8 +99,8 @@ def test_draft_summary_prefers_the_brains_readback():
         ['"Your boss" <mallory@evil.example>'],
         "Proposal",
         "Hi,\nAttached is the proposal.",
-        "Email to mallory@evil.example, subject 'Proposal'",
+        "Email to mallory@evil.example, with the subject: Proposal.",
     )
-    assert s == "Email to mallory@evil.example, subject 'Proposal'. It says: Attached is the proposal"
+    assert s == "Email to mallory@evil.example, with the subject: Proposal. Message begins: Attached is the proposal"
     # Older brain (no readback): unchanged behaviour.
     assert draft_summary(["a@x.com"], "Hi", "", "") == "email to a@x.com, subject Hi"

@@ -19,9 +19,16 @@ export interface SendResult {
   threadId?: string;
 }
 
+/**
+ * Whether a pending draft may be executed right now (docs/CONNECTORS.md §5). Not ok → nothing is
+ * sent. `gone`: the provider draft no longer exists (410, marked discarded). `changed`: the
+ * provider draft no longer matches what the read-back described (409, marked discarded).
+ * `invalid`: the record can't be executed by this sender (422, left as is).
+ */
+export type DraftCheck = { ok: true } | { ok: false; reason: "gone" | "changed" | "invalid"; message: string };
+
 export interface DraftExecutor {
-  /** False → the approve route marks the draft discarded and answers 410. */
-  stillValid(draft: Draft): Promise<boolean>;
+  check(draft: Draft): Promise<DraftCheck>;
   execute(draft: Draft): Promise<SendResult>;
 }
 

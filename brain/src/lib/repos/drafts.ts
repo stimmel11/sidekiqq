@@ -1,4 +1,4 @@
-import { buildReadback } from "../connectors/readback";
+import { assertReadbackFits, buildReadback } from "../connectors/readback";
 import { config } from "../env";
 import type { KV } from "../kv";
 import { DraftSchema, type Draft } from "../models";
@@ -9,7 +9,7 @@ import { Collection } from "./collection";
  * What a caller supplies to create a draft. `readback` is deliberately absent: the repo builds it
  * from the structured fields (docs/CONNECTORS.md §5), so no caller (and no model) can write it.
  */
-export type NewDraft = Omit<Draft, "id" | "status" | "createdAt" | "cc" | "kind" | "connectorId" | "readback" | "sentAt" | "providerMessageId"> & {
+export type NewDraft = Omit<Draft, "id" | "status" | "createdAt" | "cc" | "kind" | "connectorId" | "readback" | "sentAt" | "providerMessageId" | "gmailDraftId" | "gmailMessageId"> & {
   cc?: string[];
   kind?: Draft["kind"];
   connectorId?: string;
@@ -35,7 +35,7 @@ export class DraftsRepo {
       kind,
       connectorId: input.connectorId ?? "google",
       cc,
-      readback: buildReadback({ kind, to: input.to, cc, subject: input.subject, ...(input.when ? { when: input.when } : {}) }, this.timeZone()),
+      readback: assertReadbackFits(buildReadback({ kind, to: input.to, cc, subject: input.subject, ...(input.when ? { when: input.when } : {}) }, this.timeZone())),
       id: newId("drf"),
       status: "pending",
       createdAt: this.clock().toISOString(),

@@ -105,8 +105,11 @@ export class FakeWorkspace implements Workspace {
   async searchDrive() {
     return [];
   }
-  async draftExists(id: string) {
-    return this.drafts.has(id);
+  /** Gmail's view of a draft, built from what was drafted. Tests edit `drafts` to simulate Gmail edits. */
+  async getDraftEnvelope(id: string) {
+    const d = this.drafts.get(id);
+    if (!d) return null;
+    return { to: d.to.join(", "), cc: (d.cc ?? []).join(", "), bcc: "", subject: d.subject };
   }
   async ownerEmail() {
     return this.owner;

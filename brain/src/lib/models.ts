@@ -315,10 +315,18 @@ export type DraftWhen = z.infer<typeof DraftWhenSchema>;
  */
 function upgradeLegacyDraft(raw: unknown): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const { gmailDraftId, gmailMessageId, ...rest } = raw as Record<string, unknown>;
-  const d: Record<string, unknown> = { ...rest };
-  if (d.providerDraftId === undefined && typeof gmailDraftId === "string") d.providerDraftId = gmailDraftId;
-  if (d.providerMessageId === undefined && typeof gmailMessageId === "string") d.providerMessageId = gmailMessageId;
+  const d: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  if (d.providerDraftId === undefined && typeof d.gmailDraftId === "string") d.providerDraftId = d.gmailDraftId;
+  if (d.providerMessageId === undefined && typeof d.gmailMessageId === "string") d.providerMessageId = d.gmailMessageId;
+  // Rollback safety for one release: Google drafts keep the old field names too, so the
+  // pre-slice-3 brain (which requires `gmailDraftId`) can still read records written now.
+  if ((d.connectorId ?? "google") === "google") {
+    if (typeof d.providerDraftId === "string") d.gmailDraftId = d.providerDraftId;
+    if (typeof d.providerMessageId === "string") d.gmailMessageId = d.providerMessageId;
+  } else {
+    delete d.gmailDraftId;
+    delete d.gmailMessageId;
+  }
   if (typeof d.readback !== "string" || !d.readback) {
     // The same code-built template new drafts get (legacy drafts are always email).
     const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
@@ -356,6 +364,13 @@ export const DraftSchema = z.preprocess(
       providerDraftId: z.string().min(1).optional(),
       /** Set once sent. Replaces `gmailMessageId`. */
       providerMessageId: z.string().optional(),
+      /**
+       * DEPRECATED mirrors of providerDraftId/providerMessageId, written for Google drafts only so
+       * a rollback to the pre-slice-3 brain still reads them. Never read by this code; remove after
+       * one release (PROGRESS.md).
+       */
+      gmailDraftId: z.string().optional(),
+      gmailMessageId: z.string().optional(),
       /** Recipients (email) or attendees (calendar_invite); empty for calendar_hold. */
       to: z.array(z.string()),
       cc: z.array(z.string()).default([]),
