@@ -192,12 +192,8 @@ const callOnPhone = tool({
     const origin = ctx.request;
     if (!origin || !ctx.lookedUp) throw new ToolInputError("Calls can only be handed off from an owner request.");
     if (ctx.callQueued) throw new ToolInputError("A call is already waiting on the phone for this request.");
-    const call = resolveCallNumber(
-      input.contactId ? { contactId: input.contactId, phone: input.phone } : { spokenNumber: input.spokenNumber! },
-      { ownerText: origin.text, lookedUp: ctx.lookedUp },
-    );
-    const fields = buildCommand({ kind: "call_contact", number: call.number, ...(call.name ? { name: call.name } : {}), app: input.app });
-    const target = resolveTarget("call_contact", undefined, await deps.repos.devices.list());
+    // Every attempt is audited, refusals included: a refused number is the trace of an injection
+    // attempt. The summary never carries a number (a refused one may be an attacker's).
     const audit = (ok: boolean, error?: string) =>
       deps.repos.audit
         .add({
@@ -206,16 +202,23 @@ const callOnPhone = tool({
           tier: "user_finishes",
           caller: "ask",
           device: origin.deviceKind,
-          summary: call.via === "contact" ? `hand-off to phone: contact ${call.contactId}` : "hand-off to phone: number the owner said",
+          summary: input.contactId ? `hand-off to phone: contact ${truncate(input.contactId, 80)}` : "hand-off to phone: spoken number",
           ok,
           ...(error ? { error: truncate(error, 300) } : {}),
         })
         .catch((err: unknown) => console.warn("[audit] write failed", err));
     let row;
     try {
+      const call = resolveCallNumber(
+        input.contactId ? { contactId: input.contactId, phone: input.phone } : { spokenNumber: input.spokenNumber! },
+        { ownerText: origin.text, lookedUp: ctx.lookedUp },
+      );
+      const fields = buildCommand({ kind: "call_contact", number: call.number, ...(call.name ? { name: call.name } : {}), app: input.app });
+      const target = resolveTarget("call_contact", undefined, await deps.repos.devices.list());
       row = await deps.repos.commands.enqueue(fields, { id: origin.deviceId, kind: origin.deviceKind }, target.id);
     } catch (err) {
-      await audit(false, (err as Error).message);
+      // CommandError messages are code-built and never include the number.
+      await audit(false, err instanceof CommandError ? `${err.code ?? "refused"}: ${err.message}` : (err as Error).message);
       throw err;
     }
     await audit(true);

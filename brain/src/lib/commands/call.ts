@@ -6,7 +6,8 @@ import { CommandError, normalizeNumber } from "./index";
  * `device.call`): the number put on a `call_contact` hand-off may come ONLY from
  *
  *  1. a `contacts.lookup` result returned in THIS /api/ask request, and only the single clear match
- *     of a non-ambiguous lookup (`contacts[0]` when `ambiguous` is false), or
+ *     of a non-ambiguous lookup (`contacts[0]` when `ambiguous` is false) that is a saved contact
+ *     (not a Google "Other contact", which Gmail auto-creates from email), or
  *  2. digits the owner spoke in THIS request (the `/api/ask` `text`, i.e. the owner's transcript).
  *
  * The model never supplies a free-form number: it names a contact id it was handed by
@@ -14,6 +15,10 @@ import { CommandError, normalizeNumber } from "./index";
  * literally in the owner's words. A number seen in an email, a file, a calendar event or a contact's
  * name/org can't satisfy either rule, so injected text can't put it on the phone. The owner still
  * sees the number on the phone and taps Call in the dialer (ACTION_DIAL): a hand-off, not a call.
+ *
+ * Known gap (bounded by the tap): injected text can still steer WHICH name the model looks up, so
+ * a saved contact the owner didn't mean could be put on the phone. The phone shows the name and
+ * number, and nothing happens unless the owner taps.
  */
 
 /** Contacts lookup_contact returned in this request, by id. Built by `recordLookup`. */
@@ -42,40 +47,49 @@ export interface ResolvedCall {
   contactId?: string;
 }
 
+/** ISO dates ("2026-10-28") are not numbers: they are replaced by a word before scanning. */
+const ISO_DATE = /(?<![\d+])\d{4}-\d{2}-\d{2}(?!\d)/g;
 /**
- * Digit groups in the owner's words, with what separates each from the previous one. Only
- * digits count: "three oh three" is not supported (speech-to-text writes digits for numbers).
+ * A number-like span: optional "+", then digits joined only by number punctuation (spaces, dots,
+ * hyphens, en/em dashes, brackets). Words, commas, colons and slashes end a span.
  */
-function digitGroups(text: string): { plus: boolean; digits: string; joinable: boolean }[] {
-  const out: { plus: boolean; digits: string; joinable: boolean }[] = [];
-  let last = -1;
-  for (const m of text.matchAll(/(\+?)(\d+)/g)) {
-    const start = m.index;
-    // A group can be joined to the previous one only across number punctuation ("303 555-0142",
-    // "(303) 555.0142"), never across words ("303 or 720").
-    const between = last < 0 ? "" : text.slice(last, start);
-    out.push({ plus: m[1] === "+", digits: m[2]!, joinable: last >= 0 && /^[\s().-]*$/.test(between) && !m[1] });
-    last = start + m[0].length;
-  }
-  return out;
-}
+const SPAN = /\+?\d(?:[\s().\-–—]*\d)*/g;
+/** "+CC (0) …": the "(0)" is a national trunk prefix, not part of the international number. */
+const TRUNK = /^\+(\d{1,3})[\s.\-–—]*\(0\)/;
 
 /**
- * Numbers the owner said in `text`: every run of consecutive, punctuation-joined digit groups,
- * starting and ending on group boundaries (so "3035550142" can't be cut out of a longer number).
- * Returned normalised: optional leading "+" (only if the owner said it), then digits.
+ * Numbers the owner said in `text`, normalised (a leading "+" only if the owner said it, then
+ * digits). Only WHOLE spans count, never a piece of one, so two numbers said back to back
+ * ("303 555 0142 720 555 0199") can't be mashed together or split into something else: that span
+ * is too long and is refused, and the assistant asks. For an international span the accepted forms
+ * are the international one (trunk "(0)" removed: "+44 (0) 20 7946 0958" → "+442079460958") and,
+ * when the country code is its own group, the national one ("02079460958"; "+1 303 555 0142" →
+ * "3035550142"). Digits spelled as words ("three oh three") are not supported.
  */
 export function spokenNumbers(text: string): Set<string> {
-  const groups = digitGroups(text);
   const found = new Set<string>();
-  for (let i = 0; i < groups.length; i++) {
-    let digits = "";
-    for (let j = i; j < groups.length; j++) {
-      if (j > i && !groups[j]!.joinable) break;
-      digits += groups[j]!.digits;
-      if (digits.length > 15) break;
-      if (digits.length >= 3) found.add((groups[i]!.plus ? "+" : "") + digits);
+  const add = (n: string) => {
+    const digits = n.replace(/^\+/, "");
+    if (digits.length >= 3 && digits.length <= 15) found.add(n);
+  };
+  for (const m of text.replace(ISO_DATE, " date ").matchAll(SPAN)) {
+    const span = m[0];
+    const groups = span.match(/\d+/g) ?? [];
+    if (!span.startsWith("+")) {
+      add(groups.join(""));
+      continue;
     }
+    const trunk = TRUNK.exec(span);
+    if (trunk) {
+      const rest = (span.slice(trunk[0].length).match(/\d+/g) ?? []).join("");
+      if (rest) {
+        add(`+${trunk[1]}${rest}`);
+        add(`0${rest}`);
+      }
+      continue;
+    }
+    add(`+${groups.join("")}`);
+    if (groups.length > 1 && groups[0]!.length <= 3) add(groups.slice(1).join(""));
   }
   return found;
 }
@@ -86,7 +100,7 @@ export function resolveCallNumber(choice: CallChoice, src: { ownerText: string; 
     const number = normalizeNumber(choice.spokenNumber);
     const said = spokenNumbers(src.ownerText);
     if (said.has(number)) return { number, via: "spoken" };
-    // The owner said "+1 303 …" and the model dropped the "+": use what the owner said.
+    // The owner said "+1 303 …" as one run and the model dropped the "+": use what the owner said.
     if (!number.startsWith("+") && said.has(`+${number}`)) return { number: `+${number}`, via: "spoken" };
     throw new CommandError(
       "That number isn't in what the owner said in this request. Only a looked-up contact or digits the owner spoke can be called; ask the owner for the number.",
@@ -105,6 +119,12 @@ export function resolveCallNumber(choice: CallChoice, src: { ownerText: string; 
     );
   }
   const { contact } = entry;
+  if (contact.source !== "google") {
+    throw new CommandError(
+      "That match is an address saved automatically from past email, not one of the owner's saved contacts, so it can't be called from here. Ask the owner to say the number.",
+      "not_saved_contact",
+    );
+  }
   if (!contact.phones.length) {
     throw new CommandError(`${contact.name || "That contact"} has no phone number saved. Ask the owner for the number.`, "no_phone");
   }

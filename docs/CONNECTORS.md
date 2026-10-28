@@ -65,7 +65,7 @@ prompts do not change per provider.
 | `grocery.search` | auto | `{query, locationId?, max}` → `Product[] {id, name, size, price?, inStock?}` | |
 | `grocery.cart.add` | auto (capped) | `{items: {productId, quantity}[]}` → `{ok, count}` | No money moves. Kroger's cart API is add-only (`PUT /v1/cart/add`, 204, no read or remove), so the brain cannot undo an add and cannot report per-line results; "reversible" means the owner can remove items in the Kroger app. Caps: ≤ 50 lines per call, quantity 1–10 per line, product ids only from `grocery.search`. The assistant reads back what it asked to add. |
 | `grocery.checkout` | **user_finishes** | `{}` → `Handoff {url, label}` | The brain never places an order, picks a pickup slot or touches payment. It sends the phone a link to the provider's cart (section 4.3). |
-| `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. Implemented 2026-10-28 as the `/api/ask` tool `call_on_phone` (`lib/commands/call.ts`): `contactId` must be the clear match of a lookup in the same request, `spokenNumber` must be digits in the owner's request text. |
+| `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. Implemented 2026-10-28 as the `/api/ask` tool `call_on_phone` (`lib/commands/call.ts`): `contactId` must be the clear match of a lookup in the same request and a saved contact (not Google "Other contacts"); `spokenNumber` must be a whole number span in the owner's request text. |
 | `device.open_url` | **user_finishes** | `{url}` → `Handoff` | `https` only, host on a per-capability allowlist (provider cart pages, meeting join links the brain created). `sms:`, `mailto:`, `tel:`, `intent:`, `wa.me`, payment and app-link schemes are rejected. |
 
 Capabilities that are **forbidden** and have no interface at all: payments and checkout,
@@ -130,7 +130,12 @@ can be either; prefer MCP when a maintained server exists and its tools map clea
 ## 4. Safety policy (enforced by the brain)
 
 All capability calls go through one function, `invokeCapability(cap, input, ctx)` in
-`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. It:
+`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. The one exception is
+`device.call`, which has no connector: the `/api/ask` tool `call_on_phone` queues the hand-off
+directly on the device command queue. Its caller is fixed to `ask`, it refuses without the owner
+request's context, its number is bound in `lib/commands/call.ts` (section 2 row), and every attempt,
+refusals included, writes a `device.call` audit row. `invokeCapability("device.call")` itself
+still fails closed. `invokeCapability`:
 
 1. Looks up the tier from the fixed `POLICY` table (code constant, section 2). Executor-only
    entries (`email.send`, the invite/hold executors) are not callable here at all.
@@ -173,7 +178,11 @@ instructions. The assistant prompt already says so; the policy makes it structur
 - `ctx.caller` decides what is allowed. Only owner-initiated callers (`ask`, `task`, `dashboard`)
   may run `auto` writes or create handoffs. A `task` must trace back to one specific owner request
   and cannot re-schedule itself. The cron scan (`cron`) and the briefing (`brief`) may only use
-  `email.read`, `calendar.read` and `contacts.lookup`; anything else fails closed.
+  `email.read`, `calendar.read` and `contacts.lookup`; anything else fails closed. `call_on_phone`
+  (the `device.call` exception above) is `ask`-only: it exists only in the `/api/ask` tool loop and
+  needs that request's context. Known gap, bounded by the tap: injected text can still steer which
+  name the model looks up, so the phone may show a saved contact the owner didn't mean. The phone
+  shows the name and number, and nothing happens unless the owner taps.
 - Reads that send arguments to a third party (`grocery.search {query}`, any MCP tool) are also a
   leak channel. Each capability caps argument length and allowed characters (for example
   `grocery.search.query`: ≤ 80 chars, letters, digits, spaces and basic punctuation).

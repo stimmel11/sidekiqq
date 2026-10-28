@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { recordLookup, resolveCallNumber, spokenNumbers, type LookedUpContacts } from "@/lib/commands/call";
-import { CommandError } from "@/lib/commands";
+import { CommandError, MAX_PENDING_PER_DEVICE } from "@/lib/commands";
+import { invokeCapability } from "@/lib/connectors/invoke";
+import { CapabilityDeniedError } from "@/lib/connectors/types";
 import { executeTool, TOOL_NAMES } from "@/lib/assistant/tools";
 import type { Contact, ContactLookup } from "@/lib/google/contacts";
 import { CommandsResponseSchema, type DeviceCommand } from "@/lib/models";
@@ -55,9 +57,31 @@ describe("spokenNumbers", () => {
   it("keeps a + only when the owner said it", () => {
     const s = spokenNumbers("call +1 303 555 0142 on WhatsApp");
     expect(s).toContain("+13035550142");
-    expect(s).toContain("3035550142"); // starting at "303" (no +)
+    expect(s).toContain("3035550142"); // national form: country code dropped
     expect(s).not.toContain("+3035550142");
-    expect(spokenNumbers("call 1 303 555 0142")).not.toContain("+13035550142");
+    expect(spokenNumbers("call 1 303 555 0142")).toEqual(new Set(["13035550142"]));
+  });
+
+  it("only whole spans: two numbers said back to back are refused, never mashed or split", () => {
+    const s = spokenNumbers("call 303 555 0142 720 555 0199");
+    expect(s).toEqual(new Set()); // 20 digits: too long, the assistant asks
+    expect(s).not.toContain("01427205550199");
+    expect(spokenNumbers("call 303 555 0142 or 720 555 0199")).toEqual(new Set(["3035550142", "7205550199"]));
+  });
+
+  it("ISO dates are not numbers", () => {
+    expect(spokenNumbers("call Dana on 2026-10-28")).toEqual(new Set());
+    expect(spokenNumbers("on 2026-10-28 call 303 555 0142")).toEqual(new Set(["3035550142"]));
+  });
+
+  it("+CC (0): trunk prefix dropped in international form; national form kept", () => {
+    const s = spokenNumbers("call +44 (0) 20 7946 0958");
+    expect(s).toEqual(new Set(["+442079460958", "02079460958"]));
+    expect(s).not.toContain("+4402079460958");
+  });
+
+  it("en and em dashes separate groups", () => {
+    expect(spokenNumbers("call 303–555—0142")).toContain("3035550142");
   });
 
   it("never joins across words or cuts digits out of the middle of a group", () => {
@@ -109,6 +133,23 @@ describe("resolveCallNumber", () => {
     expect(codeOf(() => resolveCallNumber({ contactId: "people/c4", phone: "+19005550199" }, { ownerText: owner, lookedUp: two }))).toBe(
       "phone_not_on_contact",
     );
+    // Same for a single-phone contact: a different phone is refused, not swapped in.
+    const one = seen({ contacts: [DANA], ambiguous: false });
+    expect(codeOf(() => resolveCallNumber({ contactId: "people/c1", phone: "+19005550199" }, { ownerText: owner, lookedUp: one }))).toBe(
+      "phone_not_on_contact",
+    );
+  });
+
+  it("refuses a Google 'Other contact' (auto-saved from email), even as a clear match", () => {
+    const other = seen({ contacts: [person("otherContacts/c5", "Dana Bank", ["+19005550199"], { source: "google_other" })], ambiguous: false });
+    expect(codeOf(() => resolveCallNumber({ contactId: "otherContacts/c5" }, { ownerText: owner, lookedUp: other }))).toBe("not_saved_contact");
+  });
+
+  it("an international number with a (0) trunk prefix resolves to the dialable form", () => {
+    const lookedUp = seen();
+    const ownerText = "call +44 (0) 20 7946 0958 on WhatsApp";
+    expect(resolveCallNumber({ spokenNumber: "+44 20 7946 0958" }, { ownerText, lookedUp }).number).toBe("+442079460958");
+    expect(codeOf(() => resolveCallNumber({ spokenNumber: "+4402079460958" }, { ownerText, lookedUp }))).toBe("number_not_spoken");
   });
 
   it("accepts spoken digits only when they are in the owner's words", () => {
@@ -216,6 +257,31 @@ describe("call_on_phone via /api/ask", () => {
     expect(results(llm.calls[3]!)[0]!.content).toMatch(/Unknown contactId/);
     expect(results(llm.calls[4]!)[0]!.content).toMatch(/Unknown contactId/); // no lookup in this request
     expect(await onPhone(phone!.token)).toEqual([]);
+
+    // Every refusal leaves a trace in the audit log, and the injected number is never written there.
+    const rows = (await deps.repos.audit.recent()).filter((a) => a.capability === "device.call");
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.ok === false && r.tier === "user_finishes" && r.caller === "ask")).toBe(true);
+    expect(rows.map((r) => r.error?.split(":")[0]).sort()).toEqual(["number_not_spoken", "unknown_contact", "unknown_contact"]);
+    expect(rows.map((r) => r.summary).sort()).toEqual([
+      "hand-off to phone: contact people/attacker",
+      "hand-off to phone: contact people/c1",
+      "hand-off to phone: spoken number",
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/900|0199/);
+  });
+
+  it("a failed enqueue (queue full) is audited as failed and nothing more is queued", async () => {
+    const { deps, watch, phone, llm } = await setup([() => msg([toolUse("call_on_phone", { spokenNumber: "303 555 0142" })]), respond]);
+    for (let i = 0; i < MAX_PENDING_PER_DEVICE; i++) {
+      await deps.repos.commands.enqueue({ kind: "reachy_wake", activity: "chat", label: "x" }, { id: watch.device.id, kind: "watch" }, phone!.device.id);
+    }
+    await askAs(watch.token, "call 303 555 0142");
+    expect(results(llm.calls[1]!)[0]!.content).toMatch(/too many commands/);
+    const [row] = (await deps.repos.audit.recent()).filter((a) => a.capability === "device.call");
+    expect(row).toMatchObject({ ok: false, summary: "hand-off to phone: spoken number" });
+    expect(row?.error).toMatch(/^queue_full/);
+    expect((await onPhone(phone!.token)).filter((c) => c.kind === "call_contact")).toEqual([]);
   });
 
   it("ambiguous lookup → refused, nothing queued; the model must ask", async () => {
@@ -268,7 +334,9 @@ describe("call_on_phone via /api/ask", () => {
     expect(results(llm.calls[1]!)[0]).toMatchObject({ is_error: true });
     expect(results(llm.calls[1]!)[0]!.content).toMatch(/WhatsApp needs an international number/);
     expect(await onPhone(phone!.token)).toEqual([]);
-    expect((await deps.repos.audit.recent()).some((a) => a.capability === "device.call")).toBe(false);
+    const [row] = (await deps.repos.audit.recent()).filter((a) => a.capability === "device.call");
+    expect(row).toMatchObject({ ok: false });
+    expect(row?.error).toMatch(/^bad_number/);
   });
 
   it("no paired phone → a plain error the model can relay", async () => {
@@ -279,7 +347,9 @@ describe("call_on_phone via /api/ask", () => {
     await askAs(watch.token, "call 303 555 0142");
     expect(results(llm.calls[1]!)[0]).toMatchObject({ is_error: true });
     expect(results(llm.calls[1]!)[0]!.content).toMatch(/no paired phone/);
-    expect((await deps.repos.audit.recent()).some((a) => a.capability === "device.call")).toBe(false);
+    const [row] = (await deps.repos.audit.recent()).filter((a) => a.capability === "device.call");
+    expect(row).toMatchObject({ ok: false });
+    expect(row?.error).toMatch(/^no_target_device/);
   });
 
   it("rejects malformed input before anything else", async () => {
@@ -290,6 +360,12 @@ describe("call_on_phone via /api/ask", () => {
       expect(r.isError).toBe(true);
       expect(r.content).toMatch(/Invalid input/);
     }
+  });
+
+  it("invokeCapability('device.call') still fails closed and points at call_on_phone", async () => {
+    const deps = makeDeps({ now: NOW });
+    await expect(invokeCapability(deps, "device.call", { spokenNumber: "3035550142" }, { caller: "ask" })).rejects.toBeInstanceOf(CapabilityDeniedError);
+    await expect(invokeCapability(deps, "device.call", {}, { caller: "ask" })).rejects.toThrow(/call_on_phone/);
   });
 
   it("refuses outside an owner request (no request context, e.g. a future background caller)", async () => {
