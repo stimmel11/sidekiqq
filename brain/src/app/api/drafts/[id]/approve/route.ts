@@ -30,7 +30,11 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
     if (!fresh || fresh.status !== "pending") throw new HttpError(409, "Draft is no longer pending", "not_pending");
 
     // The sender registry is the only place that can execute a draft (docs/CONNECTORS.md §6).
-    const executor = deps.senders().for(fresh);
+    const registry = deps.senders();
+    // No executor for this (connectorId, kind), e.g. a calendar draft before the calendar item
+    // ships. Nothing is sent and the draft stays pending.
+    if (!registry.has(fresh)) throw new HttpError(422, `This ${fresh.kind.replace("_", " ")} draft can't be approved yet`, "unsupported_kind");
+    const executor = registry.for(fresh);
     if (!(await executor.stillValid(fresh))) {
       await drafts.markDiscarded(fresh.id);
       throw new HttpError(410, "Draft no longer exists in Gmail", "gone");

@@ -1,6 +1,8 @@
 import type { Workspace } from "../google/workspace";
-import type { Draft } from "../models";
+import type { Draft, DraftKind } from "../models";
 import { googleEmailExecutor, type MailSender } from "./google/send";
+
+export type { DraftKind };
 
 /**
  * THE SENDER REGISTRY (docs/CONNECTORS.md §6).
@@ -11,8 +13,6 @@ import { googleEmailExecutor, type MailSender } from "./google/send";
  * confirmed Draft is the only thing that can ever be executed. No `Connector.invoke` reaches
  * these functions.
  */
-
-export type DraftKind = "email";
 
 export interface SendResult {
   messageId?: string;
@@ -39,9 +39,19 @@ export class SenderRegistry {
     this.entries = new Map(Object.entries(entries));
   }
 
-  /** Drafts created before the framework have no kind/connector: they are Gmail emails. */
-  static keyFor(_draft: Draft): string {
-    return "google:email";
+  /**
+   * `(connectorId, kind)`. Drafts created before slice 3 have neither field; DraftSchema defaults
+   * them to ("google", "email") on read. Calendar kinds have no executor registered yet, so they
+   * can't be approved until the calendar connector item adds one (and the phone's confirm dialog
+   * depends on `kind`).
+   */
+  static keyFor(draft: Pick<Draft, "connectorId" | "kind">): string {
+    return `${draft.connectorId}:${draft.kind}`;
+  }
+
+  /** Whether an executor is registered for this draft's (connectorId, kind). */
+  has(draft: Pick<Draft, "connectorId" | "kind">): boolean {
+    return this.entries.has(SenderRegistry.keyFor(draft));
   }
 
   keys(): string[] {

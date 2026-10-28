@@ -279,6 +279,7 @@ const createEmailDraft = tool({
     const { deps, actions } = ctx;
     const bad = [...input.to, ...(input.cc ?? [])].filter((a) => !isPlausibleEmail(a));
     if (bad.length) throw new ToolInputError(`Not valid email addresses: ${bad.join(", ")}. Look the address up first.`);
+    // `email.draft` creates the Gmail draft AND the pending Draft record with its code-built readback.
     const created = await invokeCapability(
       deps,
       "email.draft",
@@ -288,29 +289,20 @@ const createEmailDraft = tool({
         subject: input.subject,
         body: input.body,
         ...(input.threadId ? { threadId: input.threadId } : {}),
+        ...(input.client ? { client: input.client } : {}),
+        ...(input.followupId ? { followupId: input.followupId } : {}),
       },
       conn(ctx),
     );
-    const draft = await deps.repos.drafts.create({
-      gmailDraftId: created.providerDraftId,
-      to: input.to,
-      cc: input.cc ?? [],
-      subject: input.subject,
-      body: input.body,
-      ...(created.threadId ?? input.threadId ? { threadId: (created.threadId ?? input.threadId) as string } : {}),
-      ...(input.client ? { client: input.client } : {}),
-      ...(input.followupId ? { followupId: input.followupId } : {}),
-    });
-    if (input.followupId) await deps.repos.followups.attachDraft(input.followupId, draft.id);
-    actions.push({
-      type: "draft_created",
-      id: draft.id,
-      summary: truncate(`Draft to ${input.to.join(", ")}: ${input.subject}`, 200),
-    });
+    if (input.followupId) await deps.repos.followups.attachDraft(input.followupId, created.draftId);
+    // Devices speak Action.summary before asking for "send it": it is the readback (built in code,
+    // every recipient in full), never text the model wrote (docs/CONNECTORS.md §5).
+    actions.push({ type: "draft_created", id: created.draftId, summary: created.readback });
     return {
-      draftId: draft.id,
+      draftId: created.draftId,
       status: "pending_approval",
-      note: "Draft saved in Gmail. It will only be sent if the owner approves it on a device.",
+      readback: created.readback,
+      note: "Draft saved in Gmail. It will only be sent if the owner approves it on a device. The device reads the readback to the owner before asking.",
     };
   },
 });

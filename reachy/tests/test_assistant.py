@@ -160,6 +160,19 @@ def test_draft_body_fetch_failure_falls_back_to_summary(brain):
     assert spoken_texts(brain)[-1].startswith("Send this: Draft to dana@acme.com: Proposal?")
 
 
+def test_draft_read_back_prefers_brain_readback(brain):
+    brain.transcripts = ["reply to dana"]
+    brain.ask_replies = [draft_reply()]
+    brain.drafts = [{"id": "dr_1", "kind": "email", "to": ['"Dana Lee" <dana@acme.com>'], "subject": "Proposal",
+                     "body": "Hi Dana,\nThe proposal is attached.", "readback": "Email to dana@acme.com, subject 'Proposal'"}]
+    a, _, _, _ = make(brain)
+    assert a.handle_utterance(SPEECH) is Outcome.AWAITING_CONFIRM
+    assert spoken_texts(brain)[-1] == (
+        "Send this: Email to dana@acme.com, subject 'Proposal'. It says: The proposal is attached? "
+        "Say 'send it' to confirm, or anything else to cancel."
+    )
+
+
 def test_approve_failure_is_reported_and_not_retried(brain):
     brain.transcripts = ["draft it", "send it"]
     brain.ask_replies = [draft_reply()]

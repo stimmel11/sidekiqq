@@ -79,6 +79,9 @@ export const EmailDraftInput = z.object({
   subject: z.string().trim().min(1).max(250),
   body: z.string().trim().min(1).max(20_000),
   threadId: id.optional(),
+  /** SideKiqq bookkeeping stored on the Draft record only; never sent to the provider. */
+  client: z.string().trim().min(1).max(200).optional(),
+  followupId: z.string().trim().min(1).max(100).optional(),
 });
 
 export const CalendarReadInput = z.object({
@@ -113,23 +116,39 @@ export type EmailReadOutput<I extends EmailReadIn> = I extends { op: "search" }
           ? { email?: string }
           : never;
 
-/** Provider draft created. `providerDraftId` is what the sender registry later sends. */
-export interface EmailDraftOutput {
+/** What a connector returns for `email.draft`: the draft it created in the provider. */
+export interface EmailDraftProviderOutput {
   providerDraftId: string;
   threadId?: string;
 }
 
-/** Input/output types per implemented capability. Unimplemented ones map to `never` until built. */
+/**
+ * What `email.draft` returns to its caller (§2): the pending Draft record that invokeCapability
+ * created, and its code-built read-back. Creating a draft sends nothing.
+ */
+export interface EmailDraftOutput {
+  draftId: string;
+  providerDraftId?: string;
+  readback: string;
+}
+
+/**
+ * Input/output types per implemented capability. Unimplemented ones map to `never` until built.
+ * `provider` is what `Connector.invoke` returns when invokeCapability post-processes it (only
+ * `email.draft` today: it adds the Draft record); otherwise it equals `out`.
+ */
 export interface CapabilityIO {
-  "email.read": { in: EmailReadIn; out: EmailReadOutput<EmailReadIn> };
-  "email.draft": { in: z.infer<typeof EmailDraftInput>; out: EmailDraftOutput };
-  "calendar.read": { in: z.infer<typeof CalendarReadInput>; out: CalendarEvent[] };
-  "files.read": { in: z.infer<typeof FilesReadInput>; out: DriveFile[] };
-  "contacts.lookup": { in: z.infer<typeof ContactsLookupInput>; out: ContactLookup };
+  "email.read": { in: EmailReadIn; out: EmailReadOutput<EmailReadIn>; provider: EmailReadOutput<EmailReadIn> };
+  "email.draft": { in: z.infer<typeof EmailDraftInput>; out: EmailDraftOutput; provider: EmailDraftProviderOutput };
+  "calendar.read": { in: z.infer<typeof CalendarReadInput>; out: CalendarEvent[]; provider: CalendarEvent[] };
+  "files.read": { in: z.infer<typeof FilesReadInput>; out: DriveFile[]; provider: DriveFile[] };
+  "contacts.lookup": { in: z.infer<typeof ContactsLookupInput>; out: ContactLookup; provider: ContactLookup };
 }
 export type ImplementedCapability = keyof CapabilityIO;
 export type In<C extends ImplementedCapability> = CapabilityIO[C]["in"];
 export type Out<C extends ImplementedCapability> = CapabilityIO[C]["out"];
+/** What a connector's `invoke` returns for capability C. */
+export type ProviderOut<C extends ImplementedCapability> = CapabilityIO[C]["provider"];
 
 export const INPUT_SCHEMAS: { [C in ImplementedCapability]: z.ZodType<In<C>> } = {
   "email.read": EmailReadInput,

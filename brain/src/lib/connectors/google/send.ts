@@ -31,9 +31,13 @@ export class GmailDraftSender implements MailSender {
 
 /** Sender-registry entry for ("google", "email"). */
 export function googleEmailExecutor(workspace: () => Promise<Workspace>, mailer: () => Promise<MailSender>): DraftExecutor {
+  const gmailDraftId = (d: Draft): string => {
+    if (d.kind !== "email" || !d.providerDraftId) throw new Error("Not a Gmail email draft");
+    return d.providerDraftId;
+  };
   return {
     // The owner may have deleted or sent the draft in Gmail since it was created.
-    stillValid: async (d: Draft) => (await workspace()).draftExists(d.gmailDraftId),
-    execute: async (d: Draft) => (await mailer()).sendDraft(d.gmailDraftId),
+    stillValid: async (d: Draft) => d.kind === "email" && !!d.providerDraftId && (await workspace()).draftExists(d.providerDraftId),
+    execute: async (d: Draft) => (await mailer()).sendDraft(gmailDraftId(d)),
   };
 }

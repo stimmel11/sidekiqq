@@ -8,11 +8,15 @@ call `invokeCapability`; `deps.workspace()` is gone), and the sender registry wi
 per-connector AAD, `TOKEN_ENCRYPTION_KEY_PREV` rotation, single-use state carrying the PKCE verifier),
 the Google token migration (§8 step 3), and per-connection enabled capabilities, granted scopes and
 `needs_reauth` checked in `invokeCapability` (§4 step 3). From slice 2, still open in §7: the owner
-alert on `needs_reauth`, provider revoke on disconnect, incremental scopes. Not yet built: Draft `kind`/`readback` (§5), the generic
-connections routes and the Connections screen (§9), the `search_email` tool rename, and remote MCP.
-Slice 1 differences from §2, to settle in the next slice: `email.draft` returns
-`{providerDraftId, threadId?}` and the caller (the `create_email_draft` tool) still creates the
-pending Draft record; `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
+alert on `needs_reauth`, provider revoke on disconnect, incremental scopes. Slice 3 (2026-10-28): Draft
+`kind`/`connectorId`/`readback` (§5; readback built in `lib/connectors/readback.ts` and set by
+`DraftsRepo.create`, used as `Action.summary`), legacy records upgraded on read, `email.draft` now
+returns `{draftId, providerDraftId, readback}` and `invokeCapability` creates the Draft record, `GET
+/api/drafts` adds `kind`/`readback`/`when`, sender key is `(connectorId, kind)` and approve answers 422
+when none is registered. Calendar kinds are modelled only. Not yet built: §5 lazy 7-day expiry, the
+generic connections routes and the Connections screen (§9), the `search_email` tool rename, and remote
+MCP. Remaining difference from §2: `email.read` has two extra ops for the cron scanner (`list_ids`,
+`account`).
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2

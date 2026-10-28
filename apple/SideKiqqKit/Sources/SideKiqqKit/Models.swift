@@ -303,27 +303,46 @@ public struct Top5Response: Codable, Hashable, Sendable {
  * and the voice read-back show: recipients, subject and body.
  */
 public struct Draft: Codable, Hashable, Sendable, Identifiable {
+    /** Start and end (ISO-8601) of a calendar draft. */
+    public struct When: Codable, Hashable, Sendable {
+        public var start: String
+        public var end: String
+        public init(start: String, end: String) { self.start = start; self.end = end }
+    }
+
     public var id: String
+    /** "email", "calendar_invite" or "calendar_hold"; a plain string so new kinds can't break decoding. Absent = "email". */
+    public var kind: String
     public var to: [String]
     public var cc: [String]
     public var subject: String
     public var body: String
+    /**
+     * One sentence the brain builds in code (every recipient address in full, the subject, the
+     * time for calendar kinds). Empty from older brains.
+     */
+    public var readback: String
+    /** Calendar kinds only. */
+    public var when: When?
     public var client: String?
     public var createdAt: String
 
-    public init(id: String, to: [String], cc: [String] = [], subject: String, body: String,
-                client: String? = nil, createdAt: String) {
-        self.id = id; self.to = to; self.cc = cc; self.subject = subject; self.body = body
-        self.client = client; self.createdAt = createdAt
+    public init(id: String, kind: String = "email", to: [String], cc: [String] = [], subject: String, body: String,
+                readback: String = "", when: When? = nil, client: String? = nil, createdAt: String) {
+        self.id = id; self.kind = kind; self.to = to; self.cc = cc; self.subject = subject; self.body = body
+        self.readback = readback; self.when = when; self.client = client; self.createdAt = createdAt
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "email"
         to = try c.decode([String].self, forKey: .to)
         cc = try c.decodeIfPresent([String].self, forKey: .cc) ?? []
         subject = try c.decode(String.self, forKey: .subject)
         body = try c.decode(String.self, forKey: .body)
+        readback = try c.decodeIfPresent(String.self, forKey: .readback) ?? ""
+        when = try c.decodeIfPresent(When.self, forKey: .when)
         client = try c.decodeIfPresent(String.self, forKey: .client)
         createdAt = try c.decode(String.self, forKey: .createdAt)
     }

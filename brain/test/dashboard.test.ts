@@ -212,7 +212,7 @@ describe("dashboard approve requires explicit confirmation", () => {
     setDeps(deps); // the existing route handlers resolve deps via getDeps()
     const g = await deps.ws.createDraft({ to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached." });
     const fu = await deps.repos.followups.upsert({ person: "Dana", client: "ACME", reason: "waiting", importance: "HIGH" });
-    const d = await deps.repos.drafts.create({ gmailDraftId: g.gmailDraftId, to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached.", client: "ACME", followupId: fu.followUp.id });
+    const d = await deps.repos.drafts.create({ providerDraftId: g.gmailDraftId, to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached.", client: "ACME", followupId: fu.followUp.id });
     return { deps, d, fu };
   }
 
@@ -250,7 +250,7 @@ describe("dashboard approve requires explicit confirmation", () => {
     const { deps, d, fu } = await setup();
     const form = { confirm: CONFIRM_VALUE, confirmation: draftFingerprint(d) };
     expect(await approveDraftFromDashboard(deps, d.id, form, key)).toEqual({ ok: true });
-    expect(deps.sender.sendDraft).toHaveBeenCalledExactlyOnceWith(d.gmailDraftId);
+    expect(deps.sender.sendDraft).toHaveBeenCalledExactlyOnceWith(d.providerDraftId);
     expect((await deps.repos.drafts.get(d.id))?.status).toBe("sent");
     expect((await deps.repos.followups.get(fu.followUp.id))?.resolved).toBe(true);
     // Replaying the same confirmation is refused.

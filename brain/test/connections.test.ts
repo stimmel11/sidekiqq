@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { encrypt, pkceChallenge, pkcePair } from "@/lib/crypto";
-import type { ImplementedCapability, Out } from "@/lib/connectors/capabilities";
+import type { ImplementedCapability, ProviderOut } from "@/lib/connectors/capabilities";
 import { GoogleConnector } from "@/lib/connectors/google";
 import { invokeCapability, isInvalidGrant, readEmail } from "@/lib/connectors/invoke";
 import { ConnectionStore, connectionAad, effectiveCapabilities, parseScopes, StoredConnectionSchema, type StoredConnectionInput } from "@/lib/connectors/store";
@@ -217,7 +217,7 @@ describe("invokeCapability with a stored connection (§4 step 3)", () => {
       firstParty: true,
       capabilities: ["email.read"],
       scopesFor: () => [],
-      invoke: async <C extends ImplementedCapability>(): Promise<Out<C>> => {
+      invoke: async <C extends ImplementedCapability>(): Promise<ProviderOut<C>> => {
         throw Object.assign(new Error("invalid_grant"), { response: { data: { error: "invalid_grant" } } });
       },
     };
