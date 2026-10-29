@@ -12,6 +12,8 @@ import com.google.firebase.messaging.RemoteMessage
 import com.sidekiqq.phone.MainActivity
 import com.sidekiqq.phone.R
 import com.sidekiqq.phone.SideKiqqApp
+import com.sidekiqq.phone.handoff.CommandNudge
+import com.sidekiqq.phone.handoff.NudgeAction
 import com.sidekiqq.phone.medallion.MedallionService
 import com.sidekiqq.phone.sideKiqqApp
 import com.sidekiqq.shared.model.Device
@@ -30,6 +32,10 @@ import kotlinx.coroutines.tasks.await
  * For each alert: post a phone notification, forward it to the watch (Data Layer "/sidekiqq/alert"),
  * and buzz the medallion (CONTROL 0x12) when importance is HIGH or CRITICAL.
  * Notifications open the app; they never carry a "send" action. Drafts are approved in-app behind a confirm dialog.
+ *
+ * `kind: "command"` messages are NOT alerts: they are silent nudges to poll GET /api/commands
+ * (see [CommandNudge]). They are handled first and never notify as an alert, reach the watch or buzz
+ * the medallion.
  */
 class SideKiqqMessagingService : FirebaseMessagingService() {
 
@@ -39,6 +45,13 @@ class SideKiqqMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val d = message.data
+        val app = sideKiqqApp
+        when (CommandNudge.decide(d, paired = app.tokenStore.token() != null, appVisible = app.handoffsVisible)) {
+            NudgeAction.NotANudge -> Unit
+            NudgeAction.PollNow -> return app.onCommandNudge()
+            NudgeAction.NotifyWaiting -> return showHandoffWaiting(this)
+            NudgeAction.Ignore -> return
+        }
         val title = d["title"] ?: message.notification?.title ?: "SideKiqq"
         val body = d["body"] ?: message.notification?.body ?: return
         val importance = d["importance"]?.let { runCatching { Importance.valueOf(it.uppercase()) }.getOrNull() }
@@ -58,7 +71,6 @@ class SideKiqqMessagingService : FirebaseMessagingService() {
 
         showNotification(this, alert)
 
-        val app = sideKiqqApp
         app.appScope.launch { app.wearRelay.sendAlert(alert) }
 
         if (importance == Importance.CRITICAL || importance == Importance.HIGH) {
@@ -93,6 +105,48 @@ class SideKiqqMessagingService : FirebaseMessagingService() {
                     .onFailure { Log.w(TAG, "registerDevice failed", it) }
             }
         }
+
+        /** One id, so repeated nudges collapse into a single notification. */
+        const val HANDOFF_NOTIFICATION_ID = 0x5A1D0C
+
+        /**
+         * Generic and content-free on purpose: the nudge carries only an id, and the hand-off's
+         * label/number/URL are shown only inside the app after an authenticated poll. Tapping opens
+         * the app (which polls on resume); there is no action that dials or opens anything.
+         */
+        fun showHandoffWaiting(context: Context) {
+            val open = PendingIntent.getActivity(
+                context,
+                HANDOFF_NOTIFICATION_ID,
+                Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(MainActivity.EXTRA_OPEN_TAB, "home"),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val n = Notification.Builder(context, SideKiqqApp.CHANNEL_HANDOFFS)
+                .setSmallIcon(R.drawable.ic_stat_sidekiqq)
+                .setContentTitle(context.getString(R.string.handoff_waiting_title))
+                .setContentText(context.getString(R.string.handoff_waiting_body))
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .setCategory(Notification.CATEGORY_REMINDER)
+                // Commands expire after 15 minutes on the brain; don't leave a stale prompt behind.
+                .setTimeoutAfter(HANDOFF_NOTIFICATION_TIMEOUT_MS)
+                // Several queued commands re-post the same id: sound/heads-up only for the first.
+                .setOnlyAlertOnce(true)
+                .build()
+            val nm = context.getSystemService(NotificationManager::class.java)
+            // The app may have come to the foreground since the nudge was checked; it polls itself then.
+            if (context.sideKiqqApp.handoffsVisible) return context.sideKiqqApp.onCommandNudge()
+            if (nm.areNotificationsEnabled()) nm.notify(HANDOFF_NOTIFICATION_ID, n)
+        }
+
+        /** The app is on screen and polling: the "waiting" prompt is no longer needed. */
+        fun clearHandoffWaiting(context: Context) {
+            context.getSystemService(NotificationManager::class.java).cancel(HANDOFF_NOTIFICATION_ID)
+        }
+
+        private const val HANDOFF_NOTIFICATION_TIMEOUT_MS = 15 * 60_000L
 
         fun showNotification(context: Context, alert: WearAlert) {
             val open = PendingIntent.getActivity(

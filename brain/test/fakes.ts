@@ -134,6 +134,17 @@ export class FakePush implements PushSender {
     this.sent.push({ tokens, msg });
     return { sent: tokens.length, failed: 0, invalidTokens: [] };
   }
+  dataSent: { tokens: string[]; data: Record<string, string>; priority: "high" | "normal" | undefined }[] = [];
+  /** Tokens to report as invalid on the next sendData. */
+  invalidOnData: string[] = [];
+  /** Throw from sendData (FCM outage). */
+  dataError: Error | null = null;
+  async sendData(tokens: string[], data: Record<string, string>, priority?: "high" | "normal") {
+    if (this.dataError) throw this.dataError;
+    this.dataSent.push({ tokens, data, priority });
+    const invalidTokens = tokens.filter((t) => this.invalidOnData.includes(t));
+    return { sent: tokens.length - invalidTokens.length, failed: invalidTokens.length, invalidTokens };
+  }
 }
 
 /** Scripted LLM: each call returns the next response (or computes it from params). */

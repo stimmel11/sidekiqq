@@ -59,6 +59,9 @@ Pairing / owner endpoints (not device-token auth):
 
 Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"), optional
 `importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
+One more FCM data message is **not an alert**: the command nudge `{ "kind": "command", "commandId": string }`, with
+no `title`/`body`, sent only to the target device of a newly queued command (see Device commands). Clients must check
+`kind` first and never show, relay or log it as an alert.
 Every alert is also written to a 7-day alert log (`lib/push/alerts.ts` → `deliverAlert`), so `GET /api/alerts`
 returns exactly the same title/body/data as the push.
 
@@ -104,8 +107,13 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
 - This endpoint is the owner-device path. Hand-offs created later from `/api/ask` or connectors go through
   `invokeCapability` with the caller rules and per-capability allowlists in `docs/CONNECTORS.md` §4.4.
-- Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`) for now;
-  an FCM nudge is a later slice.
+- Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
+  best-effort FCM nudge to the target device's own push token right after `POST /api/commands` (high priority,
+  data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
+  Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
+  The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no
+  action except opening the app). A nudge is never an alert: not in the alert log, not relayed to the watch, no
+  medallion haptic.
 
 ## Safety rules baked in (from the EA operating system)
 - Nothing is ever sent automatically. The brain creates drafts; sending requires `/api/drafts/:id/approve`,
