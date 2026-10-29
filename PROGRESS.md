@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 366 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 377 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -32,6 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
+- 2026-10-29: Task layer slice 4a (`crew/command-nudge`): silent FCM command nudge to the target device + phone handling (poll now / generic "hand-off waiting" notification). 377 brain tests; Android unverified.
 
 ## Backlog (top = next)
 
@@ -51,6 +52,8 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [ ] Slice 2b: Watch "call <name> on my phone" via `createCommand` (needs the number: wait for `contacts.lookup` slice 2, or a spoken number). Optional: persist handled ids across process death; percent-encode `{ } | ^` in query strings that `java.net.URI` rejects.
   - [ ] Slice 3: Reachy app polls `/api/commands` alongside `/api/alerts` and handles `reachy_wake` (chat/brief/dance/game).
   - [ ] Slice 4: FCM data nudge `kind: "command"` to the target device (phone must ignore it as a notification), and handoffs from `invokeCapability` (`user_finishes` tier, after the connector-framework PR lands).
+    - [x] 4a (`crew/command-nudge`, Android unverified): brain sends a data-only `{kind:"command", commandId}` (no title/body, high priority, 3 s timeout, best effort) to the target device's own token after `POST /api/commands`; never logged as an alert. Phone polls at once if visible, else posts one generic "Hand-off waiting" notification (no content, open-app only); never relayed to the watch or medallion. `CommandNudge` JVM test written but not run (no kotlinc allowed this run).
+    - [ ] 4b: hand-offs from `invokeCapability` (`user_finishes`). Any new path that queues a command (e.g. `call_on_phone` in PR #13) must also call `nudgeCommandTarget`. Follow-up: `setFcmToken` should clear the same token from other device records, so a stale phone record can't receive another phone's nudge.
 - [x] Connector: Google Contacts (`contacts.lookup`), so "email this to <name>" resolves people.
   - [x] Slice 1: `brain/src/lib/google/contacts.ts` (People API lookup of saved + Other contacts, warm-up, name ranking, ambiguity returned, cleaned emails/phones) and the two read-only scopes. Tested with a fake People API.
   - [x] Slice 2 (connector framework is now on main): register it as `contacts.lookup` on the `google` connector, add the Claude tool `lookup_contact`, and wire it into `deps`. Done 2026-10-28 (`crew/contacts-capability`).
