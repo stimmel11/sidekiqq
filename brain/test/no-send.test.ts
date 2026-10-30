@@ -153,7 +153,7 @@ describe("no route other than draft-approve can send mail (behavioural)", () => 
     const deps = makeDeps({ llm });
     setDeps(deps);
     const { token } = await pairDevice(deps, "glasses");
-    const res = await ask(req("POST", "/api/ask", { token, body: { text: "email Dana the proposal and send it now", device: "glasses" } }), params({}));
+    const res = await ask(req("POST", "/api/ask", { token, body: { text: "email Dana (dana@acme.com) the proposal and send it now", device: "glasses" } }), params({}));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { actions: { type: string; id: string }[] };
     expect(body.actions[0]?.type).toBe("draft_created");
