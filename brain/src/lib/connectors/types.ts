@@ -57,3 +57,20 @@ export class ConnectionUnusableError extends CapabilityDeniedError {
     this.name = "ConnectionUnusableError";
   }
 }
+
+/**
+ * A provider refused the stored sign-in (revoked, expired or rotated away). Connectors that don't
+ * use google-auth-library throw this so `invokeCapability` marks the connection `needs_reauth`,
+ * the same as Google's `invalid_grant`.
+ */
+export class ReauthRequiredError extends Error {
+  constructor(
+    readonly connectorId: string,
+    message: string,
+    /** The credential the provider refused, when it differs from the one loaded before the call (rotation). */
+    readonly failedSecret?: string,
+  ) {
+    super(message);
+    this.name = "ReauthRequiredError";
+  }
+}

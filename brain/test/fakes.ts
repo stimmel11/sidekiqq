@@ -10,6 +10,9 @@ import { ConnectionStore } from "@/lib/connectors/store";
 import type { CalendarEvent, DraftInput, EmailMessage, Workspace } from "@/lib/google/workspace";
 import type { MailSender } from "@/lib/connectors/google/send";
 import { GoogleConnector, type ContactsLookup } from "@/lib/connectors/google";
+import { ZoomConnector } from "@/lib/connectors/zoom";
+import type { ZoomRooms } from "@/lib/connectors/zoom/meetings";
+import type { In, VideoRoom } from "@/lib/connectors/capabilities";
 import type { ContactLookup, ContactQuery } from "@/lib/google/contacts";
 import { buildSenders } from "@/lib/connectors/senders";
 import type { CreateParams, LLM } from "@/lib/assistant/llm";
@@ -175,10 +178,25 @@ export interface TestDeps extends Deps {
   contacts: FakeContacts;
   sender: SpyMailSender;
   pushFake: FakePush;
+  zoom: FakeZoomRooms;
   setNow(d: Date): void;
 }
 
-export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean } = {}): TestDeps {
+/** Records Zoom room requests instead of calling Zoom. */
+export class FakeZoomRooms implements ZoomRooms {
+  created: In<"video.create_room">[] = [];
+  error: Error | null = null;
+  async create(input: In<"video.create_room">): Promise<VideoRoom> {
+    if (this.error) throw this.error;
+    this.created.push(input);
+    const n = this.created.length;
+    return { meetingId: `8${n}0000000${n}`, joinUrl: `https://us02web.zoom.us/j/8${n}0000000${n}?pwd=abc`, passcode: "123456", ...(input.start ? { start: input.start } : {}) };
+  }
+}
+
+export function makeDeps(
+  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean } = {},
+): TestDeps {
   let now = opts.now ?? new Date("2026-10-16T15:00:00Z");
   const clock = () => now;
   const kv = new MemoryKV(() => now.getTime());
@@ -189,6 +207,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
   const contacts = new FakeContacts();
   const sender = new SpyMailSender();
   const pushFake = new FakePush();
+  const zoom = new FakeZoomRooms();
   const connected = opts.googleConnected ?? true;
   const workspace = async (): Promise<Workspace> => {
     if (!connected) {
@@ -214,7 +233,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
     },
     connections,
     googleTokens: new GoogleTokenStore(connections),
-    connectors: () => [new GoogleConnector(workspace, contactsFactory)],
+    connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom ? [new ZoomConnector(async () => zoom)] : [])],
     senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
     push: () => pushFake,
     transcriber: () =>
@@ -231,6 +250,7 @@ export function makeDeps(opts: { llm?: LLM; now?: Date; transcriber?: Transcribe
     contacts,
     sender,
     pushFake,
+    zoom,
     setNow: (d: Date) => {
       now = d;
     },

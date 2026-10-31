@@ -20,6 +20,7 @@ const APPROVE_ROUTE = path.join(SRC, "app/api/drafts/[id]/approve/route.ts");
 const GOOGLE_SEND = path.join(SRC, "lib/connectors/google/send.ts");
 const SENDER_REGISTRY = path.join(SRC, "lib/connectors/senders.ts");
 const DEPS_MODULE = path.join(SRC, "lib/deps.ts");
+const ZOOM_MEETINGS = path.join(SRC, "lib/connectors/zoom/meetings.ts");
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -49,6 +50,9 @@ const P = {
   buildSenders: /\bbuildSenders\b/,
   importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
   smtp: /nodemailer|smtp/i,
+  // Zoom meeting creation (CONNECTORS.md §6): only lib/connectors/zoom/meetings.ts, with its fixed body.
+  // Also any other meetings endpoint (PATCH /meetings/{id}, /registrants) and the fields that make Zoom email people.
+  zoomApi: /api\.zoom(gov)?\.(us|com)|\bmeetings\/|users\/[^"'`\s]*\/meetings|meeting_invitees|alternative_hosts|schedule_for|registrants\b/,
 } as const;
 type Prim = keyof typeof P;
 
@@ -60,6 +64,7 @@ const ALLOWED: Record<string, Prim[]> = {
   // The container constructs the registry (and declares `senders()`), but never calls a sender.
   [DEPS_MODULE]: ["gmailSender", "buildSenders", "registry", "senders"],
   [APPROVE_ROUTE]: ["senders", "execute"],
+  [ZOOM_MEETINGS]: ["zoomApi"],
 };
 
 function hits(file: string): Prim[] {
@@ -134,6 +139,17 @@ describe("no route other than draft-approve can send mail (static)", () => {
   it("only deps imports the sender registry; only the registry and deps import the Google send module", () => {
     expect(runtimeImporters(SENDER_REGISTRY)).toEqual(["lib/deps.ts"]);
     expect(runtimeImporters(GOOGLE_SEND)).toEqual(["lib/connectors/senders.ts", "lib/deps.ts"]);
+  });
+
+  it("the Zoom meetings module never names invitees, alternative hosts or schedule_for in code", () => {
+    const c = code(ZOOM_MEETINGS);
+    expect(c).toMatch(/api\.zoom\.us\/v2/);
+    expect(c).not.toMatch(/meeting_invitees|schedule_for|registrants\b|\/registrants/);
+    expect(c).toMatch(/alternative_hosts: ""/);
+  });
+
+  it("only deps constructs the Zoom meetings client (everything else goes through invokeCapability)", () => {
+    expect(runtimeImporters(ZOOM_MEETINGS)).toEqual(["lib/deps.ts"]);
   });
 
   it("the Workspace interface exposes no send method", () => {

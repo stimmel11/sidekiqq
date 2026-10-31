@@ -7,7 +7,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 | Module | Status | Notes |
 |---|---|---|
 | Architecture & API contract | Done | `ARCHITECTURE.md` (binding). Pairing/connect/push shapes added by QA. |
-| Brain backend (`/brain`) | Done, tested | Typecheck clean, 366 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) and Google Contacts (`contacts.lookup` + `lookup_contact` tool) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
+| Brain backend (`/brain`) | Done, tested | Typecheck clean, 403 tests passing. Connector framework slices 1–2 (encrypted `ConnectionStore`), task layer slice 1 (`/api/commands`) Google Contacts (`contacts.lookup` + `lookup_contact` tool) and Zoom `video.create_room` (connect flow pending) in place. Not yet deployed. Includes `GET /api/alerts` and `POST /api/speak` for Reachy. |
 | Phone companion + Galaxy Glasses (`/android/phone`) | Written, statically fixed | Never compiled. Cloud sandbox can't reach Google Maven. Glasses XR is optional (`-Psidekiqq.xr=false`). |
 | Galaxy Watch (`/android/watch`) | Written, statically fixed | Never compiled (same reason). |
 | Shared Kotlin client (`/android/shared`) | Written | 42 pure-JVM tests passing. |
@@ -32,6 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
+- 2026-10-31: Zoom slice 1 (`crew/zoom-room`): `zoom` connector with `video.create_room` (fixed no-invite body), rotation-safe Zoom OAuth helpers, `start_video_room` tool. 403 brain tests.
 
 ## Backlog (top = next)
 
@@ -56,6 +57,10 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [x] Slice 2 (connector framework is now on main): register it as `contacts.lookup` on the `google` connector, add the Claude tool `lookup_contact`, and wire it into `deps`. Done 2026-10-28 (`crew/contacts-capability`).
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
+  - [x] Zoom slice 1 (`crew/zoom-room`): `video.create_room` (auto) on a new built-in `zoom` connector: fixed request body (no invitees/alt hosts/registration, Zoom emails and AI summaries off), host `start_url` never returned, join link must be https on zoom.us; Zoom OAuth helpers (PKCE authorize URL, code exchange, refresh with rotated-token write-back + KV refresh lock + in-memory fallback, `ReauthRequiredError` → `needs_reauth`); registered only when `ZOOM_CLIENT_ID`/`ZOOM_CLIENT_SECRET` are set; Claude tool `start_video_room`; no-send scan pins Zoom meeting endpoints to `zoom/meetings.ts`.
+  - [ ] Zoom slice 2 (after PR #15 lands): `zoomOAuth` `OAuthFlow` in `lib/connectors/oauth.ts` (authorize/callback/revoke via the generic `/api/connections/zoom/*` routes) so the owner can connect Zoom from the dashboard; optionally queue an `open_url` hand-off of the join link to the phone (task layer 4b).
+  - [ ] Meet + Zoom in invites: `calendar.invite.prepare` (confirm, needs the Draft `kind` from PR #16) with `conference: "meet" | "zoom"`; the executor in the sender registry creates the Meet link (Calendar `conferenceData`) or the Zoom room at approve time.
+  - [ ] Phone-side call intents (WhatsApp, Samsung/phone video).
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
 - [ ] Connector: Kroger / King Soopers (public API: product search, add to cart; NO checkout or pickup-slot API). Task: "here's my grocery list" fills the cart, then hands checkout to the phone. Never automate payment.
 - [ ] Connectors: Outlook / Microsoft 365, generic IMAP/SMTP; investigate Instacart's developer platform terms for other grocery chains.
