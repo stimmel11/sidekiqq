@@ -100,6 +100,27 @@ export const ContactsLookupInput = z.object({
   max: z.number().int().min(1).max(CONTACTS_MAX),
 });
 
+/**
+ * `video.create_room` (Zoom only, auto): an unannounced room for the owner to open. No invitees,
+ * attendees or emails in the input at all; the connector hard-codes the rest of the request.
+ * No `start` = an instant meeting.
+ */
+export const VIDEO_ROOM_MAX_MINUTES = 240;
+export const VideoCreateRoomInput = z.object({
+  topic: z.string().trim().min(1).max(200),
+  start: z.iso.datetime({ offset: true }).optional(),
+  durationMin: z.number().int().min(5).max(VIDEO_ROOM_MAX_MINUTES).optional(),
+});
+
+/** Never the host `start_url` (it carries a host token). */
+export interface VideoRoom {
+  meetingId: string;
+  joinUrl: string;
+  passcode?: string;
+  /** Scheduled start (UTC ISO) when one was given; absent for instant rooms. */
+  start?: string;
+}
+
 export type EmailReadIn = z.infer<typeof EmailReadInput>;
 export type EmailReadOutput<I extends EmailReadIn> = I extends { op: "search" }
   ? EmailSummary[]
@@ -126,6 +147,7 @@ export interface CapabilityIO {
   "calendar.read": { in: z.infer<typeof CalendarReadInput>; out: CalendarEvent[] };
   "files.read": { in: z.infer<typeof FilesReadInput>; out: DriveFile[] };
   "contacts.lookup": { in: z.infer<typeof ContactsLookupInput>; out: ContactLookup };
+  "video.create_room": { in: z.infer<typeof VideoCreateRoomInput>; out: VideoRoom };
 }
 export type ImplementedCapability = keyof CapabilityIO;
 export type In<C extends ImplementedCapability> = CapabilityIO[C]["in"];
@@ -137,6 +159,7 @@ export const INPUT_SCHEMAS: { [C in ImplementedCapability]: z.ZodType<In<C>> } =
   "calendar.read": CalendarReadInput,
   "files.read": FilesReadInput,
   "contacts.lookup": ContactsLookupInput,
+  "video.create_room": VideoCreateRoomInput,
 };
 
 /** Plain words for the owner (Connections screen). */

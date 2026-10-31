@@ -7,6 +7,9 @@ import { GoogleWorkspace } from "./google/workspace";
 import { GoogleContacts, googlePeopleApi } from "./google/contacts";
 import { GoogleConnector } from "./connectors/google";
 import { ConnectionStore } from "./connectors/store";
+import { ZoomConnector } from "./connectors/zoom";
+import { ZoomAuth, zoomConfigFromEnv, zoomRefreshLock } from "./connectors/zoom/auth";
+import { ZoomMeetings } from "./connectors/zoom/meetings";
 import { GmailDraftSender } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
 import type { Connector } from "./connectors/types";
@@ -30,7 +33,7 @@ export interface Deps {
   /** Google's view of `connections`, used by the Google OAuth routes. */
   googleTokens: GoogleTokenStore;
   /**
-   * Connectors (Gmail/Calendar/Drive/Contacts today). Only lib/connectors/invoke.ts may call
+   * Connectors (Google: Gmail/Calendar/Drive/Contacts; Zoom when configured). Only lib/connectors/invoke.ts may call
    * `Connector.invoke`; everything else goes through `invokeCapability`.
    */
   connectors(): readonly Connector[];
@@ -60,6 +63,10 @@ export function buildDeps(kv: KV): Deps {
   let push: PushSender | null = null;
   const googleWorkspace = async () => new GoogleWorkspace(await googleTokens.authorizedClient());
   const googleContacts = async () => new GoogleContacts(googlePeopleApi(await googleTokens.authorizedClient()));
+  // Zoom is registered only when ZOOM_CLIENT_ID/ZOOM_CLIENT_SECRET are set.
+  const zoomCfg = zoomConfigFromEnv(config.appUrl());
+  const zoomAuth = zoomCfg ? new ZoomAuth(zoomCfg, connections, fetch, Date.now, zoomRefreshLock(kv, prefix)) : null;
+  const zoomMeetings = zoomAuth ? new ZoomMeetings(zoomAuth) : null;
   let connectors: Connector[] | null = null;
   let senders: SenderRegistry | null = null;
   return {
@@ -69,7 +76,11 @@ export function buildDeps(kv: KV): Deps {
     llm: () => (llm ??= llmFromEnv()),
     connections,
     googleTokens,
-    connectors: () => (connectors ??= [new GoogleConnector(googleWorkspace, googleContacts)]),
+    connectors: () =>
+      (connectors ??= [
+        new GoogleConnector(googleWorkspace, googleContacts),
+        ...(zoomMeetings ? [new ZoomConnector(async () => zoomMeetings)] : []),
+      ]),
     senders: () =>
       (senders ??= buildSenders({
         google: { workspace: googleWorkspace, mailer: async () => new GmailDraftSender(await googleTokens.authorizedClient()) },

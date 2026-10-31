@@ -44,6 +44,7 @@ const ASK_PROTOCOL = `TOOL PROTOCOL (runtime)
   ask the owner which person or which address; never guess or invent an address.
 - You cannot send email. create_email_draft only creates a Gmail draft; the owner sends it by tapping Approve on a device.
   After creating a draft, tell the owner the recipient and gist and that it is waiting for approval.
+- start_video_room creates a Zoom room only for the owner; it invites no one. Put the join link in reply, never in spoken.
 - When a commitment's due date is guessed, set dueInferred=true and say "inferred" aloud.
 - Keep each client's information separate; when asked about one client never include another client's details.
 - ALWAYS finish by calling the respond tool exactly once with:

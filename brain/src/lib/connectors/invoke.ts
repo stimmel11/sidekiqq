@@ -15,7 +15,7 @@ import {
   type Out,
 } from "./capabilities";
 import { effectiveCapabilities } from "./store";
-import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableError, type ConnCtx, type Connector } from "./types";
+import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableError, ReauthRequiredError, type ConnCtx, type Connector } from "./types";
 
 /**
  * THE ONLY CALLER OF `Connector.invoke` (docs/CONNECTORS.md §4). Enforced by test/connectors.test.ts.
@@ -52,6 +52,8 @@ function summarize(cap: CapabilityId, input: unknown): string {
       return `search "${String(i.query)}"`;
     case "contacts.lookup":
       return `lookup "${String(i.name)}"`;
+    case "video.create_room":
+      return `room "${String(i.topic)}"${typeof i.start === "string" ? ` at ${i.start}` : " (instant)"}`;
     default:
       return cap;
   }
@@ -123,17 +125,21 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     return out;
   } catch (err) {
     await audit(false, (err as Error)?.message ?? String(err));
-    if (stored && isInvalidGrant(err)) {
+    // A ReauthRequiredError from another connector's credential is not about this connection.
+    const foreign = err instanceof ReauthRequiredError && err.connectorId !== connector.id;
+    if (stored && !foreign && isInvalidGrant(err)) {
+      const failedSecret = err instanceof ReauthRequiredError && err.failedSecret ? err.failedSecret : stored.secret;
       await deps.connections
-        .markNeedsReauth(connector.id, "The provider rejected the stored sign-in (invalid_grant).", stored.secret)
+        .markNeedsReauth(connector.id, "The provider rejected the stored sign-in.", failedSecret)
         .catch((e: unknown) => console.warn("[connections] could not mark needs_reauth", e));
     }
     throw err;
   }
 }
 
-/** OAuth refresh failure: the stored refresh token was revoked or expired (Google: `invalid_grant`). */
+/** OAuth refresh failure: the stored refresh token was revoked or expired (Google: `invalid_grant`; others throw ReauthRequiredError). */
 export function isInvalidGrant(err: unknown): boolean {
+  if (err instanceof ReauthRequiredError) return true;
   const e = err as { message?: unknown; response?: { data?: { error?: unknown } } } | null;
   if (e?.response?.data?.error === "invalid_grant") return true;
   // google-auth-library sometimes rewrites the message to the JSON error body.
