@@ -103,12 +103,24 @@ There is no always-on hotword. You wake SideKiqq explicitly: tap the glasses tou
    - Say anything other than "send it". The draft stays unsent.
    - Repeat and say "send it". The phone calls `/api/drafts/:id/approve`.
 
+## Reachy Mini on the home LAN
+The Home tab's **Reachy** card starts the SideKiqq app on a Reachy Mini and asks it to chat, read the brief or dance
+(`phone/reachy/`). On tap, the phone asks the robot's daemon (`http://reachy-mini.local:8000`, changeable with
+**Change address**) for the current app. It starts `sidekiqq_reachy` if nothing is running, waits up to 45 s for
+`running`, then queues a `reachy_wake` command on the brain. If another app is running, it says so and leaves it alone.
+- Only `.local` names are accepted. `network_security_config.xml` allows cleartext to `*.local` for this; HTTPS is still
+  required everywhere else. IP addresses are not supported yet.
+- The robot must already have the app installed and paired (see `reachy/README.md`).
+- Unverified: not compiled, and not tried against a real robot. `.local` resolution needs Android's mDNS support in the
+  system resolver (Android 12+ as far as we know).
+
 ## Tests
 ```
 ./gradlew :shared:test :phone:testDebugUnitTest :watch:testDebugUnitTest
 ```
 - `:shared` covers `WavEncoder`, JSON (de)serialization and `SideKiqqClient` against the Ktor MockEngine.
 - `:phone` covers `UtteranceAssembler` (sequence wrap, gaps, duplicates and late packets) and `DraftConfirmation`.
+- `:phone` also covers the Reachy start flow (`ReachyStartTest`: host parsing, daemon states, timeouts, never stopping another app) and `ReachyDaemonHttp` against the Ktor MockEngine.
 
 ## Phone ↔ watch contract (`com.sidekiqq.shared.wear.WearProtocol`)
 | Path | Kind | Payload |

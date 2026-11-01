@@ -32,6 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
+- 2026-11-01: Start-up-Reachy slice 1 (`crew/reachy-start`): phone Reachy card starts `sidekiqq_reachy` through the LAN daemon (no-evict, `.local` only) and queues `reachy_wake`. Android unverified; 16 JVM tests pass via kotlinc.
 
 ## Backlog (top = next)
 
@@ -57,6 +58,9 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
+  - [x] Slice 1 (`crew/reachy-start`, unverified: Android not compiled, never tried on a robot): phone Home tab **Reachy** card (Chat / Brief / Dance). On tap it reads `GET /api/apps/current-app-status` from the daemon at a `.local` name (default `reachy-mini.local:8000`), starts `sidekiqq_reachy` with `/start-app/.../no-evict` if nothing runs, waits for `running` (+3 s settle check), then queues `reachy_wake` via `POST /api/commands`. Never stops/evicts another app, never restarts our app while it is being stopped, sends the daemon no token, no redirects. Cleartext allowed only to `*.local`; pairing now refuses `http://` brains except dev hosts. Pure logic in `phone/reachy/ReachyStart.kt` (16 JVM tests pass via kotlinc); `ReachyDaemonHttpTest` (MockEngine) written, not run. Reachy's side of the wake is PR #14.
+  - [ ] Slice 2: voice. "Start up Reachy" said to the phone, watch or glasses: the brain queues a phone-side hand-off (new command kind, e.g. `reachy_start`, contract + TS + Kotlin) that the phone runs through this flow after a tap, or a phone-local intent when the phone itself heard it.
+  - [ ] Slice 3: find Reachy without typing: NsdManager discovery, IP-address hosts (needs a cleartext story beyond `*.local`), and check Android's local-network permission when `targetSdk` moves past 36. Offer `game` once Reachy implements it.
 - [ ] Connector: Kroger / King Soopers (public API: product search, add to cart; NO checkout or pickup-slot API). Task: "here's my grocery list" fills the cart, then hands checkout to the phone. Never automate payment.
 - [ ] Connectors: Outlook / Microsoft 365, generic IMAP/SMTP; investigate Instacart's developer platform terms for other grocery chains.
 - [ ] "Request a connector" flow: the build crew generates an MCP connector, opens a PR, and the owner approves before it goes live.

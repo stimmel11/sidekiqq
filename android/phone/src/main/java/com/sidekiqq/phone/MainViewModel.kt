@@ -6,6 +6,10 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sidekiqq.phone.handoff.CommandInbox
+import com.sidekiqq.phone.reachy.ReachyDaemonHttp
+import com.sidekiqq.phone.reachy.ReachySettings
+import com.sidekiqq.phone.reachy.ReachyStarter
+import com.sidekiqq.phone.reachy.message
 import com.sidekiqq.phone.push.SideKiqqMessagingService
 import com.sidekiqq.shared.SideKiqqApiException
 import com.sidekiqq.shared.SideKiqqClient
@@ -14,15 +18,20 @@ import com.sidekiqq.shared.model.AskResponse
 import com.sidekiqq.shared.model.Brief
 import com.sidekiqq.shared.model.BriefKind
 import com.sidekiqq.shared.model.Commitment
+import com.sidekiqq.shared.model.CommandKind
 import com.sidekiqq.shared.model.CommandResult
+import com.sidekiqq.shared.model.CommandTarget
+import com.sidekiqq.shared.model.CreateCommandRequest
 import com.sidekiqq.shared.model.CommitmentStatus
 import com.sidekiqq.shared.model.Device
 import com.sidekiqq.shared.model.DeviceCommand
 import com.sidekiqq.shared.model.FollowUp
 import com.sidekiqq.shared.model.Top5Response
 import com.sidekiqq.shared.wear.WearReply
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +56,10 @@ data class UiState(
     val snackbar: String? = null,
     /** Hand-offs queued for this phone (GET /api/commands), oldest first. Shown; acted on only after a tap. */
     val handoffs: List<DeviceCommand> = emptyList(),
+    /** Reachy daemon address on the home LAN (`reachy-mini.local` by default). */
+    val reachyHost: String = "",
+    /** A "start Reachy" run is in progress (buttons disabled). */
+    val reachyStarting: Boolean = false,
 )
 
 enum class TalkState { Idle, Listening, Thinking, Speaking }
@@ -55,7 +68,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as SideKiqqApp
     private val store = app.tokenStore
-    private val _ui = MutableStateFlow(UiState(paired = store.isPaired, baseUrl = store.baseUrl.orEmpty()))
+    private val reachySettings = ReachySettings(application)
+    private val _ui = MutableStateFlow(
+        UiState(paired = store.isPaired, baseUrl = store.baseUrl.orEmpty(), reachyHost = reachySettings.host.display)
+    )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private var conversationId: String? = null
@@ -64,6 +80,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastPolledCommands: List<DeviceCommand> = emptyList()
     private var pollJob: Job? = null
     private var lastOkPollAt = 0L // SystemClock.elapsedRealtime(), not the wall clock
+    private var reachyJob: Job? = null
 
     init {
         if (store.isPaired) refreshAll()
@@ -87,7 +104,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pair(baseUrl: String, code: String) {
         val url = baseUrl.trim().trimEnd('/')
-        if (!url.startsWith("https://") && !url.startsWith("http://")) {
+        // http:// only for local `next dev` (emulator / adb reverse). The network security config
+        // also allows cleartext to *.local for the Reachy daemon, so the brain URL is checked here.
+        if (!url.startsWith("https://") && !DEV_HTTP.any { url == it || url.startsWith("$it:") || url.startsWith("$it/") }) {
             _ui.update { it.copy(error = "Server URL must start with https://") }
             return
         }
@@ -116,8 +135,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.wearRelay.clearConfig() }
         conversationId = null
         pollJob?.cancel()
+        reachyJob?.cancel()
         lastPolledCommands = emptyList()
-        _ui.value = UiState(paired = false)
+        _ui.value = UiState(paired = false, reachyHost = reachySettings.host.display)
     }
 
     // ------------------------------------------------------------ data
@@ -209,6 +229,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 // Network: re-sent on the next poll while the brain still lists it.
                 Log.w(TAG, "Ack command $id", e)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ Reachy (home LAN)
+
+    /** Saves the Reachy address the owner typed. Returns false (and says why) if it isn't a `.local` name. */
+    fun setReachyHost(raw: String): Boolean {
+        val h = reachySettings.save(raw)
+        if (h == null) {
+            _ui.update { it.copy(error = "Use the robot's .local name, like reachy-mini.local or reachy-mini.local:8000") }
+            return false
+        }
+        _ui.update { it.copy(reachyHost = h.display, snackbar = "Reachy address saved") }
+        return true
+    }
+
+    /**
+     * The owner tapped Chat / Brief / Dance on the Reachy card. Starts the SideKiqq app on the
+     * robot through its LAN daemon if it isn't running, then queues a `reachy_wake` for it on the
+     * brain. Only from that tap; it never stops another app and never sends a message.
+     */
+    fun startReachy(activity: String) {
+        val c = client() ?: return
+        if (reachyJob?.isActive == true) return
+        _ui.update { it.copy(reachyStarting = true, error = null) }
+        reachyJob = viewModelScope.launch {
+            val daemon = ReachyDaemonHttp(reachySettings.host)
+            try {
+                val outcome = ReachyStarter(
+                    daemon = daemon,
+                    queueWake = { a ->
+                        try {
+                            c.createCommand(
+                                CreateCommandRequest(
+                                    kind = CommandKind.REACHY_WAKE,
+                                    target = CommandTarget(device = Device.REACHY),
+                                    activity = a,
+                                )
+                            )
+                        } catch (e: SideKiqqApiException) {
+                            // Don't put the brain's response body in the snackbar.
+                            throw IllegalStateException(
+                                when (e.status) {
+                                    401 -> "this phone isn't authorized, re-pair it"
+                                    409 -> "no Reachy is paired with SideKiqq"
+                                    else -> "brain error ${e.status}"
+                                }
+                            )
+                        }
+                    },
+                    sleep = { delay(it) },
+                    now = { SystemClock.elapsedRealtime() },
+                ).start(activity)
+                Log.i(TAG, "Start Reachy ($activity): $outcome")
+                _ui.update { it.copy(snackbar = outcome.message()) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Start Reachy", e)
+                _ui.update { it.copy(snackbar = "Couldn't start Reachy. Try again.") }
+            } finally {
+                daemon.close()
+                _ui.update { it.copy(reachyStarting = false) }
             }
         }
     }
@@ -333,5 +417,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TAG = "SideKiqqVM"
         const val STALE_COMMANDS_MS = 60_000L
+        val DEV_HTTP = listOf("http://10.0.2.2", "http://localhost", "http://127.0.0.1")
     }
 }

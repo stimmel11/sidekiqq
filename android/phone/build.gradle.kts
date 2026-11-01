@@ -65,6 +65,8 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    // ReachyDaemonHttp builds its own client for the Reachy daemon on the LAN (shared keeps OkHttp internal).
+    implementation(libs.ktor.client.okhttp)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -96,4 +98,5 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.ktor.client.mock)
 }
