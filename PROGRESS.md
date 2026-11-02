@@ -32,6 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
+- 2026-11-02: Kroger slice 1 (`crew/kroger-grocery`): `lib/kroger` product search + add-only cart module with caps, search-provenance check and uncertain-add errors; no checkout/order/payment calls. 400 brain tests.
 
 ## Backlog (top = next)
 
@@ -58,6 +59,9 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
 - [ ] Connector: Kroger / King Soopers (public API: product search, add to cart; NO checkout or pickup-slot API). Task: "here's my grocery list" fills the cart, then hands checkout to the phone. Never automate payment.
+  - [x] Slice 1 (`crew/kroger-grocery`): provider module `brain/src/lib/kroger/` (`rules.ts` dependency-free limits, `grocery.ts`): `GET /v1/products` search → `Product[]` (cleaned text, promo price, stock), `PUT /v1/cart/add` with caps (≤ 50 lines, qty 1–10 after merging, query 3–80 chars / ≤ 8 words / basic chars, `%` only after a digit), product ids only from a recent search (`SearchedProducts.missing`), add failures that may have applied raise `KrogerCartUncertainError` (never auto-retry), `krogerCartUrl()` for the checkout hand-off. Tested with a fake fetch; no network.
+  - [ ] Slice 2: `kroger` connector (OAuth code flow + PKCE, scopes `product.compact cart.basic:write`, ConnectionStore, 401 → `needs_reauth`), KV-backed `SearchedProducts`, zod schemas + `CapabilityIO` for `grocery.search` / `grocery.cart.add` (reuse `rules.ts`), store picker via `GET /v1/locations`, Claude tools `search_groceries` / `add_to_cart` with read-back.
+  - [ ] Slice 3: `grocery.checkout` hand-off (`open_url` to `krogerCartUrl()` on the phone) and the "here's my grocery list" task.
 - [ ] Connectors: Outlook / Microsoft 365, generic IMAP/SMTP; investigate Instacart's developer platform terms for other grocery chains.
 - [ ] "Request a connector" flow: the build crew generates an MCP connector, opens a PR, and the owner approves before it goes live.
 - [ ] Android Auto: messaging-style alerts + voice reply via the phone app, plus a simple Car App Library screen (Top 5, Talk). Driving mode: voice only, no full email on screen, drafts still need a spoken "send it", screen-only tasks wait until parked.
