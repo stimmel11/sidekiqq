@@ -16,6 +16,9 @@ import { truncate } from "../util";
  *   are stripped, and callers must treat it as data, never as instructions (CONNECTORS.md §4.4).
  * - Pagination links are followed only when they stay on the same Graph origin and version.
  *
+ * Ids are requested as immutable (`Prefer: IdType="ImmutableId"`), so a message keeps its id when
+ * the owner or an Inbox rule moves it to another folder (the scanner keys "processed" on the id).
+ *
  * Query syntax for `search` is Graph's KQL (`from:dana subject:proposal`). Double quotes and
  * backslashes are removed because the query is sent inside `$search="..."`.
  */
@@ -23,13 +26,14 @@ import { truncate } from "../util";
 export const GRAPH_ORIGIN = "https://graph.microsoft.com";
 const GRAPH_BASE = `${GRAPH_ORIGIN}/v1.0`;
 export const OUTLOOK_TIMEOUT_MS = 15_000;
-/** Largest Graph response body we read (bytes). A thread page of 50 text bodies fits easily. */
+/** Largest Graph response body we read (bytes). Threads are paged 10 bodies at a time to stay under it. */
 export const OUTLOOK_MAX_RESPONSE_BYTES = 4_000_000;
 const BODY_LIMIT = 8000;
 const SNIPPET_LIMIT = 300;
 export const OUTLOOK_SEARCH_MAX = 25;
 export const OUTLOOK_LIST_MAX = 500;
 export const OUTLOOK_THREAD_MAX = 50;
+const THREAD_PAGE = 10;
 const QUERY_MAX = 500;
 
 /** Graph message ids and conversation ids: base64-like, URL-safe or not. */
@@ -53,7 +57,7 @@ export class OutlookAuthError extends Error {
 
 export class OutlookAccessError extends Error {
   constructor() {
-    super("Outlook mail access isn't granted (Mail.Read is missing). The owner needs to reconnect Outlook.");
+    super("Outlook refused access to this mailbox (a permission is missing or the account has no mailbox). The owner may need to reconnect Outlook.");
     this.name = "OutlookAccessError";
   }
 }
@@ -149,7 +153,9 @@ export function formatAddress(a: GraphEmailAddress | null | undefined): string {
   const addr = cleanEmail(a?.emailAddress?.address, { allowPunycode: true });
   if (!addr) return "";
   const name = cleanText(a?.emailAddress?.name, 100).replace(/[<>"]/g, "").trim();
-  return name && name.toLowerCase() !== addr ? `${name} <${addr}>` : addr;
+  // A display name with "@" in it can impersonate another address ("chris@owner.com <evil@x.com>"),
+  // so it is dropped and only the real address is shown.
+  return name && !name.includes("@") && name.toLowerCase() !== addr ? `${name} <${addr}>` : addr;
 }
 
 function formatList(list: GraphEmailAddress[] | null | undefined): string {
@@ -178,7 +184,7 @@ export function cleanBody(m: GraphMessage): string {
   if (m.body?.contentType && m.body.contentType.toLowerCase() !== "text") text = stripHtml(text); // Prefer header ignored
   text = text
     .replace(/\r\n?/g, "\n")
-    .replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cs}]/gu, (c) => (c === "\n" || c === "\t" ? c : " "))
+    .replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}]/gu, (c) => (c === "\n" || c === "\t" ? c : " "))
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n+/g, "\n\n");
   const cut = text.search(/\n(On .{5,200}wrote:|-{2,} ?Original Message ?-{2,}|_{10,}\s*\nFrom: |From: .{1,300}\nSent: )/);
@@ -254,7 +260,10 @@ export class OutlookMail {
     this.timeoutMs = opts.timeoutMs ?? OUTLOOK_TIMEOUT_MS;
   }
 
-  /** KQL search across all folders. Graph returns relevance order and can't sort `$search` results. */
+  /**
+   * KQL search across all folders (including Deleted Items and Junk, unlike Gmail's default). Graph
+   * can't combine `$search` with `$orderby`, so the order is whatever Graph returns.
+   */
   async search(query: string, max: number): Promise<EmailSummary[]> {
     const q = cleanSearchQuery(query);
     assertMax(max, OUTLOOK_SEARCH_MAX);
@@ -312,7 +321,7 @@ export class OutlookMail {
     const cid = assertGraphId(conversationId, "conversation");
     const url = buildUrl("/me/messages", {
       $filter: `conversationId eq '${cid.replace(/'/g, "''")}'`,
-      $top: String(OUTLOOK_THREAD_MAX),
+      $top: String(THREAD_PAGE),
       $select: MESSAGE_FIELDS.join(","),
     });
     const msgs: GraphMessage[] = [];
@@ -329,18 +338,28 @@ export class OutlookMail {
     return email ? { email } : {};
   }
 
-  /** Yields items across pages, following nextLink only on the same Graph origin + version. */
+  /**
+   * Yields up to `max` items across at most 20 pages. A nextLink is followed only when it is a Graph
+   * URL with the same path as the first request; any other link stops paging with a warning.
+   */
   private async *pages<T>(first: string, max: number): AsyncGenerator<T> {
+    const path = new URL(first).pathname;
     let url: string | undefined = first;
     let n = 0;
     for (let page = 0; url && page < 20; page++) {
       const res: GraphPage<T> = await this.get<GraphPage<T>>(url);
       for (const item of res.value ?? []) {
-        if (n++ >= max) return;
+        if (n >= max) return;
+        n++;
         yield item;
       }
+      if (n >= max) return;
       const next = res["@odata.nextLink"];
-      url = typeof next === "string" && isGraphUrl(next) ? next : undefined;
+      url = undefined;
+      if (typeof next === "string") {
+        if (isGraphUrl(next) && new URL(next).pathname === path) url = next;
+        else console.warn(`[outlook] ignored an unexpected nextLink for ${path}; results may be incomplete`);
+      }
     }
   }
 
@@ -357,7 +376,7 @@ export class OutlookMail {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
-          Prefer: 'outlook.body-content-type="text"',
+          Prefer: 'outlook.body-content-type="text", IdType="ImmutableId"',
         },
         signal: ctl.signal,
         redirect: "error",
@@ -382,7 +401,7 @@ export class OutlookMail {
       const ra = Number(res.headers.get("retry-after"));
       throw new OutlookRateLimitError(Number.isFinite(ra) && ra > 0 ? ra : undefined);
     }
-    if (res.status === 400) throw new OutlookInputError("Outlook refused that request. For a search, try simpler words.");
+    if (res.status === 400) throw new OutlookInputError("Outlook refused that request. If it was a search, try simpler words.");
     if (!res.ok) throw new OutlookUnavailableError(`HTTP ${res.status}`);
     try {
       return JSON.parse(text) as T;

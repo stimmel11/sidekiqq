@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   cleanBody,
   cleanSearchQuery,
@@ -87,7 +87,7 @@ describe("OutlookMail.search", () => {
     expect(c.url.searchParams.get("$top")).toBe("5");
     expect(c.url.searchParams.get("$select")).toContain("conversationId");
     expect(c.headers.Authorization).toBe("Bearer tok1");
-    expect(c.headers.Prefer).toBe('outlook.body-content-type="text"');
+    expect(c.headers.Prefer).toBe('outlook.body-content-type="text", IdType="ImmutableId"');
     expect(c.redirect).toBe("error");
   });
 
@@ -150,6 +150,23 @@ describe("OutlookMail.getMessage / getThread / account", () => {
     const msgs = await mail(g).getThread("conv1");
     expect(msgs.map((m) => m.id)).toEqual(["m1", "m2"]);
     expect(g.calls[0]!.url.searchParams.get("$filter")).toBe("conversationId eq 'conv1'");
+    expect(g.calls[0]!.url.searchParams.get("$top")).toBe("10");
+  });
+
+  it("pages a long conversation 10 at a time, stops at 50 and never fetches a page it won't use", async () => {
+    let page = 0;
+    const g = new FakeGraph(() => {
+      const p = page++;
+      return {
+        body: {
+          value: Array.from({ length: 10 }, (_, i) => gm(`m${p * 10 + i}`, { receivedDateTime: new Date(Date.UTC(2026, 9, 1) + (p * 10 + i) * 60_000).toISOString() })),
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/me/messages?skip=${p + 1}`,
+        },
+      };
+    });
+    const msgs = await mail(g).getThread("conv1");
+    expect(msgs).toHaveLength(50);
+    expect(g.calls).toHaveLength(5);
   });
 
   it("an empty conversation is not found", async () => {
@@ -188,12 +205,25 @@ describe("OutlookMail.listRecentIds", () => {
     expect((await mail(g).listRecentIds(new Date("2026-10-30T00:00:00Z"), 2)).map((r) => r.id)).toEqual(["i1", "s1"]);
   });
 
-  it("never follows a nextLink off Graph or outside /me", async () => {
-    for (const next of ["https://evil.example/v1.0/me/messages", "https://graph.microsoft.com/beta/me/messages", "https://graph.microsoft.com/v1.0/users/x/messages", "http://graph.microsoft.com/v1.0/me/messages"]) {
+  it("never follows a nextLink off Graph or to another path, and warns", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const next of ["https://graph.microsoft.com/v1.0/me/messages", "https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages","https://evil.example/v1.0/me/messages", "https://graph.microsoft.com/beta/me/messages", "https://graph.microsoft.com/v1.0/users/x/messages", "http://graph.microsoft.com/v1.0/me/messages"]) {
       const g = new FakeGraph((u) => (u.pathname.includes("/inbox/") ? { body: { value: [gm("i1")], "@odata.nextLink": next } } : { body: { value: [] } }));
       expect((await mail(g).listRecentIds(new Date("2026-10-01"), 10)).map((r) => r.id)).toEqual(["i1"]);
       expect(g.calls).toHaveLength(2);
     }
+    expect(warn).toHaveBeenCalledTimes(6);
+    warn.mockRestore();
+  });
+
+  it("does not fetch another page once max is reached", async () => {
+    const g = new FakeGraph((u) =>
+      u.pathname.includes("/inbox/")
+        ? { body: { value: [gm("i1"), gm("i2")], "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?p=2" } }
+        : { body: { value: [] } },
+    );
+    await mail(g).listRecentIds(new Date("2026-10-01"), 2);
+    expect(g.calls).toHaveLength(2);
   });
 
   it("stops following pages after 20 even if Graph keeps linking", async () => {
@@ -219,6 +249,10 @@ describe("errors", () => {
     expect(tokens.invalidated).toBe(1);
     expect(g.calls.map((c) => c.headers.Authorization)).toEqual(["Bearer tok1", "Bearer tok2"]);
 
+    const noInvalidate = new FakeGraph(() => ({ status: 401 }));
+    await expect(new OutlookMail({ accessToken: async () => "t" }, { fetch: noInvalidate.fetch }).search("x", 1)).rejects.toBeInstanceOf(OutlookAuthError);
+    expect(noInvalidate.calls).toHaveLength(1);
+
     const always = new FakeGraph(() => ({ status: 401 }));
     await expect(mail(always).search("x", 1)).rejects.toBeInstanceOf(OutlookAuthError);
     expect(always.calls).toHaveLength(2);
@@ -230,6 +264,7 @@ describe("errors", () => {
     const rl = await mail(new FakeGraph(() => ({ status: 429, headers: { "retry-after": "7" } }))).search("x", 1).catch((e: unknown) => e);
     expect(rl).toBeInstanceOf(OutlookRateLimitError);
     expect((rl as OutlookRateLimitError).retryAfterSec).toBe(7);
+    await expect(mail(new FakeGraph(() => ({ status: 503 }))).search("x", 1)).rejects.toBeInstanceOf(OutlookRateLimitError);
     await expect(mail(new FakeGraph(() => ({ status: 400 }))).search("x", 1)).rejects.toBeInstanceOf(OutlookInputError);
     await expect(mail(new FakeGraph(() => ({ status: 502 }))).search("x", 1)).rejects.toBeInstanceOf(OutlookUnavailableError);
     await expect(mail(new FakeGraph(() => ({ raw: "not json" }))).search("x", 1)).rejects.toBeInstanceOf(OutlookUnavailableError);
@@ -244,6 +279,8 @@ describe("errors", () => {
     await expect(new OutlookMail(new Tokens(), { fetch: down }).search("x", 1)).rejects.toThrow(/network error/);
     const big = new FakeGraph(() => ({ raw: "x".repeat(4_000_001) }));
     await expect(mail(big).search("x", 1)).rejects.toThrow(/too large/);
+    const declared = new FakeGraph(() => ({ raw: "{}", headers: { "content-length": "9000000" } }));
+    await expect(mail(declared).search("x", 1)).rejects.toThrow(/too large/);
   });
 });
 
@@ -256,7 +293,7 @@ describe("cleaning third-party text", () => {
         body: { contentType: "text", content: "Line‮one\nLine two" },
       }),
     );
-    expect(m.from).toBe("Dana evil@x.com <dana@acme.com>");
+    expect(m.from).toBe("dana@acme.com");
     expect(m.subject).toBe("Pay ment due");
     expect(m.body).toBe("Line one\nLine two");
   });
@@ -265,6 +302,8 @@ describe("cleaning third-party text", () => {
     expect(formatAddress({ emailAddress: { name: "dana@acme.com", address: "dana@acme.com" } })).toBe("dana@acme.com");
     expect(formatAddress({ emailAddress: { name: "Dana", address: "bad address" } })).toBe("");
     expect(formatAddress(null)).toBe("");
+    // A display name that looks like an address can't impersonate the owner.
+    expect(formatAddress({ emailAddress: { name: "chris@owner.com", address: "evil@x.com" } })).toBe("evil@x.com");
   });
 
   it("strips HTML when Graph ignores the text Prefer header, and caps the body", () => {
@@ -296,6 +335,7 @@ describe("read-only safety", () => {
     for (const c of g.calls) {
       expect(c.method).toBe("GET");
       expect(isGraphUrl(c.url.toString())).toBe(true);
+      expect(c.url.toString().startsWith("https://graph.microsoft.com/v1.0/me")).toBe(true);
     }
   });
 

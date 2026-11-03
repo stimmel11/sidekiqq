@@ -32,6 +32,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-25: Google Contacts slice 1 (`crew/google-contacts`): People API `contacts.lookup` module + read-only contacts scopes; framework wiring is slice 2.
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
+- 2026-11-03: Outlook slice 1 (`crew/outlook-mail-read`): read-only Microsoft Graph mail module with Gmail-shaped output, Graph send endpoints added to the no-send scan. 393 brain tests.
 
 ## Backlog (top = next)
 
@@ -59,6 +60,9 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
 - [ ] Connector: Kroger / King Soopers (public API: product search, add to cart; NO checkout or pickup-slot API). Task: "here's my grocery list" fills the cart, then hands checkout to the phone. Never automate payment.
 - [ ] Connectors: Outlook / Microsoft 365, generic IMAP/SMTP; investigate Instacart's developer platform terms for other grocery chains.
+  - [x] Slice 1 (`crew/outlook-mail-read`): `brain/src/lib/microsoft/mail.ts`, a read-only Microsoft Graph mail module (KQL search, message, conversation oldest-first, account, Inbox + Sent Items ids since a date) returning `EmailSummary`/`EmailMessage`. GET only, immutable ids, same-path nextLinks only, 15 s timeout, 4 MB cap, cleaned third-party text, scopes `Mail.Read` + `User.Read` + `offline_access`. `no-send.test.ts` bans Graph send endpoints everywhere. Not wired yet.
+  - [ ] Slice 2: `outlook` connector + Microsoft OAuth (PKCE, ConnectionStore, plugs into `/api/connections` from PR #15), `email.read` registration. Decide `list_ids` → provider-neutral `{since, max}` (the scanner builds a Gmail query today); consider `inferenceClassification eq 'focused'` as the promotions filter. Graph wire details (`%24search` encoding, `$search` order, nextLink paths) are from memory: check against a real mailbox.
+  - [ ] Slice 3: `email.draft` (`Mail.ReadWrite`, `createReply` for threads) + `lib/connectors/outlook/send.ts` executor (`Mail.Send`) in the sender registry. Then generic IMAP/SMTP, then Instacart terms.
 - [ ] "Request a connector" flow: the build crew generates an MCP connector, opens a PR, and the owner approves before it goes live.
 - [ ] Android Auto: messaging-style alerts + voice reply via the phone app, plus a simple Car App Library screen (Top 5, Talk). Driving mode: voice only, no full email on screen, drafts still need a spoken "send it", screen-only tasks wait until parked.
 

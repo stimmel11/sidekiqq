@@ -50,8 +50,10 @@ const P = {
   importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
   smtp: /nodemailer|smtp/i,
   // Microsoft Graph endpoints that send at once (docs/CONNECTORS.md §6). Allowed only in a future
-  // lib/connectors/outlook/send.ts; nothing may contain them today.
-  graphSend: /\/sendMail\b|\/messages\/[^\s"'`]*\/(send|reply|replyAll|forward)\b|\bcreate(Reply|ReplyAll|Forward)\b/,
+  // lib/connectors/outlook/send.ts; nothing may contain them today. Line-based and case-insensitive
+  // so concatenation, `${ id }` and OData `messages('x')/send` forms are caught too.
+  // createReply/createReplyAll/createForward only make drafts, so they are not here.
+  graphSend: /\bsendMail\b|\bmessages\b.*\/\s*(send|reply|replyAll|forward)\b/i,
 } as const;
 type Prim = keyof typeof P;
 
@@ -119,9 +121,21 @@ describe("no route other than draft-approve can send mail (static)", () => {
 
 
   it("the Graph send pattern catches every Graph send form but not ./send imports", () => {
-    for (const c of ["/me/sendMail", "`/me/messages/${id}/send`", "/me/messages/abc/reply", "/me/messages/abc/replyAll", "/me/messages/abc/forward", "createReplyAll", "createForward"]) {
+    for (const c of [
+      "/me/sendMail",
+      "/me/sendmail",
+      "`/me/messages/${id}/send`",
+      "`/me/messages/${ id }/send`",
+      `"/me/messages/" + id + "/send"`,
+      "/me/messages('x')/send",
+      "/me/messages/x/Send",
+      "/me/messages/abc/reply",
+      "/me/messages/abc/replyAll",
+      "/me/messages/abc/forward",
+    ]) {
       expect(c, c).toMatch(P.graphSend);
     }
+    expect("/me/messages/abc/createReply").not.toMatch(P.graphSend);
     expect(`import { x } from "./send";`).not.toMatch(P.graphSend);
   });
 
