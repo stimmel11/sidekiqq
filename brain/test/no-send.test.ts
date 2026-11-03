@@ -49,6 +49,9 @@ const P = {
   buildSenders: /\bbuildSenders\b/,
   importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
   smtp: /nodemailer|smtp/i,
+  // Microsoft Graph endpoints that send at once (docs/CONNECTORS.md §6). Allowed only in a future
+  // lib/connectors/outlook/send.ts; nothing may contain them today.
+  graphSend: /\/sendMail\b|\/messages\/[^\s"'`]*\/(send|reply|replyAll|forward)\b|\bcreate(Reply|ReplyAll|Forward)\b/,
 } as const;
 type Prim = keyof typeof P;
 
@@ -114,6 +117,13 @@ describe("no route other than draft-approve can send mail (static)", () => {
     expect(code(GOOGLE_SEND)).not.toMatch(P.messagesSend);
   });
 
+
+  it("the Graph send pattern catches every Graph send form but not ./send imports", () => {
+    for (const c of ["/me/sendMail", "`/me/messages/${id}/send`", "/me/messages/abc/reply", "/me/messages/abc/replyAll", "/me/messages/abc/forward", "createReplyAll", "createForward"]) {
+      expect(c, c).toMatch(P.graphSend);
+    }
+    expect(`import { x } from "./send";`).not.toMatch(P.graphSend);
+  });
 
   it("the import scanner sees re-exports, dynamic imports, require, extensions and relative paths", () => {
     const fake = path.join(SRC, "lib/connectors/google/index.ts");
