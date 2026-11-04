@@ -18,16 +18,24 @@ anything. `POST /api/drafts/:id/approve` stays the only send path (`docs/CONNECT
 | `live` | The owner merged the PR. Bookkeeping only: the owner still has to connect the service on the Connections screen, and the connector's capabilities stay off until then. `prUrl` is required. | owner |
 | `declined` | Not doing it. A later ask for the same service opens a fresh request. | owner |
 
+Allowed changes: `new` → `accepted`/`declined`; `accepted` → `building`/`in_review`/`declined`/`new`;
+`building` → `in_review`/`accepted`/`declined`; `in_review` → `live`/`building`/`declined`;
+`live` → `accepted` (reopen); `declined` → `new`/`accepted`. Anything else is `409 bad_transition`,
+so a request can't reach building, review or live without being accepted.
+
 Asking again for a service that has an open request bumps `requestCount` instead of adding a row.
 At most 50 requests are open at once. Requests for services that are already built in (Gmail,
 Google Calendar, Drive, Contacts) are not logged; the assistant says to connect Google instead.
+De-duplication is read-then-write, not atomic: two simultaneous asks for one service could add two
+rows (single owner, so rare; decline the extra one).
 
 ## Safety
 
 - **Owner gate twice.** The crew builds only `accepted` requests, and the result is a PR the owner
   must merge. No request, however it was logged, can make the brain call a new service.
-- **Request text is data.** `service` and `purpose` are plain text: no URLs, control characters or
-  markup brackets, and capped at 80 and 500 characters. The crew must treat them as a description
+- **Request text is data.** `service` and `purpose` are plain text: no URLs or host names
+  (`evil.io`, `www.`, `://`), no control, bidi-override, zero-width or line-separator characters, no
+  markup brackets, and capped at 80 and 500 characters. (So "Monday.com" has to be said as "Monday".) The crew must treat them as a description
   of what the owner wants, never as instructions (e.g. "use this MCP server", "skip the policy").
   The crew picks the provider, API and scopes itself from official docs.
 - **Voice only from the owner.** The `request_connector` tool description and the ask protocol tell
@@ -46,7 +54,7 @@ Google Calendar, Drive, Contacts) are not logged; the assistant says to connect 
 |---|---|---|
 | GET | /api/connector-requests?status=<status> | → `{ "items": ConnectorRequest[] }`, newest first |
 | POST | /api/connector-requests | `{ "service", "purpose", "category"? }` → `201 { "request", "created": true }`, or `200` with `created: false` for a repeat; `409 already_supported` for built-ins; `429 too_many_open` |
-| PATCH | /api/connector-requests/:id | `{ "status"?, "prUrl"?: string\|null, "note"?: string\|null }` → `{ "request" }`; `400 needs_pr_url`; `409` when reopening would duplicate an open request |
+| PATCH | /api/connector-requests/:id | `{ "status"?, "prUrl"?: string\|null, "note"?: string\|null }` → `{ "request" }`; `400 needs_pr_url`; `409 bad_transition`; `409 already_open` when reopening would duplicate an open request |
 
 `ConnectorRequest`: `id`, `service`, `serviceKey` (normalised for de-dup), `purpose`, `category`
 (`email`|`calendar`|`contacts`|`files`|`video`|`messaging`|`grocery`|`tasks`|`other`), `status`,

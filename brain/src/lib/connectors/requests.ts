@@ -1,4 +1,5 @@
 import { HttpError } from "../http";
+import type { ConnectorRequestStatus } from "../models";
 
 /**
  * "Request a connector" helpers (docs/CONNECTOR_REQUESTS.md). Logging a request never builds,
@@ -35,10 +36,23 @@ export function builtInFor(service: string): string | undefined {
   return BUILT_IN[serviceKey(service)];
 }
 
+/**
+ * Allowed status changes. Only the owner changes status, but the crew builds only `accepted`
+ * requests, so a request can't skip acceptance on its way to building/review/live.
+ */
+export const CONNECTOR_REQUEST_TRANSITIONS: Record<ConnectorRequestStatus, readonly ConnectorRequestStatus[]> = {
+  new: ["accepted", "declined"],
+  accepted: ["building", "in_review", "declined", "new"],
+  building: ["in_review", "accepted", "declined"],
+  in_review: ["live", "building", "declined"],
+  live: ["accepted"],
+  declined: ["new", "accepted"],
+};
+
 /** Open requests kept at once; past this the owner should decline or finish some first. */
 export const MAX_OPEN_CONNECTOR_REQUESTS = 50;
 
-export type ConnectorRequestErrorCode = "not_found" | "too_many_open" | "needs_pr_url" | "invalid";
+export type ConnectorRequestErrorCode = "not_found" | "too_many_open" | "needs_pr_url" | "already_open" | "bad_transition" | "invalid";
 
 /** An HttpError, so owner routes return it as-is. */
 export class ConnectorRequestError extends HttpError {

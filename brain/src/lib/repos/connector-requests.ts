@@ -8,7 +8,7 @@ import {
   type DeviceKind,
   type UpdateConnectorRequest,
 } from "../models";
-import { ConnectorRequestError, MAX_OPEN_CONNECTOR_REQUESTS, serviceKey } from "../connectors/requests";
+import { CONNECTOR_REQUEST_TRANSITIONS, ConnectorRequestError, MAX_OPEN_CONNECTOR_REQUESTS, serviceKey } from "../connectors/requests";
 import { newId } from "../util";
 import { Collection } from "./collection";
 
@@ -19,7 +19,9 @@ const isOpen = (r: ConnectorRequest) => !CLOSED_CONNECTOR_REQUEST_STATUSES.inclu
 const NEEDS_PR: readonly ConnectorRequestStatus[] = ["in_review", "live"];
 
 /**
- * Connector requests (one Redis hash). Pure bookkeeping: nothing here builds, connects or enables
+ * Connector requests (one Redis hash). Read-then-write, not atomic: two simultaneous asks for the same
+ * service could add two rows. Acceptable for a single owner; the owner declines the extra one.
+ * Pure bookkeeping: nothing here builds, connects or enables
  * a connector. Asking again for a service with an open request bumps `requestCount` instead of
  * adding a row.
  */
@@ -80,7 +82,12 @@ export class ConnectorRequestsRepo {
     const current = await this.col.get(id);
     if (!current) throw new ConnectorRequestError("no such connector request", "not_found", 404);
     const next: ConnectorRequest = { ...current, updatedAt: this.clock().toISOString() };
-    if (patch.status !== undefined) next.status = patch.status;
+    if (patch.status !== undefined && patch.status !== current.status) {
+      if (!CONNECTOR_REQUEST_TRANSITIONS[current.status].includes(patch.status)) {
+        throw new ConnectorRequestError(`can't change a request from "${current.status}" to "${patch.status}"`, "bad_transition", 409);
+      }
+      next.status = patch.status;
+    }
     if (patch.prUrl === null) delete next.prUrl;
     else if (patch.prUrl !== undefined) next.prUrl = patch.prUrl;
     if (patch.note === null || patch.note === "") delete next.note;
@@ -91,7 +98,7 @@ export class ConnectorRequestsRepo {
     // Re-opening a closed request must not create a duplicate open one for the same service.
     if (!isOpen(current) && isOpen(next)) {
       const clash = (await this.col.all()).find((r) => r.id !== id && isOpen(r) && r.serviceKey === current.serviceKey);
-      if (clash) throw new ConnectorRequestError(`request ${clash.id} is already open for this service`, "invalid", 409);
+      if (clash) throw new ConnectorRequestError(`request ${clash.id} is already open for this service`, "already_open", 409);
     }
     return this.col.put(next);
   }

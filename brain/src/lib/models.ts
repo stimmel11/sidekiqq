@@ -366,8 +366,10 @@ const plainText = (max: number) =>
     .trim()
     .min(1)
     .max(max)
-    .refine((s) => !/[\u0000-\u001f\u007f<>`]/.test(s), "must be plain text")
-    .refine((s) => !/:\/\/|\bwww\./i.test(s), "must not contain a URL");
+    // \p{Cc}/\p{Cf}/\p{Zl}/\p{Zp}: control, bidi-override, zero-width and line-separator characters.
+    .refine((s) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>`]/u.test(s), "must be plain text")
+    // Scheme, "www." or anything shaped like a host name ("evil.io", "mcp.evil.io/sse").
+    .refine((s) => !/:\/\/|\bwww\.|[\p{L}\p{N}-]\.\p{L}{2,}/iu.test(s), "must not contain a URL or domain name");
 
 export const ConnectorServiceNameSchema = plainText(CONNECTOR_SERVICE_MAX).refine(
   (s) => /^[\p{L}\p{N}][\p{L}\p{N} .&+'’()/-]*$/u.test(s),
