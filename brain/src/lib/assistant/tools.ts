@@ -25,6 +25,7 @@ import { recordLookup, resolveCallNumber, type LookedUpContacts } from "../comma
 import { nudgeCommandTarget } from "../commands/nudge";
 import { normalizeOwnerDate, truncate } from "../util";
 import { toolSchema, type ToolDef } from "./llm";
+import { isSingleAddress, type KnownAddresses } from "./recipients";
 
 /**
  * Tools exposed to Claude in /api/ask. Each tool = zod input schema + handler.
@@ -40,6 +41,11 @@ export interface ToolContext {
   now: Date;
   device: DeviceKind;
   actions: Action[];
+  /**
+   * Addresses the model has seen in this conversation (owner's words, history, tool results).
+   * When set, create_email_draft rejects any recipient not in it (see ./recipients.ts).
+   */
+  knownAddresses?: KnownAddresses;
   /**
    * The owner request this loop serves: its text (the owner's own words, for call_on_phone's
    * spoken-number rule) and the authenticated asking device (its token, not the body's `device`).
@@ -302,7 +308,8 @@ const getClientTimeline = tool({
       repos.decisions.list({ client: input.client }),
     ]);
     if (!profile && !timeline.length && !commitments.length && !followups.length && !decisions.length) {
-      return { client: input.client, found: false, note: "No stored history for this client. Try search_email." };
+      // No echo of input.client: tool results feed recipient provenance (./recipients.ts).
+      return { found: false, note: "No stored history for this client. Try search_email." };
     }
     return { client: input.client, found: true, profile, timeline, commitments, followups, decisions };
   },
@@ -406,6 +413,7 @@ const createEmailDraft = tool({
     followupId: optStr(100).describe("Link the draft to an existing follow-up id"),
   }),
   async run(input, ctx) {
+    assertKnownRecipients(ctx, [...input.to, ...(input.cc ?? [])]);
     const { deps, actions } = ctx;
     const bad = [...input.to, ...(input.cc ?? [])].filter((a) => !isPlausibleEmail(a));
     if (bad.length) {
@@ -438,6 +446,22 @@ const createEmailDraft = tool({
     };
   },
 });
+
+/** Recipients must come from the owner or a lookup, never from the model's imagination. */
+function assertKnownRecipients(ctx: ToolContext, addrs: string[], refused = "No draft created."): void {
+  if (!ctx.knownAddresses) return;
+  const multi = addrs.filter((a) => !isSingleAddress(a));
+  if (multi.length) {
+    throw new ToolInputError(`${refused} Use one bare address per entry (name@example.com), no lists or quoted names: ${multi.join(" | ")}`);
+  }
+  const unknown = ctx.knownAddresses.unknown(addrs);
+  if (unknown.length) {
+    throw new ToolInputError(
+      `${refused} These addresses did not come from the owner or a lookup in this request: ${unknown.join(" | ")}. ` +
+        "Call lookup_contact with the person's name (or get_email_thread for a reply), or ask the owner for the address. Never guess an address.",
+    );
+  }
+}
 
 const recordDecision = tool({
   name: "record_decision",
@@ -497,12 +521,30 @@ const upsertClientProfile = tool({
     nextAction: optStr(1000),
     notes: optStr(4000),
   }),
-  async run(input, { deps }) {
-    const { client, created } = await deps.repos.clients.upsert(input);
+  async run(input, ctx) {
+    // A stored profile email is later read back as "known", so it needs provenance too.
+    if (input.email) assertKnownRecipients(ctx, [input.email], "Profile not saved.");
+    const { client, created } = await ctx.deps.repos.clients.upsert(input);
     return { created, client };
   },
 });
 
+/**
+ * Tools whose successful results count as recipient provenance: they return provider or stored
+ * data, never the model's own input. Write tools (add_commitment, upsert_client_profile, ...)
+ * echo what the model passed, so an address in their result proves nothing.
+ */
+export const PROVENANCE_TOOLS: ReadonlySet<string> = new Set([
+  "search_email",
+  "search_gmail", // alias of search_email (TOOL_ALIASES)
+  "get_email_thread",
+  "list_calendar_events",
+  "search_drive",
+  "lookup_contact",
+  "get_client_timeline",
+  "list_commitments",
+  "list_followups",
+]);
 // ---------------------------------------------------------------------------------------
 // Connector requests (docs/CONNECTOR_REQUESTS.md)
 // ---------------------------------------------------------------------------------------
