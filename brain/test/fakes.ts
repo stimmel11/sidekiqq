@@ -108,8 +108,11 @@ export class FakeWorkspace implements Workspace {
   async searchDrive() {
     return [];
   }
-  async draftExists(id: string) {
-    return this.drafts.has(id);
+  /** Gmail's view of a draft, built from what was drafted. Tests edit `drafts` to simulate Gmail edits. */
+  async getDraftEnvelope(id: string) {
+    const d = this.drafts.get(id);
+    if (!d) return null;
+    return { to: d.to.join(", "), cc: (d.cc ?? []).join(", "), bcc: "", subject: d.subject };
   }
   async ownerEmail() {
     return this.owner;
@@ -136,6 +139,17 @@ export class FakePush implements PushSender {
   async send(tokens: string[], msg: PushMessage) {
     this.sent.push({ tokens, msg });
     return { sent: tokens.length, failed: 0, invalidTokens: [] };
+  }
+  dataSent: { tokens: string[]; data: Record<string, string>; priority: "high" | "normal" | undefined }[] = [];
+  /** Tokens to report as invalid on the next sendData. */
+  invalidOnData: string[] = [];
+  /** Throw from sendData (FCM outage). */
+  dataError: Error | null = null;
+  async sendData(tokens: string[], data: Record<string, string>, priority?: "high" | "normal") {
+    if (this.dataError) throw this.dataError;
+    this.dataSent.push({ tokens, data, priority });
+    const invalidTokens = tokens.filter((t) => this.invalidOnData.includes(t));
+    return { sent: tokens.length - invalidTokens.length, failed: invalidTokens.length, invalidTokens };
   }
 }
 

@@ -1,5 +1,5 @@
 import type { DeviceKind } from "../models";
-import type { Caller, CapabilityId, ImplementedCapability, In, Out } from "./capabilities";
+import type { Caller, CapabilityId, ImplementedCapability, In, ProviderOut } from "./capabilities";
 
 /** Call context. `caller` decides what is allowed (docs/CONNECTORS.md §4.4). */
 export interface ConnCtx {
@@ -21,7 +21,7 @@ export interface Connector {
   capabilities: readonly CapabilityId[];
   /** Minimal OAuth scopes for the given capabilities. */
   scopesFor(caps: readonly CapabilityId[]): string[];
-  invoke<C extends ImplementedCapability>(cap: C, input: In<C>, ctx: ConnCtx): Promise<Out<C>>;
+  invoke<C extends ImplementedCapability>(cap: C, input: In<C>, ctx: ConnCtx): Promise<ProviderOut<C>>;
 }
 
 export class CapabilityDeniedError extends Error {

@@ -63,6 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val inbox = CommandInbox()
     private var lastPolledCommands: List<DeviceCommand> = emptyList()
     private var pollJob: Job? = null
+    private var repollRequested = false // main thread only (viewModelScope / UI callers)
     private var lastOkPollAt = 0L // SystemClock.elapsedRealtime(), not the wall clock
 
     init {
@@ -149,15 +150,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * (MainActivity). Polling only shows hand-offs; nothing is opened until the owner taps.
      * Failures are logged, not shown: a missed poll just means the next one picks it up.
      */
-    fun pollCommands() {
+    fun pollCommands(force: Boolean = false) {
         val c = client() ?: return
-        if (pollJob?.isActive == true) return
+        if (pollJob?.isActive == true) {
+            // An FCM nudge can arrive while a poll that started before the command was queued is
+            // still in flight; poll once more after it so the new hand-off isn't missed for 30 s.
+            if (force) repollRequested = true
+            return
+        }
+        repollRequested = false
         pollJob = viewModelScope.launch {
             try {
                 val polled = c.commands()
                 lastPolledCommands = polled
                 lastOkPollAt = SystemClock.elapsedRealtime()
                 _ui.update { it.copy(handoffs = inbox.visible(polled)) }
+                // A "Hand-off waiting" prompt posted in a race with the app opening is now stale.
+                if (app.handoffsVisible) SideKiqqMessagingService.clearHandoffWaiting(app)
                 // Handled here but still listed: the earlier ack was lost. Same result again is a no-op.
                 inbox.unackedHandled(polled).forEach { (id, result) -> sendAck(c, id, result) }
             } catch (e: Exception) {
@@ -166,10 +175,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (SystemClock.elapsedRealtime() - lastOkPollAt > STALE_COMMANDS_MS) clearCommands()
             }
         }
+        pollJob?.invokeOnCompletion { cause ->
+            // Not after a cancel (backgrounded/unpaired): the next poll must come from a resume.
+            if (cause == null && repollRequested) viewModelScope.launch { if (app.handoffsVisible) pollCommands() }
+        }
     }
 
     /** The app went to the background: hand-offs shown later must come from a fresh poll. */
     fun onCommandsHidden() {
+        repollRequested = false
         pollJob?.cancel()
         clearCommands()
     }

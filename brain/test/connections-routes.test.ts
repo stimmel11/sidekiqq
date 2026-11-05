@@ -8,7 +8,7 @@ import { GET as connectGet, POST as connectPost } from "@/app/api/connections/[c
 import { GET as callbackGet } from "@/app/api/connections/[connectorId]/callback/route";
 import { POST as disconnectPost } from "@/app/api/connections/[connectorId]/disconnect/route";
 import { POST as capabilitiesPost } from "@/app/api/connections/[connectorId]/capabilities/route";
-import { POLICY, type ImplementedCapability, type Out } from "@/lib/connectors/capabilities";
+import { POLICY, type ImplementedCapability, type ProviderOut } from "@/lib/connectors/capabilities";
 import { invokeCapability, readEmail } from "@/lib/connectors/invoke";
 import { setCapability, type Connection } from "@/lib/connectors/manage";
 import { ConnectionUnusableError, type Connector } from "@/lib/connectors/types";
@@ -296,7 +296,7 @@ describe("needs_reauth owner alert (§7)", () => {
       firstParty: true,
       capabilities: ["email.read"],
       scopesFor: () => [],
-      invoke: async <C extends ImplementedCapability>(): Promise<Out<C>> => {
+      invoke: async <C extends ImplementedCapability>(): Promise<ProviderOut<C>> => {
         throw Object.assign(new Error("invalid_grant"), { response: { data: { error: "invalid_grant" } } });
       },
     };
@@ -320,7 +320,7 @@ describe("needs_reauth owner alert (§7)", () => {
       firstParty: true,
       capabilities: ["email.read"],
       scopesFor: () => [],
-      invoke: async <C extends ImplementedCapability>(): Promise<Out<C>> => {
+      invoke: async <C extends ImplementedCapability>(): Promise<ProviderOut<C>> => {
         throw Object.assign(new Error("invalid_grant"), { response: { data: { error: "invalid_grant" } } });
       },
     };
@@ -379,7 +379,7 @@ describe("review fixes: disconnect order, alert dedupe, stale ids", () => {
     firstParty: true,
     capabilities: ["email.read"],
     scopesFor: () => [],
-    invoke: async <C extends ImplementedCapability>(): Promise<Out<C>> => {
+    invoke: async <C extends ImplementedCapability>(): Promise<ProviderOut<C>> => {
       throw Object.assign(new Error("invalid_grant"), { response: { data: { error: "invalid_grant" } } });
     },
   };

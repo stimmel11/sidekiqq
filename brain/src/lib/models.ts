@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { buildReadback } from "./connectors/readback";
 
 /**
  * Contract models (ARCHITECTURE.md). These are BINDING: Kotlin clients mirror them.
@@ -300,22 +301,121 @@ export const DecisionSchema = z.object({
 });
 export type Decision = z.infer<typeof DecisionSchema>;
 
-export const DraftSchema = z.object({
+export const DRAFT_KINDS = ["email", "calendar_invite", "calendar_hold"] as const;
+export const DraftKindSchema = z.enum(DRAFT_KINDS);
+export type DraftKind = z.infer<typeof DraftKindSchema>;
+
+export const DraftWhenSchema = z.object({ start: isoDate, end: isoDate });
+export type DraftWhen = z.infer<typeof DraftWhenSchema>;
+
+/**
+ * Stored records written before the connector framework (slice 3) have `gmailDraftId` /
+ * `gmailMessageId` and no `kind`, `connectorId` or `readback`. Map them on read so pending drafts
+ * created before the change still list and approve (docs/CONNECTORS.md §5).
+ */
+function upgradeLegacyDraft(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const d: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  if (d.providerDraftId === undefined && typeof d.gmailDraftId === "string") d.providerDraftId = d.gmailDraftId;
+  if (d.providerMessageId === undefined && typeof d.gmailMessageId === "string") d.providerMessageId = d.gmailMessageId;
+  // Rollback safety for one release: Google drafts keep the old field names too, so the
+  // pre-slice-3 brain (which requires `gmailDraftId`) can still read records written now.
+  if ((d.connectorId ?? "google") === "google") {
+    if (typeof d.providerDraftId === "string") d.gmailDraftId = d.providerDraftId;
+    if (typeof d.providerMessageId === "string") d.gmailMessageId = d.providerMessageId;
+  } else {
+    delete d.gmailDraftId;
+    delete d.gmailMessageId;
+  }
+  if (typeof d.readback !== "string" || !d.readback) {
+    // The same code-built template new drafts get (legacy drafts are always email).
+    const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    const kind = DraftKindSchema.safeParse(d.kind ?? "email");
+    const when = DraftWhenSchema.safeParse(d.when);
+    d.readback = buildReadback({
+      kind: kind.success ? kind.data : "email",
+      to: strs(d.to),
+      cc: strs(d.cc),
+      subject: typeof d.subject === "string" ? d.subject : "",
+      ...(when.success ? { when: when.data } : {}),
+    });
+  }
+  return d;
+}
+
+/**
+ * A pending action the owner must confirm (docs/CONNECTORS.md §5). Every confirm-tier action is a
+ * Draft, so `POST /api/drafts/:id/approve` stays the only executor. `readback` is built in code by
+ * DraftsRepo.create (lib/connectors/readback.ts), never by the model.
+ */
+export const DraftSchema = z.preprocess(
+  upgradeLegacyDraft,
+  z
+    .object({
+      id: z.string(),
+      status: z.enum(["pending", "sent", "discarded"]),
+      createdAt: isoDate,
+      sentAt: isoDate.optional(),
+      /** Absent on old records = "email". */
+      kind: DraftKindSchema.default("email"),
+      /** Absent on old records = "google". */
+      connectorId: z.string().min(1).default("google"),
+      /** Email only: the provider's draft id (the Gmail draft id). Replaces `gmailDraftId`. */
+      providerDraftId: z.string().min(1).optional(),
+      /** Set once sent. Replaces `gmailMessageId`. */
+      providerMessageId: z.string().optional(),
+      /**
+       * DEPRECATED mirrors of providerDraftId/providerMessageId, written for Google drafts only so
+       * a rollback to the pre-slice-3 brain still reads them. Never read by this code; remove after
+       * one release (PROGRESS.md).
+       */
+      gmailDraftId: z.string().optional(),
+      gmailMessageId: z.string().optional(),
+      /** Recipients (email) or attendees (calendar_invite); empty for calendar_hold. */
+      to: z.array(z.string()),
+      cc: z.array(z.string()).default([]),
+      /** Email subject, or the event title for calendar kinds. */
+      subject: z.string(),
+      /** Email body, or the event description for calendar kinds. */
+      body: z.string(),
+      /** ONE sentence the device speaks before asking for "send it". Built in code, never by the model. */
+      readback: z.string().min(1),
+      /** Calendar kinds only. */
+      when: DraftWhenSchema.optional(),
+      threadId: z.string().optional(),
+      client: z.string().optional(),
+      followupId: z.string().optional(),
+    })
+    .superRefine((d, ctx) => {
+      const issue = (message: string, path: string) => ctx.addIssue({ code: "custom", message, path: [path] });
+      if (d.kind === "email") {
+        if (d.to.length < 1) issue("an email needs at least one recipient", "to");
+        if (d.when) issue("an email has no time", "when");
+      } else {
+        if (!d.when) issue("a calendar draft needs a start and end", "when");
+        else if (Date.parse(d.when.end) <= Date.parse(d.when.start)) issue("end must be after start", "when");
+        if (d.kind === "calendar_invite" && d.to.length < 1) issue("an invite needs at least one attendee", "to");
+        if (d.kind === "calendar_hold" && (d.to.length > 0 || d.cc.length > 0)) issue("a hold has no attendees", "to");
+        if (d.providerDraftId) issue("only email drafts have a provider draft", "providerDraftId");
+      }
+    }),
+);
+export type Draft = z.output<typeof DraftSchema>;
+
+/** One item of `GET /api/drafts` (ARCHITECTURE.md). Pending drafts only, so no status. */
+export const DraftListItemSchema = z.object({
   id: z.string(),
-  gmailDraftId: z.string(),
-  to: z.array(z.string()).min(1),
-  cc: z.array(z.string()).default([]),
+  kind: DraftKindSchema,
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
   subject: z.string(),
   body: z.string(),
-  threadId: z.string().optional(),
+  readback: z.string(),
+  when: DraftWhenSchema.optional(),
   client: z.string().optional(),
-  followupId: z.string().optional(),
-  status: z.enum(["pending", "sent", "discarded"]),
   createdAt: isoDate,
-  sentAt: isoDate.optional(),
-  gmailMessageId: z.string().optional(),
 });
-export type Draft = z.infer<typeof DraftSchema>;
+export type DraftListItem = z.infer<typeof DraftListItemSchema>;
 
 /** A queued command as stored: the contract fields plus routing and delivery state (never returned as-is). */
 export const StoredCommandSchema = DeviceCommandSchema.extend({

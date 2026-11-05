@@ -1,4 +1,4 @@
-import type { CapabilityId, ImplementedCapability, In, Out } from "../capabilities";
+import type { CapabilityId, ImplementedCapability, In, ProviderOut } from "../capabilities";
 import type { Connector } from "../types";
 import { ZOOM_CONNECTOR_ID, ZOOM_MEETING_SCOPE } from "./auth";
 import type { ZoomRooms } from "./meetings";
@@ -27,9 +27,9 @@ export class ZoomConnector implements Connector {
     return caps.includes("video.create_room") ? [ZOOM_MEETING_SCOPE] : [];
   }
 
-  async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<Out<C>> {
+  async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<ProviderOut<C>> {
     if (cap !== "video.create_room") throw new Error(`zoom connector does not implement ${String(cap)}`);
-    const out: Out<"video.create_room"> = await (await this.rooms()).create(input as In<"video.create_room">);
-    return out as Out<C>;
+    const out: ProviderOut<"video.create_room"> = await (await this.rooms()).create(input as In<"video.create_room">);
+    return out as ProviderOut<C>;
   }
 }

@@ -1,4 +1,5 @@
 /** Minimal RFC 5322 message builder for Gmail drafts (UTF-8, plain text). */
+import { isStrictAddress } from "../address";
 
 export interface MimeInput {
   from?: string;
@@ -21,14 +22,20 @@ function assertSafe(name: string, value: string) {
   if (HEADER_INJECTION.test(value)) throw new Error(`Header ${name} contains a line break`);
 }
 
+/**
+ * One bare ASCII address (`a@b.c` or `<a@b.c>`), nothing else: no display names, lists or groups
+ * (lib/address.ts). Anything looser lets one "recipient" string become several in the To header.
+ */
 export function isPlausibleEmail(addr: string): boolean {
-  // Accept "Name <a@b.c>" or "a@b.c"
-  const m = /<([^<>\s]+)>\s*$/.exec(addr.trim());
-  const email = m?.[1] ?? addr.trim();
-  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email);
+  return isStrictAddress(addr);
 }
 
 export function buildMime(m: MimeInput): string {
+  // Defence in depth: To/Cc carry only strict bare addresses, so the header lists exactly the
+  // recipients the Draft record and its read-back name.
+  for (const a of [...m.to, ...(m.cc ?? [])]) {
+    if (!isStrictAddress(a)) throw new Error("Recipient is not a single bare email address");
+  }
   const headers: [string, string][] = [];
   if (m.from) headers.push(["From", m.from]);
   headers.push(["To", m.to.join(", ")]);

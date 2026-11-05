@@ -174,12 +174,13 @@ describe("POST /api/commands + GET /api/commands", () => {
     expect((await create(watch.token, { kind: "call_contact", number: "5550100", target: { deviceId: phone.device.id } })).status).toBe(201);
   });
 
-  it("never sends mail or pushes anything", async () => {
+  it("never sends mail or pushes an alert (only a silent nudge, covered in command-nudge.test.ts)", async () => {
     await create(watch.token, { kind: "call_contact", number: "5550142" });
     await create(watch.token, { kind: "open_url", url: "https://www.kroger.com/cart" });
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
     expect(deps.ws.createDraft).not.toHaveBeenCalled();
     expect(deps.pushFake.sent).toEqual([]);
+    expect(await deps.repos.alerts.latestSeq()).toBe(0);
   });
 });
 

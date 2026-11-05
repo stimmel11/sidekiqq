@@ -90,7 +90,7 @@ describe("clients, timeline, decisions", () => {
 describe("drafts + conversations + state", () => {
   it("drafts start pending; send lock is exclusive", async () => {
     const deps = makeDeps();
-    const d = await deps.repos.drafts.create({ gmailDraftId: "g1", to: ["a@b.co"], subject: "s", body: "b" });
+    const d = await deps.repos.drafts.create({ providerDraftId: "g1", to: ["a@b.co"], subject: "s", body: "b" });
     expect(d.status).toBe("pending");
     expect(await deps.repos.drafts.acquireSendLock(d.id)).toBe(true);
     expect(await deps.repos.drafts.acquireSendLock(d.id)).toBe(false);
