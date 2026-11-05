@@ -37,6 +37,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-28: Task layer slice 3 (`crew/reachy-commands`): Reachy polls `GET /api/commands`, runs `reachy_wake` (chat/brief/dance/game stub) once per id with persisted dedupe and acks, queued while busy. 121 Reachy tests.
 - 2026-10-28: Task layer slice 2b (`crew/watch-call`): `/api/ask` tool `call_on_phone` queues a tap-to-dial hand-off on the phone; number only from a clear `lookup_contact` match in the same request or digits the owner said. 396 brain tests.
 - 2026-10-29: Task layer slice 4a (`crew/command-nudge`): silent FCM command nudge to the target device + phone handling (poll now / generic "hand-off waiting" notification). 377 brain tests; Android unverified.
+- 2026-10-30: Dictated email slice 1 (`crew/dictated-email`): recipient provenance guard (no invented addresses on drafts or profiles) + dictation rules for `/api/ask`. 386 brain tests.
 - 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 
 ## Backlog (top = next)
@@ -65,6 +66,8 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [x] Slice 1: `brain/src/lib/google/contacts.ts` (People API lookup of saved + Other contacts, warm-up, name ranking, ambiguity returned, cleaned emails/phones) and the two read-only scopes. Tested with a fake People API.
   - [x] Slice 2 (connector framework is now on main): register it as `contacts.lookup` on the `google` connector, add the Claude tool `lookup_contact`, and wire it into `deps`. Done 2026-10-28 (`crew/contacts-capability`).
 - [ ] Task: "email this <dictated paragraph> to <contact>": draft, read back, "send it".
+  - [x] Slice 1 (`crew/dictated-email`): recipient provenance guard in `/api/ask` (`assistant/recipients.ts`: `create_email_draft` and profile emails accept only addresses the owner said, typed or spoken like "dana at acme dot com", or that a read tool returned in this request), dictation rules in the ask protocol (owner's words verbatim, short subject, device-specific "send it" / Approve), and "send it" said to `/api/ask` never drafts or sends.
+  - [ ] Slice 2: device side once slice 3 of the connector framework (Draft readback, PR #16) lands: phone/glasses/medallion speak `Action.summary` and listen for "send it" right after a `draft_created` action from `/api/ask`, then call approve. Spelled-out addresses ("d a n a at ...") are not parsed yet.
 - [ ] Connectors: Google Meet, Zoom (create meeting + send invite after confirm); phone-side call intents (WhatsApp, Samsung/phone video).
 - [ ] Task: "start up Reachy and let's do something". The phone on the home LAN calls the Reachy daemon (`/api/apps/start-app/...`), and Reachy offers a dance/game/brief.
 - [ ] Connector: Kroger / King Soopers (public API: product search, add to cart; NO checkout or pickup-slot API). Task: "here's my grocery list" fills the cart, then hands checkout to the phone. Never automate payment.

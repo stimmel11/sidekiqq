@@ -4,8 +4,9 @@ import { config } from "../env";
 import type { Action, AskRequest, AskResponse, DeviceKind } from "../models";
 import { newId } from "../util";
 import { runtimeContext, systemBlocks } from "./prompt";
+import { KnownAddresses } from "./recipients";
 import { enforceSpoken } from "./spoken";
-import { executeTool, RESPOND_TOOL, RespondSchema, toolDefinitions, type ToolContext } from "./tools";
+import { executeTool, PROVENANCE_TOOLS, RESPOND_TOOL, RespondSchema, toolDefinitions, type ToolContext } from "./tools";
 
 /**
  * /api/ask core: Claude tool-use loop.
@@ -28,12 +29,19 @@ export async function runAsk(deps: Deps, req: AskRequest, origin?: { deviceId: s
   const system = await systemBlocks(runtimeContext({ now, device: req.device }));
   const tools = toolDefinitions();
   const actions: Action[] = [];
+  // Recipient provenance: what the owner said (now and in earlier turns) plus every tool result
+  // below. The assistant's own past replies are model output, so they don't count: after a
+  // "which Dana?" question the model looks the person up again before drafting.
+  const knownAddresses = new KnownAddresses();
+  for (const t of history) if (t.role === "user") knownAddresses.addText(t.content);
+  knownAddresses.addText(req.text);
   // `request` binds call_on_phone to this owner request: its text and the asking device.
   const ctx: ToolContext = {
     deps,
     now,
     device: req.device,
     actions,
+    knownAddresses,
     ...(origin ? { request: { text: req.text, deviceId: origin.deviceId, deviceKind: origin.deviceKind }, lookedUp: new Map() } : {}),
   };
   const maxIterations = config.maxToolIterations();
@@ -84,6 +92,7 @@ export async function runAsk(deps: Deps, req: AskRequest, origin?: { deviceId: s
       }
       // Execute side-effecting tools even if respond came in the same turn.
       const out = await executeTool(use.name, use.input, ctx);
+      if (!out.isError && PROVENANCE_TOOLS.has(use.name)) knownAddresses.addText(out.content);
       results.push({ type: "tool_result", tool_use_id: use.id, content: out.content, ...(out.isError ? { is_error: true } : {}) });
     }
     if (reply !== null) break;
