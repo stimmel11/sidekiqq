@@ -7,15 +7,18 @@ call `invokeCapability`; `deps.workspace()` is gone), and the sender registry wi
 `lib/connectors/google/send.ts`. Slice 2 (2026-10-26): `ConnectionStore` (`lib/connectors/store.ts`:
 per-connector AAD, `TOKEN_ENCRYPTION_KEY_PREV` rotation, single-use state carrying the PKCE verifier),
 the Google token migration (§8 step 3), and per-connection enabled capabilities, granted scopes and
-`needs_reauth` checked in `invokeCapability` (§4 step 3). Slice 4 (2026-10-28): the `/api/connections`
+`needs_reauth` checked in `invokeCapability` (§4 step 3). Slice 3 (2026-10-28): Draft
+`kind`/`connectorId`/`readback` (§5; readback built in `lib/connectors/readback.ts` and set by
+`DraftsRepo.create`, used as `Action.summary`), legacy records upgraded on read, `email.draft` now
+returns `{draftId, providerDraftId, readback}` and `invokeCapability` creates the Draft record, `GET
+/api/drafts` adds `kind`/`readback`/`when`, sender key is `(connectorId, kind)` and approve answers 422
+when none is registered. Calendar kinds are modelled only. Slice 4 (2026-10-28): the `/api/connections`
 routes and the dashboard Connections screen (§9), shared OAuth flows (`lib/connectors/oauth.ts`,
 `lib/connectors/google/oauth.ts`; `/api/google/*` are now aliases), provider revoke on disconnect,
 the one owner alert on `needs_reauth` (alert kind `connection_needs_reauth`), and the `search_email`
-tool (`search_gmail` kept as an alias). Still open: incremental per-capability scopes (§7), deleting
-the legacy `google:tokens` key, Draft `kind`/`readback` (§5), and remote MCP.
-Slice 1 differences from §2, to settle in the next slice: `email.draft` returns
-`{providerDraftId, threadId?}` and the caller (the `create_email_draft` tool) still creates the
-pending Draft record; `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
+tool (`search_gmail` kept as an alias). Still open: §5 lazy 7-day expiry, incremental per-capability
+scopes (§7), deleting the legacy `google:tokens` key, and remote MCP. Remaining difference from §2:
+`email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
@@ -225,10 +228,17 @@ before the change still approve. The `to.min(1)` rule becomes a refinement that 
 
 **`readback` is built in code, never by the model.** It is a template over the structured fields:
 kind, every recipient or attendee address in full, subject or title, and the time for calendar
-kinds (for example "Email to dana@acme.com, cc ops@acme.com, subject 'Proposal follow-up'" or
-"Calendar invite to dana@acme.com and lee@acme.com, 'Kickoff', Tue Oct 27 2–3 pm"). The model
+kinds (for example "Email to dana@acme.com, cc ops@acme.com, with the subject: Proposal follow-up." or
+"Calendar invite to dana@acme.com and lee@acme.com, Tue Oct 27 2–3 pm, with the title: Kickoff."). The model
 writes none of it, so injected text in a subject or body cannot disguise who receives what. A test
 covers a subject and body containing injected instructions.
+
+- Recipients are strict bare ASCII addresses (`lib/address.ts`: no display names, lists, groups or
+  comments; IDN only as `xn--`), normalised once in `EmailDraftInput`, and that one list feeds the
+  provider draft's To/Cc, the stored record and the readback. The subject comes last, framed as
+  "with the subject: …", with format characters stripped and email-like tokens replaced by
+  "[address]". The readback must fit `/api/speak` (1000 chars): longer is refused before the
+  provider draft is made, never truncated.
 
 - It is generated when the draft is created, not by the device. (The open QA item about a body
   summary is a separate, optional addition; the readback stays fact-only.)
@@ -246,9 +256,12 @@ covers a subject and body containing injected instructions.
     a `draft_created` with `kind: "calendar_invite"`.
 - The approve route stays the only executor. It looks up the sender for `(connectorId, kind)` in
   the sender registry and runs it, with the same guards it has today (auth, pending, per-draft
-  lock, re-check under lock). Each registry entry also defines its own `stillValid(draft)` check
-  (→ 410 when false): provider draft still exists for Gmail/Outlook; always true for IMAP/SMTP
-  (our record is the draft); for calendar kinds, the start time is still in the future.
+  lock, re-check under lock). Each registry entry also defines its own `check(draft)`: provider
+  draft still exists for Gmail/Outlook (→ 410); always true for IMAP/SMTP (our record is the
+  draft); for calendar kinds, the start time is still in the future. For Gmail (implemented) the
+  check also compares the provider draft's sorted bare To/Cc, an empty Bcc and the subject with the
+  stored record, so an edit made in Gmail after the readback is refused (409
+  `changed_in_provider`, marked discarded, nothing sent).
 - Expiry is checked lazily by the approve route and by `GET /api/drafts` (no new cron): a pending
   draft older than 7 days, or a calendar draft whose start has passed, is marked `discarded` and
   refused.

@@ -127,14 +127,27 @@ public struct DraftConfirmation: Sendable {
         "\(readback(for: draft)) \(confirmInstruction)"
     }
 
-    /** Recipient, subject and a one-sentence body summary, for speaking. */
+    /**
+     * Recipient, subject and a one-sentence body summary, for speaking. Prefers the brain's
+     * code-built `readback` (every address in full); older brains don't send it, and then the
+     * recipients and subject are read from the fields.
+     */
     public static func readback(for draft: Draft) -> String {
-        var parts = ["Email to \(spokenRecipients(draft.to))"]
-        if !draft.cc.isEmpty { parts[0] += ", copying \(spokenRecipients(draft.cc))" }
-        let subject = draft.subject.trimmingCharacters(in: .whitespacesAndNewlines)
-        parts.append("Subject: \(subject.isEmpty ? "no subject" : stripTrailingPunctuation(subject))")
+        var parts: [String]
+        let brainReadback = draft.readback.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !brainReadback.isEmpty {
+            parts = [stripTrailingPunctuation(brainReadback)]
+        } else {
+            parts = ["Email to \(spokenRecipients(draft.to))"]
+            if !draft.cc.isEmpty { parts[0] += ", copying \(spokenRecipients(draft.cc))" }
+            let subject = draft.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+            parts.append("Subject: \(subject.isEmpty ? "no subject" : stripTrailingPunctuation(subject))")
+        }
         let summary = bodySummary(draft.body)
-        parts.append(summary.isEmpty ? "The message is empty" : "It says: \(stripTrailingPunctuation(summary))")
+        // With the brain's readback, an explicit marker keeps body text from sounding like part of
+        // the recipient line.
+        let lead = brainReadback.isEmpty ? "It says" : "Message begins"
+        parts.append(summary.isEmpty ? "The message is empty" : "\(lead): \(stripTrailingPunctuation(summary))")
         return parts.joined(separator: ". ") + "."
     }
 

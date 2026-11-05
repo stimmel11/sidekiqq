@@ -13,8 +13,10 @@ export const maxDuration = 30;
  *  1. Authenticated device (withDevice).
  *  2. Draft exists in our store and is still "pending" (not sent/discarded).
  *  3. Per-draft lock so a double-tap cannot send twice.
- *  4. The sender registry entry for this draft says it is still valid (for Gmail: the draft still
- *     exists; the owner may have deleted/sent it in Gmail).
+ *  4. A sender is registered for the draft's (connectorId, kind) (else 422 unsupported_kind).
+ *  5. The sender's check passes. For Gmail: the draft still exists (else 410 gone) and its To, Cc,
+ *     Bcc and Subject still match what the read-back described (else 409 changed_in_provider);
+ *     a record with no Gmail draft id is 422 no_provider_draft.
  */
 export const POST = withDevice<{ id: string }>(async (_req, { deps, params, device }) => {
   const { drafts, followups, timeline, state } = deps.repos;
@@ -30,10 +32,19 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
     if (!fresh || fresh.status !== "pending") throw new HttpError(409, "Draft is no longer pending", "not_pending");
 
     // The sender registry is the only place that can execute a draft (docs/CONNECTORS.md §6).
-    const executor = deps.senders().for(fresh);
-    if (!(await executor.stillValid(fresh))) {
+    const registry = deps.senders();
+    // No executor for this (connectorId, kind), e.g. a calendar draft before the calendar item
+    // ships. Nothing is sent and the draft stays pending.
+    if (!registry.has(fresh)) throw new HttpError(422, `This ${fresh.kind.replace("_", " ")} draft can't be approved yet`, "unsupported_kind");
+    const executor = registry.for(fresh);
+    const check = await executor.check(fresh);
+    if (!check.ok) {
+      if (check.reason === "invalid") throw new HttpError(422, check.message, "no_provider_draft");
+      // Gone or changed in the provider: the stored read-back no longer describes what would be
+      // sent, so the record is retired and nothing is sent.
       await drafts.markDiscarded(fresh.id);
-      throw new HttpError(410, "Draft no longer exists in Gmail", "gone");
+      if (check.reason === "changed") throw new HttpError(409, check.message, "changed_in_provider");
+      throw new HttpError(410, check.message, "gone");
     }
 
     const sent = await executor.execute(fresh);

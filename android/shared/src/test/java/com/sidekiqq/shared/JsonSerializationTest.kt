@@ -10,6 +10,8 @@ import com.sidekiqq.shared.model.Commitment
 import com.sidekiqq.shared.model.CommitmentStatus
 import com.sidekiqq.shared.model.Confidence
 import com.sidekiqq.shared.model.Device
+import com.sidekiqq.shared.model.Draft
+import com.sidekiqq.shared.model.DraftKind
 import com.sidekiqq.shared.model.FollowUp
 import com.sidekiqq.shared.model.Importance
 import com.sidekiqq.shared.model.ItemsResponse
@@ -139,6 +141,29 @@ class JsonSerializationTest {
         assertTrue(s.contains("\"status\":\"open\""))
         assertTrue(s.contains("\"kind\":\"meeting\""))
         assertEquals(c, json.decodeFromString(Commitment.serializer(), s))
+    }
+
+    @Test
+    fun draftsListParsesNewFieldsAndOldBrains() {
+        val r = json.decodeFromString(
+            ItemsResponse.serializer(Draft.serializer()),
+            """{"items":[
+               {"id":"drf_1","kind":"email","to":["dana@acme.com"],"cc":["ops@acme.com"],"subject":"Proposal","body":"Hi",
+                "readback":"Email to dana@acme.com, cc ops@acme.com, subject 'Proposal'","client":"ACME","createdAt":"2026-10-28T10:00:00Z"},
+               {"id":"drf_2","kind":"calendar_hold","to":[],"cc":[],"subject":"Focus","body":"","readback":"Calendar hold, 'Focus', Tue Oct 27 9–10 am",
+                "when":{"start":"2026-10-27T15:00:00Z","end":"2026-10-27T16:00:00Z"},"createdAt":"2026-10-28T10:00:00Z"},
+               {"id":"drf_old","to":["lee@acme.com"],"cc":[],"subject":"Old","body":"b","createdAt":"2026-10-01T10:00:00Z","futureField":1}
+            ]}"""
+        )
+        val (email, hold, old) = r.items
+        assertEquals(DraftKind.EMAIL, email.kind)
+        assertEquals("Email to dana@acme.com, cc ops@acme.com, subject 'Proposal'", email.readback)
+        assertNull(email.`when`)
+        assertEquals(DraftKind.CALENDAR_HOLD, hold.kind)
+        assertEquals("2026-10-27T15:00:00Z", hold.`when`!!.start)
+        // An older brain: no kind, no readback.
+        assertEquals(DraftKind.EMAIL, old.kind)
+        assertEquals("", old.readback)
     }
 
     @Test

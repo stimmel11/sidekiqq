@@ -1,6 +1,6 @@
 import type { ContactLookup, ContactQuery } from "../../google/contacts";
 import type { Workspace } from "../../google/workspace";
-import type { CapabilityId, ImplementedCapability, In, Out } from "../capabilities";
+import type { CapabilityId, ImplementedCapability, In, ProviderOut } from "../capabilities";
 import { CapabilityUnavailableError, type Connector } from "../types";
 
 /**
@@ -45,18 +45,18 @@ export class GoogleConnector implements Connector {
     return [...new Set(caps.flatMap((c) => SCOPES[c] ?? []))];
   }
 
-  async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<Out<C>> {
+  async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<ProviderOut<C>> {
     if (cap === "contacts.lookup") {
       if (!this.contacts) throw new CapabilityUnavailableError("contacts.lookup");
       const i = input as In<"contacts.lookup">;
-      const out: Out<"contacts.lookup"> = await (await this.contacts()).lookup({ name: i.name, max: i.max });
-      return out as Out<C>;
+      const out: ProviderOut<"contacts.lookup"> = await (await this.contacts()).lookup({ name: i.name, max: i.max });
+      return out as ProviderOut<C>;
     }
     const ws = await this.workspace();
     switch (cap) {
       case "email.read": {
         const i = input as In<"email.read">;
-        let out: Out<"email.read">;
+        let out: ProviderOut<"email.read">;
         if (i.op === "search") out = await ws.searchGmail(i.query, i.max);
         else if (i.op === "list_ids") out = await ws.listMessageIds(i.query, i.max);
         else if (i.op === "thread") out = await ws.getThread(i.threadId);
@@ -65,7 +65,7 @@ export class GoogleConnector implements Connector {
           const email = await ws.ownerEmail();
           out = email ? { email } : {};
         }
-        return out as Out<C>;
+        return out as ProviderOut<C>;
       }
       case "email.draft": {
         const i = input as In<"email.draft">;
@@ -76,23 +76,23 @@ export class GoogleConnector implements Connector {
           body: i.body,
           ...(i.threadId ? { threadId: i.threadId } : {}),
         });
-        const out: Out<"email.draft"> = { providerDraftId: created.gmailDraftId, ...(created.threadId ? { threadId: created.threadId } : {}) };
-        return out as Out<C>;
+        const out: ProviderOut<"email.draft"> = { providerDraftId: created.gmailDraftId, ...(created.threadId ? { threadId: created.threadId } : {}) };
+        return out as ProviderOut<C>;
       }
       case "calendar.read": {
         const i = input as In<"calendar.read">;
-        const out: Out<"calendar.read"> = await ws.listCalendarEvents({
+        const out: ProviderOut<"calendar.read"> = await ws.listCalendarEvents({
           timeMin: i.timeMin,
           timeMax: i.timeMax,
           maxResults: i.max,
           ...(i.query ? { query: i.query } : {}),
         });
-        return out as Out<C>;
+        return out as ProviderOut<C>;
       }
       case "files.read": {
         const i = input as In<"files.read">;
-        const out: Out<"files.read"> = await ws.searchDrive(i.query, i.max, i.includeContent);
-        return out as Out<C>;
+        const out: ProviderOut<"files.read"> = await ws.searchDrive(i.query, i.max, i.includeContent);
+        return out as ProviderOut<C>;
       }
       default:
         throw new Error(`google connector does not implement ${String(cap)}`);
