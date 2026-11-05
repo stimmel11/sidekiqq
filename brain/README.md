@@ -51,7 +51,7 @@ alerts use high priority.
 
 - **System prompt**: `prompts/operating-system.md` is loaded verbatim at runtime and sent as a cached system block.
   Runtime context (time, device, tool protocol) goes in a second block.
-- **/api/ask**: a Claude tool-use loop with `search_gmail`, `get_email_thread`, `list_calendar_events`, `search_drive`,
+- **/api/ask**: a Claude tool-use loop with `search_email` (old name `search_gmail` still accepted), `get_email_thread`, `list_calendar_events`, `search_drive`,
   `get_client_timeline`, `list_commitments`, `add_commitment`, `update_commitment`, `list_followups`,
   `create_email_draft`, `record_decision`, `upsert_client_profile`. The model ends by calling `respond {reply, spoken}`;
   on the last allowed iteration that tool is forced. `spoken` is enforced server-side to ≤2 sentences / 280 chars with

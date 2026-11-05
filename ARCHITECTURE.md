@@ -55,11 +55,19 @@ Pairing / owner endpoints (not device-token auth):
 |---|---|---|---|
 | POST | /api/devices/pair-code | owner secret header | `{ "label"?: string }` → `{ "code": "123456", "expiresAt": string, "ttlSeconds": number }` |
 | POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "name"?: string }` → `{ "token": string, "deviceId": string, "device": string }` |
-| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link) |
+| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link). Alias of the connections route below for one release |
+| GET | /api/connections | owner secret header or dashboard session | → `{ "items": Connection[] }` |
+| POST | /api/connections/:connectorId/connect | owner secret header or dashboard session | → `{ "url": string, "expiresAt": string }` (single-use 5-min link; `GET` on it starts the provider sign-in) |
+| GET | /api/connections/:connectorId/callback | none (single-use OAuth `state` + PKCE) | redirects to `/dashboard/connections?connect=<code>` |
+| POST | /api/connections/:connectorId/disconnect | owner secret header or dashboard session | → `{ "ok": true, "revoked": boolean }` (provider revoke is best effort; the stored sign-in is always deleted) |
+| POST | /api/connections/:connectorId/capabilities | owner secret header or dashboard session | `{ "enabled": CapabilityId[] }` → `Connection`. Only that connector's own capabilities; tiers are fixed in code |
 | GET / POST | /api/connector-requests | owner secret header | "Request a connector" log, see `docs/CONNECTOR_REQUESTS.md`. Logging a request builds, connects and enables nothing |
 | PATCH | /api/connector-requests/:id | owner secret header | `{ "status"?, "prUrl"?, "note"? }` → `{ "request" }` (owner bookkeeping only) |
 
-Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"), optional
+Device tokens are never accepted on `/api/connections*` (a device token plus a session cookie is refused too). `Connection`
+is defined in `docs/CONNECTORS.md` §9. Devices get no connector endpoints.
+
+Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"\|"connection_needs_reauth"), optional
 `importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
 Every alert is also written to a 7-day alert log (`lib/push/alerts.ts` → `deliverAlert`), so `GET /api/alerts`
 returns exactly the same title/body/data as the push.
@@ -78,7 +86,8 @@ interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
-  kind: "email"|"commitment_overdue"; importance?: Importance; priority: "high"|"normal";
+  kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
+  importance?: Importance; priority: "high"|"normal";
   client?: string; messageId?: string; threadId?: string; commitmentId?: string; }
 type CommandKind = "open_url"|"call_contact"|"reachy_wake";   // clients must ignore kinds they don't know
 interface DeviceCommand { id: string; at: string; expiresAt: string /* at + 15 min */; kind: CommandKind;
@@ -104,8 +113,14 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   `number` on its own line, not only inside `label`.
 - Liveness: a device treats a command as live only while `GET /api/commands` returns it. An `opened` ack is accepted up
   to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
-- This endpoint is the owner-device path. Hand-offs created later from `/api/ask` or connectors go through
-  `invokeCapability` with the caller rules and per-capability allowlists in `docs/CONNECTORS.md` §4.4.
+- `POST /api/commands` is the owner-device path. "Call Dana on my phone" said to any device goes through `/api/ask`:
+  Claude's `call_on_phone` tool queues a `call_contact` for the phone (`from` = the asking device). Its number comes only
+  from the clear match of a `lookup_contact` in the same request (a saved contact's id, plus which of its numbers when
+  it has several; any candidate of an ambiguous lookup, and Google "Other contacts", are refused so the assistant asks)
+  or from a whole number span in the owner's request text; never a number the model typed from email, files or
+  calendar (`lib/commands/call.ts`). One call per request; every attempt, refusals included, is audited as
+  `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
+  phone. Other connector hand-offs will go through `invokeCapability` with the caller rules in `docs/CONNECTORS.md` §4.4.
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`) for now;
   an FCM nudge is a later slice.
 
@@ -132,9 +147,21 @@ with its own device token (device kind `"reachy"`): mic → endpointing → 16 k
 from its settings page (port 8042); an on-device wake word is optional and off by default, so room audio is not
 streamed to the cloud. Draft approval uses the same "send it" rule and still goes only through `/api/drafts/:id/approve`.
 
+`reachy_wake` on Reachy: the robot has no screen, so the owner's tap is the one on the device that created the command
+(only paired owner devices can). Reachy polls `GET /api/commands` every 30 s (or the alert interval if shorter, same
+backoff) and runs a wake only while the latest successful GET lists it: `chat` = greeting + one Talk-style listen,
+`brief` = daily brief, `dance` = motion only, `game` = not built yet (spoken "coming soon", acked `failed`); an unknown
+`activity` does nothing and is acked `failed`. A wake never interrupts a turn, listening, speech or a pending "send it":
+it waits for an idle robot, and is acked `dismissed` without acting if it waited more than 2 minutes (a `chat`, which
+opens the mic, also if its `at` is more than 2 minutes + 60 s clock skew old). Handled ids are
+claimed and persisted before acting, so re-delivery, lost acks or a restart never repeat one (lost acks are re-sent
+while the command is still listed). Kinds Reachy doesn't run are ignored and not acked.
+
 ## Connectors
 Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (framework
-slice 1 implemented: every Gmail/Calendar/Drive call goes through `invokeCapability` and its fixed policy table): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+slices 1, 2 and 4 implemented: every Gmail/Calendar/Drive/Contacts call goes through `invokeCapability` and its fixed policy table;
+the owner manages connections on the dashboard Connections screen; a refresh failure marks the connection `needs_reauth` and raises
+one `connection_needs_reauth` alert): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
 `/api/drafts/:id/approve` stays the only executor.
 
 ## Auth

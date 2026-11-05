@@ -1,5 +1,6 @@
 import type { Deps } from "../deps";
 import { truncate } from "../util";
+import { deliverAlert } from "../push/alerts";
 import {
   BACKGROUND_ALLOWED,
   INPUT_SCHEMAS,
@@ -24,15 +25,17 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *  2. Background callers (cron, brief) may only use BACKGROUND_ALLOWED reads.
  *  3. Auto writes and handoffs need an owner-initiated caller (ask, task, dashboard).
  *  4. `confirm` and `user_finishes` never run here. Their prepare/handoff paths arrive with the
- *     calendar and device-queue items; until then they fail closed.
+ *     calendar and device-queue items; until then they fail closed. The one exception is
+ *     `device.call`, which has no connector: the /api/ask tool `call_on_phone` queues it directly
+ *     (caller fixed to "ask", needs the owner request's context, number bound by
+ *     lib/commands/call.ts, audited as `device.call`).
  *  5. Input is validated against the capability's schema before any connector sees it.
  *  6. The stored connection must be usable for this capability (§4 step 3): not `needs_reauth`,
  *     the capability enabled by the owner, and its scopes granted. With no stored connection the
  *     connector itself fails (e.g. GoogleNotConnectedError), as before.
  *  7. Every attempted call that reaches a connector writes an audit row (best effort).
- *  8. A refresh failure (`invalid_grant`) marks the connection `needs_reauth` (§7). The one owner
- *     alert §7 asks for needs a new alert kind in the device contract and lands with the
- *     Connections screen (slice 4); until then the assistant speaks the reconnect message.
+ *  8. A refresh failure (`invalid_grant`) marks the connection `needs_reauth` (§7) and, on that
+ *     transition only, raises one owner alert (kind `connection_needs_reauth`).
  */
 
 function implemented(cap: CapabilityId): cap is ImplementedCapability {
@@ -81,7 +84,14 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     throw new CapabilityDeniedError(cap, `not allowed for background caller "${ctx.caller}"`);
   }
   if (tier === "confirm") throw new CapabilityDeniedError(cap, "needs the owner's confirmation and must be prepared as a draft");
-  if (tier === "user_finishes") throw new CapabilityDeniedError(cap, "the owner finishes this on the phone; handoffs are not available yet");
+  if (tier === "user_finishes") {
+    throw new CapabilityDeniedError(
+      cap,
+      cap === "device.call"
+        ? "calls are handed off by the call_on_phone tool, not through invokeCapability"
+        : "the owner finishes this on the phone; connector handoffs are not available yet",
+    );
+  }
   if (!READ_ONLY.includes(cap) && background) throw new CapabilityDeniedError(cap, "writes need an owner request");
 
   if (!implemented(cap)) throw new CapabilityUnavailableError(cap);
@@ -129,11 +139,30 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     const foreign = err instanceof ReauthRequiredError && err.connectorId !== connector.id;
     if (stored && !foreign && isInvalidGrant(err)) {
       const failedSecret = err instanceof ReauthRequiredError && err.failedSecret ? err.failedSecret : stored.secret;
-      await deps.connections
+      const marked = await deps.connections
         .markNeedsReauth(connector.id, "The provider rejected the stored sign-in.", failedSecret)
-        .catch((e: unknown) => console.warn("[connections] could not mark needs_reauth", e));
+        .catch((e: unknown) => {
+          console.warn("[connections] could not mark needs_reauth", e);
+          return false;
+        });
+      // One owner alert, only on the transition to needs_reauth (§7).
+      if (marked) await alertNeedsReauth(deps, connector);
     }
     throw err;
+  }
+}
+
+/** The owner alert for a connection that needs reconnecting. Best effort: never fails the call path. */
+async function alertNeedsReauth(deps: Deps, connector: Connector): Promise<void> {
+  try {
+    await deliverAlert(deps, {
+      title: `Reconnect ${connector.displayName}`,
+      body: `SideKiqq can't use ${connector.displayName} until you reconnect it from Connections in the dashboard.`,
+      priority: "normal",
+      data: { kind: "connection_needs_reauth", importance: "HIGH" },
+    });
+  } catch (err) {
+    console.warn("[connections] needs_reauth alert failed", err);
   }
 }
 
