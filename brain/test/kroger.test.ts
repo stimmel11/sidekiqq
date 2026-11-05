@@ -78,6 +78,8 @@ describe("parseGroceryQuery", () => {
     expect(parseGroceryQuery({ query: "1/2 gallon 2% organic whole milk from Horizon" }).query).toBe("1/2 gallon 2% organic whole milk from Horizon");
     expect(parseGroceryQuery({ query: "12 ct eggs" }).query).toBe("12 ct eggs");
     expect(parseGroceryQuery({ query: "1234 bagels" }).query).toBe("1234 bagels");
+    expect(parseGroceryQuery({ query: "1/2 gallon 2% milk" }).query).toBe("1/2 gallon 2% milk");
+    expect(parseGroceryQuery({ query: "12 ct eggs 18 oz" }).query).toBe("12 ct eggs 18 oz");
     // Bidi/control characters are stripped, not passed to Kroger.
     expect(parseGroceryQuery({ query: "\u202emilk\u0000" }).query).toBe("milk");
   });
@@ -89,7 +91,7 @@ describe("parseGroceryQuery", () => {
   });
 
   it("rejects runs of 5+ digits (UPCs, codes, phone numbers)", () => {
-    for (const query of [UPC_MILK, `milk ${UPC_MILK}`, "code 482913", "12345 milk", "call 3035551234"]) {
+    for (const query of [UPC_MILK, `milk ${UPC_MILK}`, "code 482913", "12345 milk", "call 3035551234", "call 303-555-1234", "code 4829 13", "(303) 555 1234"]) {
       expect(() => parseGroceryQuery({ query }), query).toThrow(/long numbers/);
     }
   });
