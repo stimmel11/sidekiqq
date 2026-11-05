@@ -19,6 +19,10 @@ the one owner alert on `needs_reauth` (alert kind `connection_needs_reauth`), an
 tool (`search_gmail` kept as an alias). Still open: §5 lazy 7-day expiry, incremental per-capability
 scopes (§7), deleting the legacy `google:tokens` key, and remote MCP. Remaining difference from §2:
 `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
+Outlook slice 1 (2026-11-03): `brain/src/lib/microsoft/mail.ts` is a read-only Graph module
+(search, message, conversation, account, and `listRecentIds(since, max)` for the scanner) returning the
+Gmail shapes; not registered as a connector yet. Open for slice 2: `email.read` `list_ids` takes a
+Gmail-syntax query today, so it needs a provider-neutral `{since, max}` form.
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
@@ -332,7 +336,8 @@ Initial scope plan (verify each against the provider's current docs when impleme
 | Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (new, only when enabled) |
 | Google | files.read | `drive.readonly` (today) |
 | Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (requested since 2026-10-25; People API search needs an empty warm-up query first) |
-| Microsoft 365 | email.read / email.draft | `Mail.ReadWrite`, `offline_access`, `User.Read` |
+| Microsoft 365 | email.read | `Mail.Read`, `offline_access`, `User.Read` (slice 1, `lib/microsoft/mail.ts`) |
+| Microsoft 365 | email.draft | `Mail.ReadWrite` (only when enabled) |
 | Microsoft 365 | email.send | `Mail.Send` (only when enabled) |
 | Microsoft 365 | calendar.read / contacts.lookup | `Calendars.Read`, `Contacts.Read` |
 | Microsoft 365 | calendar.hold / calendar.invite | `Calendars.ReadWrite` (only when enabled) |

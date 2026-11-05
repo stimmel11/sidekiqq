@@ -21,6 +21,8 @@ const GOOGLE_SEND = path.join(SRC, "lib/connectors/google/send.ts");
 const SENDER_REGISTRY = path.join(SRC, "lib/connectors/senders.ts");
 const DEPS_MODULE = path.join(SRC, "lib/deps.ts");
 const ZOOM_MEETINGS = path.join(SRC, "lib/connectors/zoom/meetings.ts");
+const MICROSOFT_DIR = path.join(SRC, "lib/microsoft") + path.sep;
+const OUTLOOK_MAIL = path.join(SRC, "lib/microsoft/mail.ts");
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -50,6 +52,18 @@ const P = {
   buildSenders: /\bbuildSenders\b/,
   importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
   smtp: /nodemailer|smtp/i,
+  // Microsoft Graph endpoints that send at once (docs/CONNECTORS.md §6). Allowed only in a future
+  // lib/connectors/outlook/send.ts; nothing may contain them today. Line-based and case-insensitive
+  // so concatenation, `${ id }`, OData `messages('x')/send` and namespace-qualified
+  // `/microsoft.graph.send` forms are caught too. `messages`/`events` must follow a path or quote
+  // character, so `import { messages } from "./send"` is not a hit. Also bans `$batch`, which can
+  // carry any of these. createReply/createReplyAll/createForward only make drafts, so they are not here.
+  // The generic "any write to /events" rule (CONNECTORS.md §6) is left for the calendar slice: a
+  // line regex can't tell a POST/PATCH/DELETE on /events from a read.
+  graphSend: /\bsendMail\b|[\/'"`](messages|events)\b.*\/\s*(microsoft\.graph\.)?(send|reply|replyAll|forward|cancel|accept|decline|tentativelyAccept)\b|\$batch\b/i,
+  // Looser check, applied only to Graph modules (graphFile below): any `/send`-like path segment or a
+  // bare "send" string, even when the path is built across variables (`${p}/send`, "/" + "send").
+  graphVerb: /\/\s*(microsoft\.graph\.)?(send|reply|replyAll|forward)\b|["'`](microsoft\.graph\.)?(send|reply|replyAll|forward)["'`]/i,
   // Zoom meeting creation (CONNECTORS.md §6): only lib/connectors/zoom/meetings.ts, with its fixed body.
   // Also any other meetings endpoint (PATCH /meetings/{id}, /registrants) and the fields that make Zoom email people.
   zoomApi: /api\.zoom(gov)?\.(us|com)|\bmeetings\/|users\/[^"'`\s]*\/meetings|meeting_invitees|alternative_hosts|schedule_for|registrants\b/,
@@ -67,9 +81,14 @@ const ALLOWED: Record<string, Prim[]> = {
   [ZOOM_MEETINGS]: ["zoomApi"],
 };
 
+/** Files that talk to Microsoft Graph get the looser `graphVerb` check too. */
+function graphFile(file: string, c: string): boolean {
+  return file.startsWith(MICROSOFT_DIR) || /graph\.microsoft\.com/i.test(c);
+}
+
 function hits(file: string): Prim[] {
   const c = code(file);
-  return (Object.keys(P) as Prim[]).filter((k) => P[k].test(c));
+  return (Object.keys(P) as Prim[]).filter((k) => (k !== "graphVerb" || graphFile(file, c)) && P[k].test(c));
 }
 
 /**
@@ -119,6 +138,56 @@ describe("no route other than draft-approve can send mail (static)", () => {
     expect(code(GOOGLE_SEND)).not.toMatch(P.messagesSend);
   });
 
+
+  it("the Graph send pattern catches every Graph send form but not ./send imports", () => {
+    for (const c of [
+      "/me/messages/x/microsoft.graph.send",
+      "/me/messages/x/microsoft.graph.reply",
+      "/me/messages/x/microsoft.graph.replyAll",
+      "/me/messages/x/microsoft.graph.forward",
+      "`/me/events/${id}/forward`",
+      "/me/events/abc/cancel",
+      "/me/events/abc/accept",
+      "/me/events/abc/decline",
+      "/me/events/abc/tentativelyAccept",
+      "/me/events('abc')/microsoft.graph.accept",
+      `"https://graph.microsoft.com/v1.0/$batch"`,
+      "/me/sendMail",
+      "/me/sendmail",
+      "`/me/messages/${id}/send`",
+      "`/me/messages/${ id }/send`",
+      `"/me/messages/" + id + "/send"`,
+      "/me/messages('x')/send",
+      "/me/messages/x/Send",
+      "/me/messages/abc/reply",
+      "/me/messages/abc/replyAll",
+      "/me/messages/abc/forward",
+    ]) {
+      expect(c, c).toMatch(P.graphSend);
+    }
+    expect("/me/messages/abc/createReply").not.toMatch(P.graphSend);
+    expect(`import { x } from "./send";`).not.toMatch(P.graphSend);
+    expect(`import { messages } from "./send";`).not.toMatch(P.graphSend);
+    expect("/me/events?$select=subject").not.toMatch(P.graphSend);
+  });
+
+  it("the loose Graph verb check catches paths built across variables, and runs on Graph modules", () => {
+    for (const c of [
+      "`${p}/send`",
+      "`${base}/microsoft.graph.reply`",
+      `"/" + "send"`,
+      `const verb = 'replyAll'`,
+      "url + `/forward`",
+      `"/messages/" + id + "/send"`,
+    ]) {
+      expect(c, c).toMatch(P.graphVerb);
+    }
+    expect(`import { x } from "./sender";`).not.toMatch(P.graphVerb);
+    expect("/me/messages/abc/createReply").not.toMatch(P.graphVerb);
+    expect(graphFile(OUTLOOK_MAIL, code(OUTLOOK_MAIL))).toBe(true);
+    expect(graphFile(path.join(SRC, "lib/x.ts"), `fetch("https://graph.microsoft.com/v1.0/me")`)).toBe(true);
+    expect(graphFile(GOOGLE_SEND, code(GOOGLE_SEND))).toBe(false);
+  });
 
   it("the import scanner sees re-exports, dynamic imports, require, extensions and relative paths", () => {
     const fake = path.join(SRC, "lib/connectors/google/index.ts");
