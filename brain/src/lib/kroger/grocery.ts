@@ -5,6 +5,7 @@ import {
   GROCERY_QUERY_MAX_CHARS,
   GROCERY_QUERY_MAX_WORDS,
   GROCERY_QUERY_MIN_CHARS,
+  GROCERY_QUERY_DIGIT_RUN_RE,
   GROCERY_QUERY_RE,
   GROCERY_SEARCH_DEFAULT_MAX,
   GROCERY_SEARCH_MAX,
@@ -27,7 +28,8 @@ export * from "./rules";
  * - Caps: ≤ 50 lines per call, quantity 1–10 per line (after merging duplicate lines), and product
  *   ids must have come from `grocery.search` recently (`SearchedProducts`), so
  *   injected text can't put an arbitrary UPC into the owner's cart.
- * - Search queries go to a third party, so they are capped (≤ 80 chars, basic characters only).
+ * - Search queries go to a third party, so they are capped (≤ 80 chars, basic characters only, no
+ *   run of 5+ digits: no UPCs, codes or phone numbers).
  * - Every string from Kroger is cleaned (control/bidi characters stripped, length capped). Product
  *   names are still third-party text: callers treat them as data, never as instructions.
  */
@@ -88,10 +90,20 @@ export class GroceryInputError extends Error {
   }
 }
 
-/** 401/403: token expired, revoked or missing a scope. Slice 2 maps this to `needs_reauth`. */
+/**
+ * 401/403: token expired, revoked or missing a scope. Slice 2 maps an owner-token failure to
+ * `needs_reauth`; an app-token (client credentials) failure is a server config problem, not the owner's.
+ */
 export class KrogerAuthError extends Error {
-  constructor(readonly status: number) {
-    super("Kroger access isn't granted or has expired. The owner must reconnect Kroger.");
+  constructor(
+    readonly status: number,
+    readonly appCredentials = false,
+  ) {
+    super(
+      appCredentials
+        ? "Kroger refused SideKiqq's app credentials. The Kroger client id/secret on the server are misconfigured."
+        : "Kroger access isn't granted or has expired. The owner must reconnect Kroger.",
+    );
     this.name = "KrogerAuthError";
   }
 }
@@ -104,7 +116,7 @@ export class KrogerRateLimitError extends Error {
 }
 
 export class KrogerUnavailableError extends Error {
-  constructor(detail: string) {
+  constructor(readonly detail: string) {
     super(`Kroger isn't responding right now (${detail}).`);
     this.name = "KrogerUnavailableError";
   }
@@ -119,6 +131,14 @@ export class KrogerCartUncertainError extends Error {
   constructor(detail: string) {
     super(`Kroger didn't confirm the cart add (${detail}). It may or may not have gone through: check the cart in the Kroger app before trying again.`);
     this.name = "KrogerCartUncertainError";
+  }
+}
+
+/** Kroger answered the cart add with a 4xx other than 401/403/429: it refused the add, so nothing was added. */
+export class KrogerCartRefusedError extends Error {
+  constructor(readonly status: number) {
+    super(`Kroger refused the cart add (HTTP ${status}). Nothing was added to the cart.`);
+    this.name = "KrogerCartRefusedError";
   }
 }
 
@@ -147,7 +167,7 @@ export function krogerHttpApi(opts: KrogerHttpOptions): KrogerApi {
   const base = opts.base ?? KROGER_API_BASE;
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
 
-  async function call(url: string, init: RequestInit & { headers: Record<string, string> }, token: string): Promise<Response> {
+  async function call(url: string, init: RequestInit & { headers: Record<string, string> }, token: string, appToken = false): Promise<Response> {
     let res: Response;
     try {
       res = await f(url, {
@@ -159,7 +179,7 @@ export function krogerHttpApi(opts: KrogerHttpOptions): KrogerApi {
     } catch (e) {
       throw new KrogerUnavailableError(netDetail(e));
     }
-    if (res.status === 401 || res.status === 403) throw new KrogerAuthError(res.status);
+    if (res.status === 401 || res.status === 403) throw new KrogerAuthError(res.status, appToken);
     if (res.status === 429) throw new KrogerRateLimitError();
     return res;
   }
@@ -182,7 +202,7 @@ export function krogerHttpApi(opts: KrogerHttpOptions): KrogerApi {
       const q = new URLSearchParams({ "filter.term": term, "filter.limit": String(limit) });
       if (locationId) q.set("filter.locationId", locationId);
       const token = await (opts.appToken ?? opts.userToken)();
-      const res = await call(`${base}/products?${q.toString()}`, { method: "GET", headers: {} }, token);
+      const res = await call(`${base}/products?${q.toString()}`, { method: "GET", headers: {} }, token, opts.appToken !== undefined);
       if (res.status === 400) throw new GroceryInputError("Kroger didn't accept that search. Try different words.");
       if (!res.ok) throw new KrogerUnavailableError(`HTTP ${res.status}`);
       const text = await readText(res);
@@ -203,13 +223,14 @@ export function krogerHttpApi(opts: KrogerHttpOptions): KrogerApi {
         );
       } catch (e) {
         // The request may have reached Kroger: never let this look like a clean, retryable failure.
-        if (e instanceof KrogerUnavailableError) throw new KrogerCartUncertainError(e.message.replace(/^.*\((.*)\)\.$/, "$1"));
+        if (e instanceof KrogerUnavailableError) throw new KrogerCartUncertainError(e.detail);
         throw e;
       }
-      // Kroger answers 204; any 2xx is success. 4xx means it was refused (nothing added); 5xx may
-      // or may not have applied, and a partial add can't be inspected or undone.
+      // Kroger answers 204; any 2xx is success. Other 4xx means it was refused (nothing added); 5xx
+      // may or may not have applied, and a partial add can't be inspected or undone.
       if (res.status >= 500) throw new KrogerCartUncertainError(`HTTP ${res.status}`);
-      if (!res.ok) throw new KrogerUnavailableError(`HTTP ${res.status}`);
+      if (res.status >= 400) throw new KrogerCartRefusedError(res.status);
+      if (!res.ok) throw new KrogerCartUncertainError(`HTTP ${res.status}`);
     },
   };
 }
@@ -266,11 +287,12 @@ export function cleanText(s: unknown, maxLen: number): string {
 }
 
 export function parseGroceryQuery(q: GrocerySearchQuery): { query: string; locationId?: string; max: number } {
-  const query = cleanText(q.query, 1000);
+  const query = cleanText(q?.query, 1000);
   if (!query) throw new GroceryInputError("Say what to search for.");
   if (Array.from(query).length > GROCERY_QUERY_MAX_CHARS) throw new GroceryInputError(`Searches are at most ${GROCERY_QUERY_MAX_CHARS} characters.`);
   if (Array.from(query).length < GROCERY_QUERY_MIN_CHARS) throw new GroceryInputError(`Searches need at least ${GROCERY_QUERY_MIN_CHARS} characters.`);
   if (query.split(" ").length > GROCERY_QUERY_MAX_WORDS) throw new GroceryInputError(`Searches are at most ${GROCERY_QUERY_MAX_WORDS} words.`);
+  if (GROCERY_QUERY_DIGIT_RUN_RE.test(query)) throw new GroceryInputError("A grocery search can't contain long numbers (codes, UPCs or phone numbers).");
   if (!GROCERY_QUERY_RE.test(query)) throw new GroceryInputError("A grocery search can only contain letters, numbers, spaces and basic punctuation.");
   if (q.locationId !== undefined && !KROGER_LOCATION_ID_RE.test(q.locationId)) throw new GroceryInputError("That isn't a Kroger store id.");
   const max = q.max ?? GROCERY_SEARCH_DEFAULT_MAX;
@@ -292,7 +314,6 @@ export function parseCartLines(lines: CartLine[]): CartLine[] {
     }
     merged.set(id, (merged.get(id) ?? 0) + qty);
   }
-  if (merged.size > CART_MAX_LINES) throw new GroceryInputError(`At most ${CART_MAX_LINES} different items per add.`);
   for (const [, qty] of merged) {
     if (qty > CART_MAX_QTY) throw new GroceryInputError(`At most ${CART_MAX_QTY} of any one item.`);
   }

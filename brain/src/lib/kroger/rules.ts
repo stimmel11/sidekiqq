@@ -14,8 +14,14 @@ export const GROCERY_QUERY_MAX_WORDS = 8;
 /**
  * Letters, digits, spaces and . , ' ’ & - / ( ), plus % only right after a digit and not before two
  * hex digits ("2% milk"), so percent-encoded text ("dana%40acme.com", "a2%40b") can't pass. Must start with a letter or digit.
+ * No run of 5+ digits (see GROCERY_QUERY_DIGIT_RUN_RE).
  */
-export const GROCERY_QUERY_RE = /^[\p{L}\p{N}](?:[\p{L}\p{M}\p{N} .,'’&/()-]|(?<=\p{N})%(?![0-9A-Fa-f]{2}))*$/u;
+export const GROCERY_QUERY_RE = /^(?!.*\p{N}{5})[\p{L}\p{N}](?:[\p{L}\p{M}\p{N} .,'’&/()-]|(?<=\p{N})%(?![0-9A-Fa-f]{2}))*$/u;
+/**
+ * 5+ digits in a row: a UPC (searching one would make it "from search" and so addable) or a code,
+ * account or phone number copied from an email. Short numbers ("12 ct", "2%") are fine.
+ */
+export const GROCERY_QUERY_DIGIT_RUN_RE = /\p{N}{5}/u;
 export const GROCERY_SEARCH_MAX = 25;
 export const GROCERY_SEARCH_DEFAULT_MAX = 10;
 

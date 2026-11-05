@@ -6,6 +6,7 @@ import {
   cleanText,
   GroceryInputError,
   KrogerAuthError,
+  KrogerCartRefusedError,
   KrogerCartUncertainError,
   KrogerGrocery,
   krogerCartUrl,
@@ -75,6 +76,8 @@ describe("parseGroceryQuery", () => {
     expect(parseGroceryQuery({ query: "jalapeño" }).query).toBe("jalapeño");
     expect(parseGroceryQuery({ query: "milk 2%" }).query).toBe("milk 2%");
     expect(parseGroceryQuery({ query: "1/2 gallon 2% organic whole milk from Horizon" }).query).toBe("1/2 gallon 2% organic whole milk from Horizon");
+    expect(parseGroceryQuery({ query: "12 ct eggs" }).query).toBe("12 ct eggs");
+    expect(parseGroceryQuery({ query: "1234 bagels" }).query).toBe("1234 bagels");
     // Bidi/control characters are stripped, not passed to Kroger.
     expect(parseGroceryQuery({ query: "\u202emilk\u0000" }).query).toBe("milk");
   });
@@ -83,6 +86,16 @@ describe("parseGroceryQuery", () => {
     for (const query of ["", "   ", "milk?token=abc", "email dana@acme.com", "x".repeat(81), "<script>", "https://evil.example", "#tag", "ox", "a b c d e f g h i", "dana%40acme.com", "dana2%40acme.com", "2%4a"]) {
       expect(() => parseGroceryQuery({ query }), JSON.stringify(query)).toThrow(GroceryInputError);
     }
+  });
+
+  it("rejects runs of 5+ digits (UPCs, codes, phone numbers)", () => {
+    for (const query of [UPC_MILK, `milk ${UPC_MILK}`, "code 482913", "12345 milk", "call 3035551234"]) {
+      expect(() => parseGroceryQuery({ query }), query).toThrow(/long numbers/);
+    }
+  });
+
+  it("tolerates a missing input", () => {
+    for (const q of [null, undefined, {}]) expect(() => parseGroceryQuery(q as never)).toThrow(GroceryInputError);
   });
 
   it("rejects bad store ids and max", () => {
@@ -179,6 +192,14 @@ describe("KrogerGrocery", () => {
     const { api, g } = setup();
     await expect(g.search({ query: "send to dana@acme.com" })).rejects.toThrow(GroceryInputError);
     expect(api.searches).toEqual([]);
+  });
+
+  it("a UPC can't be made addable by searching for it", async () => {
+    const { api, g } = setup();
+    await expect(g.search({ query: UPC_BREAD })).rejects.toThrow(GroceryInputError);
+    expect(api.searches).toEqual([]);
+    await expect(g.addToCart({ items: [{ productId: UPC_BREAD, quantity: 1 }] })).rejects.toThrow(/recent grocery search/);
+    expect(api.adds).toEqual([]);
   });
 
   it("search fails closed on an unexpected response shape", async () => {
@@ -286,7 +307,23 @@ describe("krogerHttpApi", () => {
     await expect(mk(403).addToCart([{ upc: UPC_MILK, quantity: 1, modality: "PICKUP" }])).rejects.toThrow(KrogerAuthError);
     await expect(mk(429).searchProducts({ term: "milk", limit: 1 })).rejects.toThrow(KrogerRateLimitError);
     await expect(mk(500).searchProducts({ term: "milk", limit: 1 })).rejects.toThrow(KrogerUnavailableError);
-    await expect(mk(400).addToCart([{ upc: UPC_MILK, quantity: 1, modality: "PICKUP" }])).rejects.toThrow(KrogerUnavailableError);
+    for (const status of [400, 404, 422]) {
+      const add = mk(status).addToCart([{ upc: UPC_MILK, quantity: 1, modality: "PICKUP" }]);
+      await expect(add).rejects.toThrow(KrogerCartRefusedError);
+    }
+    await expect(mk(400).addToCart([{ upc: UPC_MILK, quantity: 1, modality: "PICKUP" }])).rejects.toThrow(/refused the cart add \(HTTP 400\)\. Nothing was added/);
+  });
+
+  it("an app-token 401 on search blames the app credentials, not the owner's connection", async () => {
+    const f = fakeFetch(new Response("{}", { status: 401 }));
+    const app = krogerHttpApi({ userToken: async () => "u", appToken: async () => "a", fetch: f as unknown as typeof fetch });
+    const e = await app.searchProducts({ term: "milk", limit: 1 }).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(KrogerAuthError);
+    expect(e).toMatchObject({ appCredentials: true });
+    expect((e as Error).message).toMatch(/misconfigured/);
+    expect((e as Error).message).not.toMatch(/reconnect/);
+    const user = krogerHttpApi({ userToken: async () => "u", fetch: f as unknown as typeof fetch });
+    await expect(user.searchProducts({ term: "milk", limit: 1 })).rejects.toThrow(/reconnect Kroger/);
   });
 
   it("a search 400 is an input problem, not an outage", async () => {
@@ -343,6 +380,28 @@ describe("Kroger safety", () => {
     expect(urls.map((u) => new URL(u).origin + new URL(u).pathname)).toEqual(["https://api.kroger.com/v1/products", "https://api.kroger.com/v1/cart/add"]);
   });
 
+  const ALLOWED_PATHS = ["/v1", "/products", "/cart/add", "/cart"];
+  /** URL paths in code that aren't on the allowlist: at the start of a string (after an optional https://host) or after a `${...}`. */
+  function disallowedPaths(code: string): string[] {
+    const bad: string[] = [];
+    for (const m of code.matchAll(/["'`](?:https:\/\/[^"'`]*?)?(\/[a-z][^"'`?]*)/gi)) {
+      const p = m[1]!.replace(/\$\{[^}]*\}/g, "");
+      if (!ALLOWED_PATHS.includes(p)) bad.push(m[0]);
+    }
+    for (const m of code.matchAll(/\$\{[^}]*\}(\/[^"'`?\s]*)/g)) {
+      const p = m[1]!.replace(/\$\{[^}]*\}.*$/, "");
+      if (!ALLOWED_PATHS.includes(p)) bad.push(m[0]);
+    }
+    return bad;
+  }
+
+  it("the path check catches paths after an interpolation and in plain strings", () => {
+    expect(disallowedPaths("const u = `${base}/purchase`;")).toEqual(["${base}/purchase"]);
+    expect(disallowedPaths('const u = "/v1/orders";')).toEqual(['"/v1/orders']);
+    expect(disallowedPaths("const u = `${base}/${p}`;")).toHaveLength(1);
+    expect(disallowedPaths("call(`${base}/products?${q}`); call(`${base}/cart/add`);")).toEqual([]);
+  });
+
   it("no Kroger module names a checkout, order, payment or pickup-slot API path", () => {
     const dirs = ["../src/lib/kroger", "../src/lib/connectors/kroger"].map((d) => join(__dirname, d)).filter((d) => existsSync(d));
     const files = dirs.flatMap((d) => readdirSync(d).filter((n) => n.endsWith(".ts")).map((n) => join(d, n)));
@@ -350,9 +409,7 @@ describe("Kroger safety", () => {
     for (const file of files) {
       const code = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
       // The only URL paths allowed in code: the API base, the two endpoints, and the cart pages for hand-off.
-      for (const m of code.matchAll(/["'`](?:https:\/\/[^"'`]*?)?(\/[a-z][^"'`?]*)/gi)) {
-        expect(["/v1", "/products", "/cart/add", "/cart"], `${file}: ${m[0]}`).toContain(m[1]!.replace(/\$\{[^}]*\}/g, ""));
-      }
+      expect(disallowedPaths(code), file).toEqual([]);
       expect(code, file).not.toMatch(/\/(?:checkout|orders?|payments?|slots?|fulfillment)\b/i);
     }
   });
