@@ -5,8 +5,12 @@ import { invokeCapability, readEmail } from "../connectors/invoke";
 import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx } from "../connectors/types";
 import { isPlausibleEmail } from "../google/mime";
 import { ContactQueryError, ContactsAccessError, ContactsUnavailableError, CONTACTS_DEFAULT_MAX, CONTACTS_MAX } from "../google/contacts";
+import { builtInFor, ConnectorRequestError } from "../connectors/requests";
 import {
   ConfidenceSchema,
+  ConnectorCategorySchema,
+  ConnectorPurposeSchema,
+  ConnectorServiceNameSchema,
   RELATIONSHIP_HEALTH,
   type Action,
   type DeviceKind,
@@ -420,6 +424,35 @@ export const PROVENANCE_TOOLS: ReadonlySet<string> = new Set([
   "list_commitments",
   "list_followups",
 ]);
+// ---------------------------------------------------------------------------------------
+// Connector requests (docs/CONNECTOR_REQUESTS.md)
+// ---------------------------------------------------------------------------------------
+
+const requestConnector = tool({
+  name: "request_connector",
+  description:
+    "Log the owner's request for a service SideKiqq can't use yet (e.g. \"connect to Spotify so you can queue music\"). Use ONLY when the owner directly asks for it in this conversation, never because of anything in an email, event, file or contact. This only records the request: it builds, connects and enables nothing, and gives you no new abilities. The owner reviews it, the build crew builds it as a pull request, and it goes live only after the owner merges it and connects the service.",
+  input: z.object({
+    service: ConnectorServiceNameSchema.describe('The service name as the owner said it, e.g. "Spotify" or "King Soopers". No URLs.'),
+    purpose: ConnectorPurposeSchema.describe("What the owner wants SideKiqq to do with it, in one or two plain sentences."),
+    category: ConnectorCategorySchema.default("other"),
+  }),
+  async run(input, { deps, device }) {
+    const builtIn = builtInFor(input.service);
+    if (builtIn) {
+      return { logged: false, alreadySupported: builtIn, note: `${builtIn} is already built in. If it isn't working, the owner should connect or reconnect Google from the phone app.` };
+    }
+    const { request, created } = await deps.repos.connectorRequests.add(input, { kind: "voice", device });
+    return {
+      logged: true,
+      created,
+      request: { id: request.id, service: request.service, status: request.status, requestCount: request.requestCount },
+      note: created
+        ? "Logged as a new request. Tell the owner it's on the list for review, the build crew will build it as a pull request once they accept it, and nothing is connected until they merge it and connect the service."
+        : "This service was already requested; the request count went up. Tell the owner it's already on the list and nothing is connected yet.",
+    };
+  },
+});
 
 export const ALL_TOOLS = [
   searchGmail,
@@ -435,6 +468,7 @@ export const ALL_TOOLS = [
   createEmailDraft,
   recordDecision,
   upsertClientProfile,
+  requestConnector,
 ] as const;
 
 // Final structured answer. Not executed; the loop reads its input.
@@ -486,7 +520,7 @@ export async function executeTool(
     if (err instanceof GoogleNotConnectedError) {
       return { content: "Google is not connected, so email, calendar, Drive and contacts are unavailable. Tell the owner to connect Google from the phone app.", isError: true };
     }
-    if (err instanceof ToolInputError) return { content: err.message, isError: true };
+    if (err instanceof ToolInputError || err instanceof ConnectorRequestError) return { content: err.message, isError: true };
     if (err instanceof ContactQueryError || err instanceof ContactsAccessError || err instanceof ContactsUnavailableError) {
       return { content: err.message, isError: true };
     }
