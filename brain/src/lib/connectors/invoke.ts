@@ -1,5 +1,6 @@
 import type { Deps } from "../deps";
 import { truncate } from "../util";
+import { deliverAlert } from "../push/alerts";
 import {
   BACKGROUND_ALLOWED,
   INPUT_SCHEMAS,
@@ -37,9 +38,8 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *  7. Every attempted call that reaches a connector writes an audit row (best effort).
  *  7a. `email.draft` also creates the pending Draft record with its code-built read-back
  *      (recordEmailDraft below). It still sends nothing; only the approve route executes drafts.
- *  8. A refresh failure (`invalid_grant`) marks the connection `needs_reauth` (§7). The one owner
- *     alert §7 asks for needs a new alert kind in the device contract and lands with the
- *     Connections screen (slice 4); until then the assistant speaks the reconnect message.
+ *  8. A refresh failure (`invalid_grant`) marks the connection `needs_reauth` (§7) and, on that
+ *     transition only, raises one owner alert (kind `connection_needs_reauth`).
  */
 
 function implemented(cap: CapabilityId): cap is ImplementedCapability {
@@ -146,9 +146,14 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
   } catch (err) {
     await audit(false, (err as Error)?.message ?? String(err));
     if (stored && isInvalidGrant(err)) {
-      await deps.connections
+      const marked = await deps.connections
         .markNeedsReauth(connector.id, "The provider rejected the stored sign-in (invalid_grant).", stored.secret)
-        .catch((e: unknown) => console.warn("[connections] could not mark needs_reauth", e));
+        .catch((e: unknown) => {
+          console.warn("[connections] could not mark needs_reauth", e);
+          return false;
+        });
+      // One owner alert, only on the transition to needs_reauth (§7).
+      if (marked) await alertNeedsReauth(deps, connector);
     }
     throw err;
   }
@@ -178,6 +183,20 @@ async function recordEmailDraft(deps: Deps, connectorId: string, input: In<"emai
     ...(input.followupId ? { followupId: input.followupId } : {}),
   });
   return { draftId: draft.id, providerDraftId: provided.providerDraftId, readback: draft.readback };
+}
+
+/** The owner alert for a connection that needs reconnecting. Best effort: never fails the call path. */
+async function alertNeedsReauth(deps: Deps, connector: Connector): Promise<void> {
+  try {
+    await deliverAlert(deps, {
+      title: `Reconnect ${connector.displayName}`,
+      body: `SideKiqq can't use ${connector.displayName} until you reconnect it from Connections in the dashboard.`,
+      priority: "normal",
+      data: { kind: "connection_needs_reauth", importance: "HIGH" },
+    });
+  } catch (err) {
+    console.warn("[connections] needs_reauth alert failed", err);
+  }
 }
 
 /** OAuth refresh failure: the stored refresh token was revoked or expired (Google: `invalid_grant`). */

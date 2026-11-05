@@ -7,16 +7,18 @@ call `invokeCapability`; `deps.workspace()` is gone), and the sender registry wi
 `lib/connectors/google/send.ts`. Slice 2 (2026-10-26): `ConnectionStore` (`lib/connectors/store.ts`:
 per-connector AAD, `TOKEN_ENCRYPTION_KEY_PREV` rotation, single-use state carrying the PKCE verifier),
 the Google token migration (§8 step 3), and per-connection enabled capabilities, granted scopes and
-`needs_reauth` checked in `invokeCapability` (§4 step 3). From slice 2, still open in §7: the owner
-alert on `needs_reauth`, provider revoke on disconnect, incremental scopes. Slice 3 (2026-10-28): Draft
+`needs_reauth` checked in `invokeCapability` (§4 step 3). Slice 3 (2026-10-28): Draft
 `kind`/`connectorId`/`readback` (§5; readback built in `lib/connectors/readback.ts` and set by
 `DraftsRepo.create`, used as `Action.summary`), legacy records upgraded on read, `email.draft` now
 returns `{draftId, providerDraftId, readback}` and `invokeCapability` creates the Draft record, `GET
 /api/drafts` adds `kind`/`readback`/`when`, sender key is `(connectorId, kind)` and approve answers 422
-when none is registered. Calendar kinds are modelled only. Not yet built: §5 lazy 7-day expiry, the
-generic connections routes and the Connections screen (§9), the `search_email` tool rename, and remote
-MCP. Remaining difference from §2: `email.read` has two extra ops for the cron scanner (`list_ids`,
-`account`).
+when none is registered. Calendar kinds are modelled only. Slice 4 (2026-10-28): the `/api/connections`
+routes and the dashboard Connections screen (§9), shared OAuth flows (`lib/connectors/oauth.ts`,
+`lib/connectors/google/oauth.ts`; `/api/google/*` are now aliases), provider revoke on disconnect,
+the one owner alert on `needs_reauth` (alert kind `connection_needs_reauth`), and the `search_email`
+tool (`search_gmail` kept as an alias). Still open: §5 lazy 7-day expiry, incremental per-capability
+scopes (§7), deleting the legacy `google:tokens` key, and remote MCP. Remaining difference from §2:
+`email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
@@ -379,9 +381,20 @@ Owner API (owner secret header or dashboard session; not device tokens):
 ```ts
 interface Connection { connectorId: string; displayName: string;
   status: "connected"|"needs_reauth"|"error"|"disabled"|"not_connected";
-  account?: string; capabilities: { id: CapabilityId; enabled: boolean; tier: Tier }[];
+  account?: string; capabilities: { id: CapabilityId; enabled: boolean; tier: Tier;
+    ownerEnabled: boolean; granted: boolean; label: string; tierLabel: string }[];
   connectedAt?: string; lastUsedAt?: string; lastError?: string; }
 ```
+
+As built (slice 4): `enabled` = usable now (owner switch on **and** scopes granted); `ownerEnabled` is
+the switch itself, `granted` whether the provider granted its scopes (true when unknown). `error` =
+a stored record that can't be decrypted; `disabled` = connected with every capability off.
+`lastUsedAt` is the newest successful audit row (the audit log is bounded). Auth is the owner secret
+header or the dashboard session cookie; any header credential must be the owner secret, and
+cookie writes refuse a cross-site `Origin`/`Sec-Fetch-Site`. `GET .../connect?ticket=` opens the
+sign-in; the callback only ever puts a fixed result code in the dashboard URL. Google's registered
+redirect URI is still `/api/google/callback` (it shows a page linking back to Connections) unless
+`GOOGLE_REDIRECT_URI` points at `/api/connections/google/callback`.
 
 Devices get no new endpoints for connectors. They see results through `/api/ask` replies, Drafts
 and (later) handoffs in the device command queue.

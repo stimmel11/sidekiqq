@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { isOwnerSecret, requireOwner } from "@/lib/auth";
 import { getDeps } from "@/lib/deps";
 import { config } from "@/lib/env";
-import { pkcePair } from "@/lib/crypto";
-import { createOAuthClient, GOOGLE_SCOPES, type OAuth2Client } from "@/lib/google/auth";
+import { googleOAuth } from "@/lib/connectors/google/oauth";
 import { bearerToken, errorResponse, HttpError, json } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -11,9 +10,8 @@ export const dynamic = "force-dynamic";
 
 const TICKET_TTL_SECONDS = 300;
 
-type CodeChallengeMethod = NonNullable<NonNullable<Parameters<OAuth2Client["generateAuthUrl"]>[0]>["code_challenge_method"]>;
-
 /**
+ * Alias of the generic `/api/connections/google/connect` for one release (docs/CONNECTORS.md §8 step 3).
  * Owner-only: mint a one-time browser link for starting Google OAuth.
  * `POST` with `Authorization: Bearer <OWNER_SECRET>` (or `X-Owner-Secret`) returns
  * `{ url, expiresAt }`; open `url` in a browser within 5 minutes. The ticket is single use,
@@ -55,17 +53,7 @@ export async function GET(req: Request): Promise<Response> {
     if (!authorized) throw new HttpError(401, "Owner authentication required", "unauthorized");
 
     // PKCE (docs/CONNECTORS.md §7): the verifier is stored with the single-use state, never sent to the browser.
-    const pkce = pkcePair();
-    const state = await deps.googleTokens.issueState(pkce.verifier);
-    const authUrl = createOAuthClient().generateAuthUrl({
-      access_type: "offline",
-      prompt: "consent", // force a refresh_token every time
-      include_granted_scopes: true,
-      scope: [...GOOGLE_SCOPES],
-      state,
-      code_challenge: pkce.challenge,
-      code_challenge_method: "S256" as CodeChallengeMethod,
-    });
+    const authUrl = await googleOAuth.authUrl(deps);
     return NextResponse.redirect(authUrl, { headers: { "Referrer-Policy": "no-referrer", "Cache-Control": "no-store" } });
   } catch (err) {
     return errorResponse(err);
