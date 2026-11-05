@@ -84,6 +84,9 @@ your words to your brain, speaks the answer, and reacts to urgent alerts.
    Enter the brain URL and the 6-digit code, then press **Pair**. The robot registers as device
    kind `reachy`.
 5. Press **Talk** and ask, for example, "What's on my plate today?"
+6. **From the phone (optional):** the SideKiqq phone app's Home tab has a **Reachy** card. On the same Wi-Fi, Chat,
+   Brief or Dance starts this app through the daemon (`reachy-mini.local:8000`) if it isn't running, then asks
+   Reachy to wake up for that. It won't stop another app that is running.
 
 ### Optional wake word
 Run `pip install "sidekiqq_reachy[wakeword]"` in the robot's app environment
