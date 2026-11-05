@@ -338,3 +338,83 @@ export const DeviceRecordSchema = z.object({
   revoked: z.boolean().default(false),
 });
 export type DeviceRecord = z.infer<typeof DeviceRecordSchema>;
+
+// --- Connector requests ("request a connector" flow, docs/CONNECTOR_REQUESTS.md) ------------
+// The owner asks for a service SideKiqq can't use yet. The brain only LOGS the request: nothing
+// is built, connected or enabled here. The build crew builds only requests the owner has marked
+// "accepted", as a pull request, and a connector goes live only after the owner merges it and
+// connects the service. Owner-only endpoints; devices never call these.
+
+export const CONNECTOR_REQUEST_STATUSES = ["new", "accepted", "building", "in_review", "live", "declined"] as const;
+export const ConnectorRequestStatusSchema = z.enum(CONNECTOR_REQUEST_STATUSES);
+export type ConnectorRequestStatus = z.infer<typeof ConnectorRequestStatusSchema>;
+/** Statuses where the request is finished; a new ask for the same service opens a fresh request. */
+export const CLOSED_CONNECTOR_REQUEST_STATUSES: readonly ConnectorRequestStatus[] = ["live", "declined"];
+
+export const CONNECTOR_CATEGORIES = ["email", "calendar", "contacts", "files", "video", "messaging", "grocery", "tasks", "other"] as const;
+export const ConnectorCategorySchema = z.enum(CONNECTOR_CATEGORIES);
+
+export const CONNECTOR_SERVICE_MAX = 80;
+export const CONNECTOR_PURPOSE_MAX = 500;
+export const CONNECTOR_NOTE_MAX = 1000;
+
+// Request text is owner speech (or, if the model was misled, third-party text). It is stored and
+// shown as plain data: no URLs, no control characters, no markup brackets.
+const plainText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    // \p{Cc}/\p{Cf}/\p{Zl}/\p{Zp}: control, bidi-override, zero-width and line-separator characters.
+    .refine((s) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>`]/u.test(s), "must be plain text")
+    // Scheme, "www." or anything shaped like a host name ("evil.io", "mcp.evil.io/sse").
+    .refine((s) => !/:\/\/|\bwww\.|[\p{L}\p{N}-]\.\p{L}{2,}/iu.test(s), "must not contain a URL or domain name");
+
+export const ConnectorServiceNameSchema = plainText(CONNECTOR_SERVICE_MAX).refine(
+  (s) => /^[\p{L}\p{N}][\p{L}\p{N} .&+'’()/-]*$/u.test(s),
+  "service name may contain only letters, digits, spaces and . & + ' ( ) / -",
+);
+export const ConnectorPurposeSchema = plainText(CONNECTOR_PURPOSE_MAX);
+
+/** Only links to a pull request on GitHub. */
+export const PullRequestUrlSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .regex(/^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/pull\/\d{1,7}$/, "must be a GitHub pull request URL");
+
+export const ConnectorRequestSchema = z.object({
+  id: z.string(),
+  service: z.string(),
+  /** Normalised service name used for de-duplication. */
+  serviceKey: z.string(),
+  purpose: z.string(),
+  category: ConnectorCategorySchema.default("other"),
+  status: ConnectorRequestStatusSchema,
+  source: z.object({ kind: z.enum(["voice", "owner"]), device: DeviceKindSchema.optional() }),
+  /** How many times the owner has asked for this service while the request was open. */
+  requestCount: z.number().int().min(1),
+  prUrl: PullRequestUrlSchema.optional(),
+  note: z.string().max(CONNECTOR_NOTE_MAX).optional(),
+  createdAt: isoDate,
+  updatedAt: isoDate,
+});
+export type ConnectorRequest = z.infer<typeof ConnectorRequestSchema>;
+
+export const CreateConnectorRequestSchema = z.object({
+  service: ConnectorServiceNameSchema,
+  purpose: ConnectorPurposeSchema,
+  category: ConnectorCategorySchema.default("other"),
+});
+export type CreateConnectorRequest = z.infer<typeof CreateConnectorRequestSchema>;
+
+export const UpdateConnectorRequestSchema = z
+  .object({
+    status: ConnectorRequestStatusSchema.optional(),
+    prUrl: PullRequestUrlSchema.nullable().optional(),
+    note: z.string().trim().max(CONNECTOR_NOTE_MAX).refine((s) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s), "must be plain text").nullable().optional(),
+  })
+  .strict()
+  .refine((o) => o.status !== undefined || o.prUrl !== undefined || o.note !== undefined, "nothing to update");
+export type UpdateConnectorRequest = z.infer<typeof UpdateConnectorRequestSchema>;

@@ -61,6 +61,8 @@ Pairing / owner endpoints (not device-token auth):
 | GET | /api/connections/:connectorId/callback | none (single-use OAuth `state` + PKCE) | redirects to `/dashboard/connections?connect=<code>` |
 | POST | /api/connections/:connectorId/disconnect | owner secret header or dashboard session | → `{ "ok": true, "revoked": boolean }` (provider revoke is best effort; the stored sign-in is always deleted) |
 | POST | /api/connections/:connectorId/capabilities | owner secret header or dashboard session | `{ "enabled": CapabilityId[] }` → `Connection`. Only that connector's own capabilities; tiers are fixed in code |
+| GET / POST | /api/connector-requests | owner secret header | "Request a connector" log, see `docs/CONNECTOR_REQUESTS.md`. Logging a request builds, connects and enables nothing |
+| PATCH | /api/connector-requests/:id | owner secret header | `{ "status"?, "prUrl"?, "note"? }` → `{ "request" }` (owner bookkeeping only) |
 
 Device tokens are never accepted on `/api/connections*` (a device token plus a session cookie is refused too). `Connection`
 is defined in `docs/CONNECTORS.md` §9. Devices get no connector endpoints.
