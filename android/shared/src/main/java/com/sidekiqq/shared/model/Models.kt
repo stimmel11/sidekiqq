@@ -198,6 +198,17 @@ object CommandKind {
     const val REACHY_WAKE = "reachy_wake"
 }
 
+/**
+ * Values of the `kind` key in alert pushes (FCM data) and `GET /api/alerts` items. A plain string
+ * on the wire, so a newer brain can add kinds; show unknown kinds as a plain notification.
+ */
+object AlertKind {
+    const val EMAIL = "email"
+    const val COMMITMENT_OVERDUE = "commitment_overdue"
+    /** A connected account (e.g. Google) stopped working; the owner reconnects it from the dashboard. */
+    const val CONNECTION_NEEDS_REAUTH = "connection_needs_reauth"
+}
+
 /** Values for [DeviceCommand.app] / [CreateCommandRequest.app]. WhatsApp needs a "+" international number. */
 object CallApp {
     const val PHONE = "phone"

@@ -135,6 +135,8 @@ public struct AlertKind: RawRepresentable, Codable, Hashable, Sendable, Expressi
 
     public static let email: AlertKind = "email"
     public static let commitmentOverdue: AlertKind = "commitment_overdue"
+    /// A connected account (e.g. Google) stopped working; the owner reconnects it from the dashboard.
+    public static let connectionNeedsReauth: AlertKind = "connection_needs_reauth"
 }
 
 // MARK: - Contract models

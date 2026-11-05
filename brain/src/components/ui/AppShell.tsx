@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SideNav, TabBar, type NavItem } from "./NavLinks";
+import { SideNav, TabBar, TopBarLinks, type NavItem } from "./NavLinks";
 
 function Wordmark() {
   return (
@@ -37,7 +37,10 @@ export function AppShell({ nav, signOut, children }: { nav: NavItem[]; signOut: 
 
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between bg-nav px-4 md:hidden">
         <Wordmark />
-        {signOut}
+        <div className="flex items-center gap-1">
+          <TopBarLinks items={nav} />
+          {signOut}
+        </div>
       </header>
 
       <main id="main" className="min-w-0 flex-1 px-4 pt-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-6 md:px-10 md:pt-10 md:pb-16">
