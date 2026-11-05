@@ -4,6 +4,7 @@ import { optional, required } from "./env";
 import { safeEqual } from "./crypto";
 import { bearerToken, errorResponse, HttpError } from "./http";
 import type { DeviceRecord } from "./models";
+import { SESSION_COOKIE, sessionSecretFromEnv, verifySession } from "./dashboard/session";
 
 /**
  * Auth middleware for route handlers. Next's edge `middleware.ts` only checks that a
@@ -34,6 +35,39 @@ export function requireOwner(req: Request): void {
   if (!isOwnerSecret(candidate)) throw new HttpError(401, "Owner authentication required", "unauthorized");
 }
 
+function cookieValue(req: Request, name: string): string | undefined {
+  for (const part of (req.headers.get("cookie") ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return undefined;
+}
+
+/**
+ * Owner endpoints that the dashboard also calls (docs/CONNECTORS.md §9): the owner secret header,
+ * or a valid dashboard session cookie. A paired device token is never enough. If any header
+ * credential is sent it must be the owner secret (a device token plus a cookie is refused). For
+ * cookie auth on writes, a cross-site `Origin`/`Sec-Fetch-Site` is refused on top of SameSite=Strict.
+ */
+export async function requireOwnerOrSession(req: Request, env: Record<string, string | undefined> = process.env): Promise<"secret" | "session"> {
+  const header = req.headers.get("x-owner-secret") ?? bearerToken(req);
+  if (header !== null) {
+    if (!isOwnerSecret(header)) throw new HttpError(401, "Owner authentication required", "unauthorized");
+    return "secret";
+  }
+  if (!(await verifySession(cookieValue(req, SESSION_COOKIE), sessionSecretFromEnv(env)))) {
+    throw new HttpError(401, "Owner authentication required", "unauthorized");
+  }
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const site = req.headers.get("sec-fetch-site");
+    const origin = req.headers.get("origin");
+    if ((site && site !== "same-origin") || (origin && origin !== new URL(req.url).origin)) {
+      throw new HttpError(403, "Cross-site request refused", "cross_site");
+    }
+  }
+  return "session";
+}
+
 /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET`; `X-Cron-Secret` is accepted for manual runs. */
 export function requireCron(req: Request): void {
   const secret = optional("CRON_SECRET");
@@ -60,6 +94,22 @@ export function withDevice<P = Record<string, never>>(
     } catch (err) {
       return errorResponse(err);
     }
+  };
+}
+
+/** Owner secret header or dashboard session (see requireOwnerOrSession), with uniform errors. `no-store` on every reply. */
+export function withOwnerOrSession<P = Record<string, never>>(handler: (req: NextRequest, ctx: { deps: Deps; params: P }) => Promise<Response>) {
+  return async (req: NextRequest, ctx: RouteCtx<P>): Promise<Response> => {
+    let res: Response;
+    try {
+      await requireOwnerOrSession(req);
+      const params = ctx?.params ? await ctx.params : ({} as P);
+      res = await handler(req, { deps: getDeps(), params });
+    } catch (err) {
+      res = errorResponse(err);
+    }
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   };
 }
 

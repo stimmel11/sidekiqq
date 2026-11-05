@@ -95,6 +95,14 @@ final class ModelsTests: XCTestCase {
         // cc defaults to [] when absent
         let d = try decode(Draft.self, #"{"id":"d","to":["a@b.c"],"subject":"s","body":"b","createdAt":"2026-10-22T00:00:00Z"}"#)
         XCTAssertEqual(d.cc, [])
+        // Older brain: no kind/readback/when.
+        XCTAssertEqual(d.kind, "email")
+        XCTAssertEqual(d.readback, "")
+        XCTAssertNil(d.when)
+        let hold = try decode(Draft.self, #"{"id":"h","kind":"calendar_hold","to":[],"subject":"Focus","body":"","readback":"Calendar hold, 'Focus', Tue Oct 27 9–10 am","when":{"start":"2026-10-27T15:00:00Z","end":"2026-10-27T16:00:00Z"},"createdAt":"2026-10-22T00:00:00Z"}"#)
+        XCTAssertEqual(hold.kind, "calendar_hold")
+        XCTAssertEqual(hold.when?.start, "2026-10-27T15:00:00Z")
+        XCTAssertEqual(hold.readback, "Calendar hold, 'Focus', Tue Oct 27 9–10 am")
     }
 
     func testAlerts() throws {

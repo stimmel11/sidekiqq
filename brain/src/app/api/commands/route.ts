@@ -1,6 +1,7 @@
 import { withDevice } from "@/lib/auth";
 import { HttpError, json, parseJson } from "@/lib/http";
 import { buildCommand, resolveTarget } from "@/lib/commands";
+import { nudgeCommandTarget } from "@/lib/commands/nudge";
 import { toContract } from "@/lib/repos/commands";
 import { CommandsResponseSchema, CreateCommandRequestSchema, CreateCommandResponseSchema } from "@/lib/models";
 
@@ -11,12 +12,15 @@ export const dynamic = "force-dynamic";
  * POST /api/commands — queue a command started on this device to run on another one
  * (default target: the most recently seen device that can run it, e.g. the phone for a call).
  * Commands are hand-offs: the target shows the label and the owner taps. Nothing is sent.
+ * The target then gets a silent FCM nudge (`kind: "command"`, id only) so it polls right away;
+ * polling stays the delivery guarantee.
  */
 export const POST = withDevice(async (req, { device, deps }) => {
   const body = await parseJson(req, CreateCommandRequestSchema);
   const fields = buildCommand(body);
   const target = resolveTarget(body.kind, body.target, await deps.repos.devices.list());
   const row = await deps.repos.commands.enqueue(fields, { id: device.id, kind: device.kind }, target.id);
+  await nudgeCommandTarget(deps, target, row.id);
   return json(CreateCommandResponseSchema.parse({ command: toContract(row), deviceId: target.id, device: target.kind }), { status: 201 });
 });
 

@@ -174,12 +174,13 @@ describe("POST /api/commands + GET /api/commands", () => {
     expect((await create(watch.token, { kind: "call_contact", number: "5550100", target: { deviceId: phone.device.id } })).status).toBe(201);
   });
 
-  it("never sends mail or pushes anything", async () => {
+  it("never sends mail or pushes an alert (only a silent nudge, covered in command-nudge.test.ts)", async () => {
     await create(watch.token, { kind: "call_contact", number: "5550142" });
     await create(watch.token, { kind: "open_url", url: "https://www.kroger.com/cart" });
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
     expect(deps.ws.createDraft).not.toHaveBeenCalled();
     expect(deps.pushFake.sent).toEqual([]);
+    expect(await deps.repos.alerts.latestSeq()).toBe(0);
   });
 });
 
@@ -294,7 +295,8 @@ describe("only the commands route can queue commands (static)", () => {
 
   it("no other source file calls commands.enqueue", () => {
     const callers = walk(SRC).filter((f) => /\bcommands\s*\.\s*enqueue\b|\benqueue\s*\(/.test(readFileSync(f, "utf8")));
-    expect(callers.map((f) => path.relative(SRC, f)).sort()).toEqual(["app/api/commands/route.ts", "lib/repos/commands.ts"]);
+    // lib/assistant/tools.ts: call_on_phone (slice 2b), number bound by lib/commands/call.ts.
+    expect(callers.map((f) => path.relative(SRC, f)).sort()).toEqual(["app/api/commands/route.ts", "lib/assistant/tools.ts", "lib/repos/commands.ts"]);
     expect(callers).toContain(ROUTE);
   });
 });

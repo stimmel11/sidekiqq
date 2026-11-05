@@ -19,12 +19,21 @@ export interface PushResult {
 export interface PushSender {
   readonly enabled: boolean;
   send(tokens: string[], msg: PushMessage): Promise<PushResult>;
+  /**
+   * A silent, data-only message with NO title/body keys (e.g. the device-command nudge), so a
+   * client that doesn't know `data.kind` has nothing to show. Never used for alerts.
+   */
+  sendData(tokens: string[], data: Record<string, string>, priority?: "high" | "normal"): Promise<PushResult>;
 }
 
 export class NoopPushSender implements PushSender {
   readonly enabled = false;
   async send(tokens: string[], msg: PushMessage): Promise<PushResult> {
     console.info(`[push] FCM not configured; would send "${msg.title}" to ${tokens.length} device(s)`);
+    return { sent: 0, failed: 0, invalidTokens: [] };
+  }
+  async sendData(tokens: string[], data: Record<string, string>): Promise<PushResult> {
+    console.info(`[push] FCM not configured; would send a "${data.kind}" data message to ${tokens.length} device(s)`);
     return { sent: 0, failed: 0, invalidTokens: [] };
   }
 }
@@ -60,6 +69,12 @@ export function buildMulticast(tokens: string[], msg: PushMessage) {
   };
 }
 
+/** Data-only multicast without title/body (see PushSender.sendData). */
+export function buildDataMulticast(tokens: string[], data: Record<string, string>, priority: "high" | "normal" = "normal") {
+  const { title: _t, body: _b, ...rest } = data;
+  return { tokens, data: rest, android: { priority } };
+}
+
 export class FcmPushSender implements PushSender {
   readonly enabled = true;
   private messagingPromise: Promise<import("firebase-admin/messaging").Messaging> | null = null;
@@ -81,7 +96,20 @@ export class FcmPushSender implements PushSender {
     const unique = [...new Set(tokens)].filter(Boolean);
     if (!unique.length) return { sent: 0, failed: 0, invalidTokens: [] };
     const messaging = await this.messaging();
-    const res = await messaging.sendEachForMulticast(buildMulticast(unique, msg));
+    return this.collect(unique, await messaging.sendEachForMulticast(buildMulticast(unique, msg)));
+  }
+
+  async sendData(tokens: string[], data: Record<string, string>, priority: "high" | "normal" = "normal"): Promise<PushResult> {
+    const unique = [...new Set(tokens)].filter(Boolean);
+    if (!unique.length) return { sent: 0, failed: 0, invalidTokens: [] };
+    const messaging = await this.messaging();
+    return this.collect(unique, await messaging.sendEachForMulticast(buildDataMulticast(unique, data, priority)));
+  }
+
+  private collect(
+    unique: string[],
+    res: { successCount: number; failureCount: number; responses: { success: boolean; error?: { code: string } }[] },
+  ): PushResult {
     const invalidTokens: string[] = [];
     res.responses.forEach((r, i) => {
       if (!r.success && r.error && INVALID_TOKEN_CODES.has(r.error.code)) invalidTokens.push(unique[i] as string);
