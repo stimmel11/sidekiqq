@@ -39,9 +39,17 @@ export function checkApprovalConfirmation(
 
 export type ActionOutcome = { ok: true } | { ok: false; error: string };
 
+/** Route error codes whose own message is the one to show (more specific than the status). */
+const CODE_MESSAGES: Record<string, string> = {
+  changed_in_provider: "The draft was changed in Gmail after it was drafted, so nothing was sent. It has been marked discarded; review it in Gmail.",
+  no_provider_draft: "This draft has no Gmail draft attached, so it can't be sent from here.",
+  unsupported_kind: "This kind of draft can't be approved yet. Nothing was sent.",
+};
+
 function outcome(r: RouteResult, messages: Record<number, string> = {}): ActionOutcome {
   if (r.status >= 200 && r.status < 300) return { ok: true };
-  return { ok: false, error: messages[r.status] ?? r.body.error ?? `Request failed (${r.status}).` };
+  const byCode = r.body.code ? CODE_MESSAGES[r.body.code] : undefined;
+  return { ok: false, error: byCode ?? messages[r.status] ?? r.body.error ?? `Request failed (${r.status}).` };
 }
 
 export async function approveDraftFromDashboard(

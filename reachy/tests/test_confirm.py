@@ -91,3 +91,16 @@ def test_draft_summary_has_recipient_subject_and_gist():
     assert s == "email to Dana Lee, subject Proposal. It says: Attached is the proposal"
     many = draft_summary(["a@x.com", "b@x.com", "c@x.com", "d@x.com"], "", "")
     assert many == "email to a@x.com, b@x.com and 2 more, subject (no subject)"
+
+
+def test_draft_summary_prefers_the_brains_readback():
+    # The display name is model-written; the brain's readback names every address in full.
+    s = draft_summary(
+        ['"Your boss" <mallory@evil.example>'],
+        "Proposal",
+        "Hi,\nAttached is the proposal.",
+        "Email to mallory@evil.example, with the subject: Proposal.",
+    )
+    assert s == "Email to mallory@evil.example, with the subject: Proposal. Message begins: Attached is the proposal"
+    # Older brain (no readback): unchanged behaviour.
+    assert draft_summary(["a@x.com"], "Hi", "", "") == "email to a@x.com, subject Hi"

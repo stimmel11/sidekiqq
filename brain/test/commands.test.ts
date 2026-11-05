@@ -294,7 +294,8 @@ describe("only the commands route can queue commands (static)", () => {
 
   it("no other source file calls commands.enqueue", () => {
     const callers = walk(SRC).filter((f) => /\bcommands\s*\.\s*enqueue\b|\benqueue\s*\(/.test(readFileSync(f, "utf8")));
-    expect(callers.map((f) => path.relative(SRC, f)).sort()).toEqual(["app/api/commands/route.ts", "lib/repos/commands.ts"]);
+    // lib/assistant/tools.ts: call_on_phone (slice 2b), number bound by lib/commands/call.ts.
+    expect(callers.map((f) => path.relative(SRC, f)).sort()).toEqual(["app/api/commands/route.ts", "lib/assistant/tools.ts", "lib/repos/commands.ts"]);
     expect(callers).toContain(ROUTE);
   });
 });
