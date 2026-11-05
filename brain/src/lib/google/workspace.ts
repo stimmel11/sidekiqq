@@ -56,6 +56,28 @@ export interface DraftInput {
   threadId?: string;
 }
 
+/** Raw header values of a provider draft, for the approve-time drift check. */
+export interface DraftEnvelope {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+}
+
+/** RFC 2047 encoded-words (`=?UTF-8?B?...?=` / `?Q?`) → text; plain values pass through. */
+export function decodeEncodedWords(value: string): string {
+  return value
+    .replace(/\?=\s+=\?/g, "?==?") // whitespace between adjacent encoded-words is not part of the text
+    .replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (whole, charset: string, enc: string, text: string) => {
+      if (!/^utf-?8$/i.test(charset) && !/^(us-)?ascii$/i.test(charset) && !/^iso-8859-1$/i.test(charset)) return whole;
+      const bytes =
+        enc.toUpperCase() === "B"
+          ? Buffer.from(text, "base64")
+          : Buffer.from(text.replace(/_/g, " ").replace(/=([0-9a-fA-F]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16))), "latin1");
+      return bytes.toString(/^iso-8859-1$/i.test(charset) ? "latin1" : "utf8");
+    });
+}
+
 export interface Workspace {
   searchGmail(query: string, maxResults: number): Promise<EmailSummary[]>;
   getThread(threadId: string): Promise<EmailMessage[]>;
@@ -64,7 +86,8 @@ export interface Workspace {
   listCalendarEvents(opts: { timeMin: string; timeMax: string; query?: string; maxResults: number }): Promise<CalendarEvent[]>;
   searchDrive(query: string, maxResults: number, includeContent: boolean): Promise<DriveFile[]>;
   createDraft(input: DraftInput): Promise<{ gmailDraftId: string; threadId?: string }>;
-  draftExists(gmailDraftId: string): Promise<boolean>;
+  /** The draft's To/Cc/Subject header values as Gmail holds them now, or null if it no longer exists. */
+  getDraftEnvelope(gmailDraftId: string): Promise<DraftEnvelope | null>;
   ownerEmail(): Promise<string | undefined>;
 }
 
@@ -272,12 +295,14 @@ export class GoogleWorkspace implements Workspace {
     return { gmailDraftId: res.data.id, ...(threadId ? { threadId } : {}) };
   }
 
-  async draftExists(gmailDraftId: string): Promise<boolean> {
+  async getDraftEnvelope(gmailDraftId: string): Promise<DraftEnvelope | null> {
     try {
-      const res = await this.gmail.users.drafts.get({ userId: "me", id: gmailDraftId, format: "minimal" });
-      return Boolean(res.data.id);
+      const res = await this.gmail.users.drafts.get({ userId: "me", id: gmailDraftId, format: "metadata" });
+      if (!res.data.id || !res.data.message) return null;
+      const m = res.data.message;
+      return { to: header(m, "To"), cc: header(m, "Cc"), bcc: header(m, "Bcc"), subject: decodeEncodedWords(header(m, "Subject")) };
     } catch (err) {
-      if ((err as { code?: number }).code === 404) return false;
+      if ((err as { code?: number }).code === 404) return null;
       throw err;
     }
   }

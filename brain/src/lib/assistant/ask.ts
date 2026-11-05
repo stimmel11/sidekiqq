@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Deps } from "../deps";
 import { config } from "../env";
-import type { Action, AskRequest, AskResponse } from "../models";
+import type { Action, AskRequest, AskResponse, DeviceKind } from "../models";
 import { newId } from "../util";
 import { runtimeContext, systemBlocks } from "./prompt";
 import { KnownAddresses } from "./recipients";
@@ -16,7 +16,7 @@ import { executeTool, PROVENANCE_TOOLS, RESPOND_TOOL, RespondSchema, toolDefinit
  *     we force that tool so the loop always terminates with a structured answer.
  *  4. `spoken` is length-guarded server-side regardless of what the model produced.
  */
-export async function runAsk(deps: Deps, req: AskRequest): Promise<AskResponse> {
+export async function runAsk(deps: Deps, req: AskRequest, origin?: { deviceId: string; deviceKind: DeviceKind }): Promise<AskResponse> {
   const now = deps.clock();
   const conversationId = req.conversationId ?? newId("conv");
   const history = await deps.repos.conversations.load(conversationId);
@@ -35,7 +35,15 @@ export async function runAsk(deps: Deps, req: AskRequest): Promise<AskResponse> 
   const knownAddresses = new KnownAddresses();
   for (const t of history) if (t.role === "user") knownAddresses.addText(t.content);
   knownAddresses.addText(req.text);
-  const ctx: ToolContext = { deps, now, device: req.device, actions, knownAddresses };
+  // `request` binds call_on_phone to this owner request: its text and the asking device.
+  const ctx: ToolContext = {
+    deps,
+    now,
+    device: req.device,
+    actions,
+    knownAddresses,
+    ...(origin ? { request: { text: req.text, deviceId: origin.deviceId, deviceKind: origin.deviceKind }, lookedUp: new Map() } : {}),
+  };
   const maxIterations = config.maxToolIterations();
   const llm = deps.llm();
 

@@ -152,7 +152,7 @@ describe('"email this <dictated paragraph> to <contact>" through /api/ask', () =
       () => msg([draftCall(["dana@acme.com"])]), // guessed from "Dana at ACME"
       () => msg([draftCall(["dana@acme.com"])]), // stubborn retry: the error text itself must not whitelist it
       () => msg([toolUse("lookup_contact", { name: "Dana" })]),
-      () => msg([draftCall(["Dana Kim <dana@acme.com>"])]),
+      () => msg([draftCall(["dana@acme.com"])]), // bare address: display names are refused since #16
       respond,
     ]);
     const deps = makeDeps({ llm, now: NOW });
