@@ -33,6 +33,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
 - 2026-11-01: Start-up-Reachy slice 1 (`crew/reachy-start`): phone Reachy card starts `sidekiqq_reachy` through the LAN daemon (no-evict, `.local` only) and queues `reachy_wake`. Android unverified; 16 JVM tests pass via kotlinc.
+- 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 
 ## Backlog (top = next)
 
@@ -64,6 +65,9 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
 - [ ] Connector: Kroger / King Soopers (public API: product search, add to cart; NO checkout or pickup-slot API). Task: "here's my grocery list" fills the cart, then hands checkout to the phone. Never automate payment.
 - [ ] Connectors: Outlook / Microsoft 365, generic IMAP/SMTP; investigate Instacart's developer platform terms for other grocery chains.
 - [ ] "Request a connector" flow: the build crew generates an MCP connector, opens a PR, and the owner approves before it goes live.
+  - [x] Slice 1 (`crew/connector-requests`): `ConnectorRequest` log (status lifecycle with fixed transitions, de-dup by service, 50 open max, no URLs/host names in request text), owner-only `GET/POST /api/connector-requests` + `PATCH /:id`, Claude tool `request_connector` (owner's own request only; built-in Google services pointed at Connect instead). Flow + crew pickup in `docs/CONNECTOR_REQUESTS.md`.
+  - [ ] Slice 2: requests on the dashboard Connections screen (accept / decline / PR link / "copy as backlog item") once that screen (PR #15) is on `main`; optional `connector_requested` Action type (contract + TS + Kotlin).
+  - [ ] Slice 3: crew template for generated connectors (manifest skeleton + required tests).
 - [ ] Android Auto: messaging-style alerts + voice reply via the phone app, plus a simple Car App Library screen (Top 5, Talk). Driving mode: voice only, no full email on screen, drafts still need a spoken "send it", screen-only tasks wait until parked.
 
 ### Apple support (owner request, 2026-10-21)
