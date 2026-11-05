@@ -149,11 +149,14 @@ describe("OutlookMail.getMessage / getThread / account", () => {
     }));
     const msgs = await mail(g).getThread("conv1");
     expect(msgs.map((m) => m.id)).toEqual(["m1", "m2"]);
-    expect(g.calls[0]!.url.searchParams.get("$filter")).toBe("conversationId eq 'conv1'");
+    // Newest first from Graph (so the 50 cap keeps the latest), oldest first in the output.
+    expect(g.calls[0]!.url.searchParams.get("$filter")).toBe("receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq 'conv1'");
+    expect(g.calls[0]!.url.searchParams.get("$orderby")).toBe("receivedDateTime desc");
     expect(g.calls[0]!.url.searchParams.get("$top")).toBe("10");
   });
 
-  it("pages a long conversation 10 at a time, stops at 50 and never fetches a page it won't use", async () => {
+  it("pages a long conversation 10 at a time, stops at 50 with a warning and never fetches a page it won't use", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let page = 0;
     const g = new FakeGraph(() => {
       const p = page++;
@@ -167,6 +170,8 @@ describe("OutlookMail.getMessage / getThread / account", () => {
     const msgs = await mail(g).getThread("conv1");
     expect(msgs).toHaveLength(50);
     expect(g.calls).toHaveLength(5);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/50-message cap/));
+    warn.mockRestore();
   });
 
   it("an empty conversation is not found", async () => {
@@ -265,7 +270,10 @@ describe("errors", () => {
     expect(rl).toBeInstanceOf(OutlookRateLimitError);
     expect((rl as OutlookRateLimitError).retryAfterSec).toBe(7);
     await expect(mail(new FakeGraph(() => ({ status: 503 }))).search("x", 1)).rejects.toBeInstanceOf(OutlookRateLimitError);
-    await expect(mail(new FakeGraph(() => ({ status: 400 }))).search("x", 1)).rejects.toBeInstanceOf(OutlookInputError);
+    await expect(mail(new FakeGraph(() => ({ status: 400 }))).search("x", 1)).rejects.toThrow(/couldn't run that search/);
+    const bad = await mail(new FakeGraph(() => ({ status: 400 }))).getMessage("m1").catch((e: unknown) => e);
+    expect(bad).toBeInstanceOf(OutlookInputError);
+    expect((bad as Error).message).not.toMatch(/search/);
     await expect(mail(new FakeGraph(() => ({ status: 502 }))).search("x", 1)).rejects.toBeInstanceOf(OutlookUnavailableError);
     await expect(mail(new FakeGraph(() => ({ raw: "not json" }))).search("x", 1)).rejects.toBeInstanceOf(OutlookUnavailableError);
   });
@@ -300,7 +308,12 @@ describe("cleaning third-party text", () => {
 
   it("formats addresses without duplicate names and drops invalid ones", () => {
     expect(formatAddress({ emailAddress: { name: "dana@acme.com", address: "dana@acme.com" } })).toBe("dana@acme.com");
-    expect(formatAddress({ emailAddress: { name: "Dana", address: "bad address" } })).toBe("");
+    // No usable address (e.g. legacy Exchange DN): keep the name, never invent an address.
+    expect(formatAddress({ emailAddress: { name: "Dana", address: "bad address" } })).toBe("Dana");
+    expect(formatAddress({ emailAddress: { name: "Dana Kim", address: "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=abc123-dana" } })).toBe("Dana Kim");
+    expect(toMessage(gm("m1", { from: { emailAddress: { name: "Dana Kim", address: "/O=EXCHANGELABS/OU=X/CN=RECIPIENTS/CN=dana" } } })).from).toBe("Dana Kim");
+    expect(formatAddress({ emailAddress: { name: "chris@owner.com", address: "/O=EXCHANGELABS/CN=x" } })).toBe("");
+    expect(formatAddress({ emailAddress: { name: null, address: null } })).toBe("");
     expect(formatAddress(null)).toBe("");
     // A display name that looks like an address can't impersonate the owner.
     expect(formatAddress({ emailAddress: { name: "chris@owner.com", address: "evil@x.com" } })).toBe("evil@x.com");

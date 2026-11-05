@@ -148,14 +148,18 @@ function assertMax(max: number, limit: number): number {
   return max;
 }
 
-/** `Name <addr>` like a Gmail header, or just the address. Unusable addresses are dropped. */
+/**
+ * `Name <addr>` like a Gmail header, or just the address. An unusable address (e.g. a legacy Exchange
+ * `/O=EXCHANGELABS/...` DN) is dropped and only the display name is kept; no address is invented.
+ */
 export function formatAddress(a: GraphEmailAddress | null | undefined): string {
   const addr = cleanEmail(a?.emailAddress?.address, { allowPunycode: true });
-  if (!addr) return "";
-  const name = cleanText(a?.emailAddress?.name, 100).replace(/[<>"]/g, "").trim();
   // A display name with "@" in it can impersonate another address ("chris@owner.com <evil@x.com>"),
   // so it is dropped and only the real address is shown.
-  return name && !name.includes("@") && name.toLowerCase() !== addr ? `${name} <${addr}>` : addr;
+  const raw = cleanText(a?.emailAddress?.name, 100).replace(/[<>"]/g, "").trim();
+  const name = raw.includes("@") ? "" : raw;
+  if (!addr) return name;
+  return name && name.toLowerCase() !== addr ? `${name} <${addr}>` : addr;
 }
 
 function formatList(list: GraphEmailAddress[] | null | undefined): string {
@@ -268,7 +272,9 @@ export class OutlookMail {
     const q = cleanSearchQuery(query);
     assertMax(max, OUTLOOK_SEARCH_MAX);
     const url = buildUrl("/me/messages", { $search: `"${q}"`, $top: String(max), $select: SUMMARY_FIELDS.join(",") });
-    const page = await this.get<GraphPage<GraphMessage>>(url);
+    const page = await this.get<GraphPage<GraphMessage>>(url).catch((err: unknown) => {
+      throw err instanceof OutlookInputError ? new OutlookInputError("Outlook couldn't run that search. Try simpler words.") : err;
+    });
     return (page.value ?? []).filter(usable).slice(0, max).map(toSummary);
   }
 
@@ -316,16 +322,26 @@ export class OutlookMail {
     return toMessage(m);
   }
 
-  /** Every message in the conversation, oldest first (like a Gmail thread), up to 50. */
+  /**
+   * The newest 50 messages in the conversation, returned oldest first (like a Gmail thread). Graph
+   * only accepts `$orderby` when its property also appears first in `$filter`, hence the always-true
+   * `receivedDateTime ge 1900-...` clause.
+   */
   async getThread(conversationId: string): Promise<EmailMessage[]> {
     const cid = assertGraphId(conversationId, "conversation");
     const url = buildUrl("/me/messages", {
-      $filter: `conversationId eq '${cid.replace(/'/g, "''")}'`,
+      $filter: `receivedDateTime ge 1900-01-01T00:00:00Z and conversationId eq '${cid.replace(/'/g, "''")}'`,
+      $orderby: "receivedDateTime desc",
       $top: String(THREAD_PAGE),
       $select: MESSAGE_FIELDS.join(","),
     });
     const msgs: GraphMessage[] = [];
-    for await (const m of this.pages<GraphMessage>(url, OUTLOOK_THREAD_MAX)) if (usable(m) && m.conversationId === cid) msgs.push(m);
+    let n = 0;
+    for await (const m of this.pages<GraphMessage>(url, OUTLOOK_THREAD_MAX)) {
+      n++;
+      if (usable(m) && m.conversationId === cid) msgs.push(m);
+    }
+    if (n >= OUTLOOK_THREAD_MAX) console.warn(`[outlook] conversation reached the ${OUTLOOK_THREAD_MAX}-message cap; older messages may be left out`);
     if (!msgs.length) throw new OutlookNotFoundError("conversation");
     const at = (m: GraphMessage) => Date.parse(m.receivedDateTime ?? m.sentDateTime ?? "") || 0;
     return msgs.sort((a, b) => at(a) - at(b)).map(toMessage);
@@ -401,7 +417,7 @@ export class OutlookMail {
       const ra = Number(res.headers.get("retry-after"));
       throw new OutlookRateLimitError(Number.isFinite(ra) && ra > 0 ? ra : undefined);
     }
-    if (res.status === 400) throw new OutlookInputError("Outlook refused that request. If it was a search, try simpler words.");
+    if (res.status === 400) throw new OutlookInputError("Outlook refused that request.");
     if (!res.ok) throw new OutlookUnavailableError(`HTTP ${res.status}`);
     try {
       return JSON.parse(text) as T;
