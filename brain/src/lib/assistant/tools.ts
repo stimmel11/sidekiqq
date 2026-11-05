@@ -19,6 +19,7 @@ import {
 import { config } from "../env";
 import { buildCommand, CommandError, resolveTarget } from "../commands";
 import { recordLookup, resolveCallNumber, type LookedUpContacts } from "../commands/call";
+import { nudgeCommandTarget } from "../commands/nudge";
 import { normalizeOwnerDate, truncate } from "../util";
 import { toolSchema, type ToolDef } from "./llm";
 
@@ -213,13 +214,14 @@ const callOnPhone = tool({
         })
         .catch((err: unknown) => console.warn("[audit] write failed", err));
     let row;
+    let target;
     try {
       const call = resolveCallNumber(
         input.contactId ? { contactId: input.contactId, phone: input.phone } : { spokenNumber: input.spokenNumber! },
         { ownerText: origin.text, lookedUp: ctx.lookedUp },
       );
       const fields = buildCommand({ kind: "call_contact", number: call.number, ...(call.name ? { name: call.name } : {}), app: input.app });
-      const target = resolveTarget("call_contact", undefined, await deps.repos.devices.list());
+      target = resolveTarget("call_contact", undefined, await deps.repos.devices.list());
       row = await deps.repos.commands.enqueue(fields, { id: origin.deviceId, kind: origin.deviceKind }, target.id);
     } catch (err) {
       // CommandError messages are code-built and never include the number.
@@ -228,6 +230,8 @@ const callOnPhone = tool({
     }
     await audit(true);
     ctx.callQueued = true;
+    // Same silent, id-only FCM nudge as POST /api/commands (best effort, never throws).
+    await nudgeCommandTarget(deps, target, row.id);
     return {
       queued: true,
       label: row.label,

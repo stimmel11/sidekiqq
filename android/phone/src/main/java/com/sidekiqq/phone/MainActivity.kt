@@ -62,6 +62,7 @@ import com.sidekiqq.phone.glasses.GlassesSessionService
 import com.sidekiqq.phone.handoff.HandoffPlan
 import com.sidekiqq.phone.handoff.Handoffs
 import com.sidekiqq.phone.medallion.MedallionService
+import com.sidekiqq.phone.push.SideKiqqMessagingService
 import com.sidekiqq.phone.ui.ApproveDraftDialog
 import com.sidekiqq.phone.ui.BriefScreen
 import com.sidekiqq.phone.ui.CommitmentsScreen
@@ -90,16 +91,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         initialTab = tabFrom(intent)
         setContent { SideKiqqTheme { App(vm, initialTab) } }
-        // Hand-offs from other devices: poll on open/resume and every 30 s while visible.
-        // Delivery is polling only for now (FCM nudge is a later slice).
+        // Hand-offs from other devices: poll on open/resume, every 30 s while visible, and at once
+        // when an FCM command nudge arrives (SideKiqqMessagingService -> app.commandNudges).
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val app = sideKiqqApp
+                app.onHandoffScreenStarted()
+                SideKiqqMessagingService.clearHandoffWaiting(this@MainActivity)
+                val nudges = launch { app.commandNudges.collect { vm.pollCommands(force = true) } }
                 try {
                     while (isActive) {
                         vm.pollCommands()
                         delay(COMMAND_POLL_MS)
                     }
                 } finally {
+                    app.onHandoffScreenStopped()
+                    nudges.cancel()
                     // Never show a hand-off from before the app was backgrounded; wait for a fresh poll.
                     vm.onCommandsHidden()
                 }

@@ -79,6 +79,9 @@ is defined in `docs/CONNECTORS.md` §9. Devices get no connector endpoints.
 
 Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"\|"connection_needs_reauth"), optional
 `importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
+One more FCM data message is **not an alert**: the command nudge `{ "kind": "command", "commandId": string }`, with
+no `title`/`body`, sent only to the target device of a newly queued command (see Device commands). Clients must check
+`kind` first and never show, relay or log it as an alert.
 Every alert is also written to a 7-day alert log (`lib/push/alerts.ts` → `deliverAlert`), so `GET /api/alerts`
 returns exactly the same title/body/data as the push.
 
@@ -140,8 +143,13 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   calendar (`lib/commands/call.ts`). One call per request; every attempt, refusals included, is audited as
   `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
   phone. Other connector hand-offs will go through `invokeCapability` with the caller rules in `docs/CONNECTORS.md` §4.4.
-- Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`) for now;
-  an FCM nudge is a later slice.
+- Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
+  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands` or `call_on_phone`) (high priority,
+  data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
+  Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
+  The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no
+  action except opening the app). A nudge is never an alert: not in the alert log, not relayed to the watch, no
+  medallion haptic.
 
 ## Safety rules baked in (from the EA operating system)
 - Nothing is ever sent automatically. The brain creates drafts; sending requires `/api/drafts/:id/approve`,
