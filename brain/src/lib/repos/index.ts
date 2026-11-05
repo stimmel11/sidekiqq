@@ -4,6 +4,7 @@ import { AuditRepo } from "./audit";
 import { ClientsRepo } from "./clients";
 import { CommandsRepo } from "./commands";
 import { CommitmentsRepo } from "./commitments";
+import { ConnectorRequestsRepo } from "./connector-requests";
 import { ConversationsRepo } from "./conversations";
 import { DecisionsRepo } from "./decisions";
 import { DevicesRepo } from "./devices";
@@ -27,6 +28,7 @@ export interface Repos {
   alerts: AlertsRepo;
   commands: CommandsRepo;
   audit: AuditRepo;
+  connectorRequests: ConnectorRequestsRepo;
 }
 
 export interface RepoOptions {
@@ -54,7 +56,8 @@ export function createRepos(kv: KV, o: RepoOptions): Repos {
     alerts: new AlertsRepo(kv, o.prefix, clock, o.alertRetentionDays ?? 7),
     commands: new CommandsRepo(kv, o.prefix, clock),
     audit: new AuditRepo(kv, o.prefix, clock),
+    connectorRequests: new ConnectorRequestsRepo(kv, o.prefix, clock),
   };
 }
 
-export { AlertsRepo, AuditRepo, ClientsRepo, CommandsRepo, CommitmentsRepo, ConversationsRepo, DecisionsRepo, DevicesRepo, DraftsRepo, FollowUpsRepo, PairingRepo, StateRepo, TimelineRepo };
+export { AlertsRepo, AuditRepo, ClientsRepo, CommandsRepo, CommitmentsRepo, ConnectorRequestsRepo, ConversationsRepo, DecisionsRepo, DevicesRepo, DraftsRepo, FollowUpsRepo, PairingRepo, StateRepo, TimelineRepo };

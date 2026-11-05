@@ -64,11 +64,12 @@ export function withDevice<P = Record<string, never>>(
 }
 
 /** Same as withDevice but for owner-secret endpoints. */
-export function withOwner(handler: (req: NextRequest, ctx: { deps: Deps }) => Promise<Response>) {
-  return async (req: NextRequest): Promise<Response> => {
+export function withOwner<P = Record<string, never>>(handler: (req: NextRequest, ctx: { deps: Deps; params: P }) => Promise<Response>) {
+  return async (req: NextRequest, ctx?: RouteCtx<P>): Promise<Response> => {
     try {
       requireOwner(req);
-      return await handler(req, { deps: getDeps() });
+      const params = ctx?.params ? await ctx.params : ({} as P);
+      return await handler(req, { deps: getDeps(), params });
     } catch (err) {
       return errorResponse(err);
     }
