@@ -497,7 +497,8 @@ const upsertClientProfile = tool({
  * echo what the model passed, so an address in their result proves nothing.
  */
 export const PROVENANCE_TOOLS: ReadonlySet<string> = new Set([
-  "search_gmail",
+  "search_email",
+  "search_gmail", // alias of search_email (TOOL_ALIASES)
   "get_email_thread",
   "list_calendar_events",
   "search_drive",

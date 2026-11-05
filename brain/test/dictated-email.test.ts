@@ -3,7 +3,7 @@ import { setDeps } from "@/lib/deps";
 import { AskResponseSchema } from "@/lib/models";
 import { runtimeContext } from "@/lib/assistant/prompt";
 import { extractAddresses, KnownAddresses, normalizeAddress } from "@/lib/assistant/recipients";
-import { executeTool, type ToolContext } from "@/lib/assistant/tools";
+import { executeTool, PROVENANCE_TOOLS, TOOL_ALIASES, TOOL_NAMES, type ToolContext } from "@/lib/assistant/tools";
 import { makeDeps, msg, pairDevice, params, req, ScriptedLLM, toolUse, type TestDeps } from "./fakes";
 import { POST as ask } from "@/app/api/ask/route";
 
@@ -242,6 +242,29 @@ describe('"email this <dictated paragraph> to <contact>" through /api/ask', () =
     await run(deps, "Reply to Dana's lunch email and her ops team: running ten minutes late.");
     expect(resultsOn(llm, 2)[0]!.is_error).toBeUndefined();
     expect(deps.ws.createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["search_email", "search_gmail"])("accepts recipients found by %s (and its alias)", async (tool) => {
+    const llm = new ScriptedLLM([
+      () => msg([toolUse(tool, { query: "from:dana" })]),
+      () => msg([draftCall(["dana@acme.com"])]),
+      respond,
+    ]);
+    const deps = makeDeps({ llm, now: NOW });
+    deps.ws.messages = [
+      { id: "m1", threadId: "t1", from: "Dana Kim <dana@acme.com>", to: "stimmel@example.com", subject: "Lunch", date: NOW.toISOString(), snippet: "", labels: [], cc: "", body: "hi" },
+    ];
+    await run(deps, "Find Dana's last email and tell her I'm running late.");
+    expect(resultsOn(llm, 1)[0]!.is_error).toBeUndefined();
+    expect(resultsOn(llm, 2)[0]!.is_error).toBeUndefined();
+    expect(deps.ws.createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("every provenance tool is a real tool or alias, and none is a write tool", () => {
+    for (const name of PROVENANCE_TOOLS) expect(TOOL_NAMES.includes(name) || Object.hasOwn(TOOL_ALIASES, name)).toBe(true);
+    for (const w of ["add_commitment", "update_commitment", "upsert_client_profile", "record_decision", "create_email_draft", "call_on_phone", "request_connector"]) {
+      expect(PROVENANCE_TOOLS.has(w)).toBe(false);
+    }
   });
 
   it("after a 'which Dana?' question, needs a fresh lookup on the next turn", async () => {
