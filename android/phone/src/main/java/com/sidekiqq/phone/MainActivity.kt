@@ -16,6 +16,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -70,6 +71,7 @@ import com.sidekiqq.phone.ui.FollowUpsScreen
 import com.sidekiqq.phone.ui.HandoffDialog
 import com.sidekiqq.phone.ui.HomeScreen
 import com.sidekiqq.phone.ui.PairingScreen
+import com.sidekiqq.phone.ui.ReachyCard
 import com.sidekiqq.phone.ui.SectionCard
 import com.sidekiqq.phone.ui.theme.SideKiqqTheme
 import com.sidekiqq.phone.voice.AudioCapture
@@ -256,7 +258,17 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
     ) { pad ->
         val m = Modifier.padding(pad)
         when (tab) {
-            Tab.HOME -> HomeScreen(state, onApproveAnswerDraft = { approveAction = it }, wearables = { WearablesCard(vm) }, modifier = m)
+            Tab.HOME -> HomeScreen(state, onApproveAnswerDraft = { approveAction = it }, wearables = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        WearablesCard(vm)
+                        ReachyCard(
+                            host = state.reachyHost,
+                            starting = state.reachyStarting,
+                            onStart = vm::startReachy,
+                            onSaveHost = vm::setReachyHost,
+                        )
+                    }
+                }, modifier = m)
             Tab.FOLLOWUPS -> FollowUpsScreen(state.followUps, onApprove = { approveFollowUp = it }, modifier = m)
             Tab.COMMITMENTS -> CommitmentsScreen(
                 state.commitments, state.commitmentFilter, vm::setCommitmentFilter, { vm.completeCommitment(it.id) }, m,
