@@ -33,6 +33,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-10-26: Connector framework slice 2 (`crew/connection-store`): encrypted per-connector `ConnectionStore` with key rotation, Google token migration, PKCE, enabled capabilities and `needs_reauth` checked in `invokeCapability`. 345 brain tests.
 - 2026-10-28: Google Contacts slice 2 (`crew/contacts-capability`): `contacts.lookup` registered on the `google` connector (audited, background-readable), Claude tool `lookup_contact` (ambiguity → ask, never guess an address), wired in `deps`. 332 brain tests.
 - 2026-11-03: Outlook slice 1 (`crew/outlook-mail-read`): read-only Microsoft Graph mail module with Gmail-shaped output, Graph send endpoints added to the no-send scan. 393 brain tests.
+- 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 
 ## Backlog (top = next)
 
@@ -64,6 +65,9 @@ SideKiqq should connect to any email, video and grocery service, and run tasks s
   - [ ] Slice 2: `outlook` connector + Microsoft OAuth (PKCE, ConnectionStore, plugs into `/api/connections` from PR #15), `email.read` registration. Decide `list_ids` → provider-neutral `{since, max}` (the scanner builds a Gmail query today); consider `inferenceClassification eq 'focused'` as the promotions filter. Graph wire details (`%24search` encoding, `$search` order, nextLink paths) are from memory: check against a real mailbox.
   - [ ] Slice 3: `email.draft` (`Mail.ReadWrite`, `createReply` for threads) + `lib/connectors/outlook/send.ts` executor (`Mail.Send`) in the sender registry. Then generic IMAP/SMTP, then Instacart terms.
 - [ ] "Request a connector" flow: the build crew generates an MCP connector, opens a PR, and the owner approves before it goes live.
+  - [x] Slice 1 (`crew/connector-requests`): `ConnectorRequest` log (status lifecycle with fixed transitions, de-dup by service, 50 open max, no URLs/host names in request text), owner-only `GET/POST /api/connector-requests` + `PATCH /:id`, Claude tool `request_connector` (owner's own request only; built-in Google services pointed at Connect instead). Flow + crew pickup in `docs/CONNECTOR_REQUESTS.md`.
+  - [ ] Slice 2: requests on the dashboard Connections screen (accept / decline / PR link / "copy as backlog item") once that screen (PR #15) is on `main`; optional `connector_requested` Action type (contract + TS + Kotlin).
+  - [ ] Slice 3: crew template for generated connectors (manifest skeleton + required tests).
 - [ ] Android Auto: messaging-style alerts + voice reply via the phone app, plus a simple Car App Library screen (Top 5, Talk). Driving mode: voice only, no full email on screen, drafts still need a spoken "send it", screen-only tasks wait until parked.
 
 ### Apple support (owner request, 2026-10-21)

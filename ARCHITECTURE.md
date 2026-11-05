@@ -56,6 +56,8 @@ Pairing / owner endpoints (not device-token auth):
 | POST | /api/devices/pair-code | owner secret header | `{ "label"?: string }` → `{ "code": "123456", "expiresAt": string, "ttlSeconds": number }` |
 | POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "name"?: string }` → `{ "token": string, "deviceId": string, "device": string }` |
 | POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link) |
+| GET / POST | /api/connector-requests | owner secret header | "Request a connector" log, see `docs/CONNECTOR_REQUESTS.md`. Logging a request builds, connects and enables nothing |
+| PATCH | /api/connector-requests/:id | owner secret header | `{ "status"?, "prUrl"?, "note"? }` → `{ "request" }` (owner bookkeeping only) |
 
 Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"), optional
 `importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
