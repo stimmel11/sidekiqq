@@ -173,6 +173,12 @@ with its own device token (device kind `"reachy"`): mic → endpointing → 16 k
 → `/api/speak` → robot speaker. It polls `/api/alerts` about every 60 s instead of FCM. Activation is tap-to-talk
 from its settings page (port 8042); an on-device wake word is optional and off by default, so room audio is not
 streamed to the cloud. Draft approval uses the same "send it" rule and still goes only through `/api/drafts/:id/approve`.
+The brain can't reach the home LAN, so the **phone** starts Reachy: on the owner's tap (Reachy card: Chat / Brief /
+Dance) it calls the robot's daemon over plain HTTP at a `.local` mDNS name (default `reachy-mini.local:8000`):
+`GET /api/apps/current-app-status`, then `POST /api/apps/start-app/sidekiqq_reachy/no-evict` (plain `start-app` only
+if that route is 404). It never stops or evicts another app or remote session, sends the daemon no token or owner
+data, and doesn't follow redirects. Once the app reports `running`, the phone queues `reachy_wake` with
+`POST /api/commands` (`target.device: "reachy"`); that tap is the hand-off's "user finishes" step.
 
 `reachy_wake` on Reachy: the robot has no screen, so the owner's tap is the one on the device that created the command
 (only paired owner devices can). Reachy polls `GET /api/commands` every 30 s (or the alert interval if shorter, same
