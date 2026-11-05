@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .alerts import AlertPoller, alert_speech
 from .assistant import Assistant, Outcome
+from .commands import CommandPoller, Wake, run_wake
 from .audio import EndpointConfig, EndpointEvent, Endpointer, FrameAssembler, mic_to_pcm16
 from .config import ConfigStore, SettingsError
 from .controller import Controller
@@ -85,7 +86,8 @@ def register_routes(app: Any, ctl: Controller) -> None:
 
 class VoiceLoop:
     """Mic reader + activation + endpointing on the app's main thread.
-    Network work (a voice turn, a brief, alert delivery) runs on one worker thread at a time."""
+    Network work (a voice turn, a brief, alert delivery, a wake from another device) runs on one
+    worker thread at a time. Alerts and device commands are polled on a background thread."""
 
     def __init__(self, media: Any, body: RobotBody, assistant: Assistant, ctl: Controller, stop_event: threading.Event) -> None:
         self.media = media
@@ -104,6 +106,14 @@ class VoiceLoop:
             save_cursor=ctl.save_cursor,
             interval_s=lambda: float(ctl.settings.alert_poll_seconds),
             max_age_s=lambda: float(ctl.settings.alert_max_age_minutes) * 60,
+        )
+        # reachy_wake hand-offs from the owner's other devices (GET /api/commands). Same thread and
+        # backoff as alerts; the interval is capped at 30 s like the phone's.
+        self.commands = CommandPoller(
+            client_factory=ctl.client,
+            load_handled=ctl.load_handled_commands,
+            save_handled=ctl.save_handled_commands,
+            interval_s=lambda: float(ctl.settings.alert_poll_seconds),
         )
 
     # ------------------------------------------------------------------ threads
@@ -137,6 +147,14 @@ class VoiceLoop:
                     log.info("alert poll: %s", res.error)
                 for a in res.attention:
                     self.alerts.put(a)
+            if self.commands.due():
+                cres = self.commands.poll()
+                if cres.unauthorized:
+                    self.ctl.mark_unauthorized()
+                elif cres.error and cres.error != "not paired":
+                    log.info("command poll: %s", cres.error)
+                for w in cres.new:
+                    log.info("wake from another device: %s (%s)", w.activity, w.id)
             self.stop.wait(1.0)
 
     # ------------------------------------------------------------------ actions
@@ -212,6 +230,8 @@ class VoiceLoop:
 
                 if self.ctl.cancel_requested.is_set():
                     self.ctl.cancel_requested.clear()
+                    # Also stops a listen that was requested but hasn't started (e.g. by a chat wake).
+                    self.ctl.talk_requested.clear()
                     if self.endpointer is not None and not self.assistant.awaiting_confirm:
                         self.endpointer = None
                         self.body.neutral()
@@ -252,6 +272,12 @@ class VoiceLoop:
                     self.ctl.set_status("briefing")
                     self._spawn("brief", self._brief)
                     continue
+                # A wake from another device runs only here, when nothing else is going on (it
+                # waits in CommandPoller while the robot is busy, see commands.py).
+                wake = self.commands.take()
+                if wake is not None:
+                    self._spawn("wake", self._wake, wake)
+                    continue
                 pending = self._drain_alerts()
                 if pending:
                     self._spawn("alerts", self._deliver_alerts, pending)
@@ -274,6 +300,14 @@ class VoiceLoop:
     def _brief(self) -> None:
         self.assistant.brief("daily")
         self.body.neutral()
+
+    def _wake(self, wake: Wake) -> None:
+        result = "failed"
+        try:
+            result = run_wake(wake, self.assistant, self.body, self.ctl.request_talk, on_status=self.ctl.set_status)
+        finally:
+            # Ack off the worker, so a chat's listen isn't held up by a slow brain.
+            threading.Thread(target=self.commands.complete, args=(wake, result), name="sk-ack", daemon=True).start()
 
     def _cancel_draft(self) -> None:
         self.assistant.cancel_pending()

@@ -125,6 +125,26 @@ class RobotBody:
         self._goto(0.25, yaw=-15, roll=-5, antennas=(40, -40))
         self._goto(0.4, antennas=(20, -20))
 
+    def greet(self) -> None:
+        """Woken from another device: the SDK's wake-up sound, head up, antennas perked."""
+        self.thinking_stop()
+        self._sound("wake_up.wav")
+        self._goto(0.4, pitch=-8, antennas=(40, -40))
+        self._goto(0.3, roll=6, antennas=(25, -25))
+
+    def dance(self) -> None:
+        """A short dance (about 4 s): side-to-side sways with alternating antenna flicks, to the
+        SDK's dance sound. Angles stay inside the ranges the other gestures already use."""
+        self.thinking_stop()
+        self._sound("dance1.wav")
+        for i in range(4):
+            if self.stop_event.is_set():
+                return
+            s = 1 if i % 2 == 0 else -1
+            self._goto(0.35, roll=10 * s, yaw=12 * s, pitch=-4, antennas=(50, -10) if s > 0 else (10, -50))
+            self._goto(0.3, pitch=6, antennas=(30, -30))
+        self._goto(0.5)
+
     def confused(self) -> None:
         """Couldn't reach the brain / didn't understand."""
         self.thinking_stop()
