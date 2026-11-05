@@ -130,6 +130,11 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
 6. **Cron**: `vercel.json` schedules `/api/cron/scan` every 30 minutes. Sub-daily crons require a Vercel Pro plan
    (Hobby allows daily only). The scan route sets `maxDuration = 300`.
 7. Pair devices as described above.
+8. **Zoom (optional)**: create a user-managed *General* OAuth app in the Zoom App Marketplace with the single
+   granular scope `meeting:write:meeting` and redirect URL `https://<your-domain>/api/connections/zoom/callback`,
+   then set `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET` (`ZOOM_REDIRECT_URI` overrides the default). The connect
+   route arrives with the Connections screen; until then Zoom is registered but not connected. Rooms are created
+   with a fixed request (no invitees, no Zoom emails); see `src/lib/connectors/zoom/meetings.ts`.
 
 ## Testing
 

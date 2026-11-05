@@ -20,6 +20,7 @@ const APPROVE_ROUTE = path.join(SRC, "app/api/drafts/[id]/approve/route.ts");
 const GOOGLE_SEND = path.join(SRC, "lib/connectors/google/send.ts");
 const SENDER_REGISTRY = path.join(SRC, "lib/connectors/senders.ts");
 const DEPS_MODULE = path.join(SRC, "lib/deps.ts");
+const ZOOM_MEETINGS = path.join(SRC, "lib/connectors/zoom/meetings.ts");
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -49,11 +50,17 @@ const P = {
   buildSenders: /\bbuildSenders\b/,
   importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
   smtp: /nodemailer|smtp/i,
+<<<<<<< HEAD
   // Microsoft Graph endpoints that send at once (docs/CONNECTORS.md §6). Allowed only in a future
   // lib/connectors/outlook/send.ts; nothing may contain them today. Line-based and case-insensitive
   // so concatenation, `${ id }` and OData `messages('x')/send` forms are caught too.
   // createReply/createReplyAll/createForward only make drafts, so they are not here.
   graphSend: /\bsendMail\b|\bmessages\b.*\/\s*(send|reply|replyAll|forward)\b/i,
+=======
+  // Zoom meeting creation (CONNECTORS.md §6): only lib/connectors/zoom/meetings.ts, with its fixed body.
+  // Also any other meetings endpoint (PATCH /meetings/{id}, /registrants) and the fields that make Zoom email people.
+  zoomApi: /api\.zoom(gov)?\.(us|com)|\bmeetings\/|users\/[^"'`\s]*\/meetings|meeting_invitees|alternative_hosts|schedule_for|registrants\b/,
+>>>>>>> origin/main
 } as const;
 type Prim = keyof typeof P;
 
@@ -65,6 +72,7 @@ const ALLOWED: Record<string, Prim[]> = {
   // The container constructs the registry (and declares `senders()`), but never calls a sender.
   [DEPS_MODULE]: ["gmailSender", "buildSenders", "registry", "senders"],
   [APPROVE_ROUTE]: ["senders", "execute"],
+  [ZOOM_MEETINGS]: ["zoomApi"],
 };
 
 function hits(file: string): Prim[] {
@@ -160,6 +168,17 @@ describe("no route other than draft-approve can send mail (static)", () => {
     expect(runtimeImporters(GOOGLE_SEND)).toEqual(["lib/connectors/senders.ts", "lib/deps.ts"]);
   });
 
+  it("the Zoom meetings module never names invitees, alternative hosts or schedule_for in code", () => {
+    const c = code(ZOOM_MEETINGS);
+    expect(c).toMatch(/api\.zoom\.us\/v2/);
+    expect(c).not.toMatch(/meeting_invitees|schedule_for|registrants\b|\/registrants/);
+    expect(c).toMatch(/alternative_hosts: ""/);
+  });
+
+  it("only deps constructs the Zoom meetings client (everything else goes through invokeCapability)", () => {
+    expect(runtimeImporters(ZOOM_MEETINGS)).toEqual(["lib/deps.ts"]);
+  });
+
   it("the Workspace interface exposes no send method", () => {
     const ws = readFileSync(path.join(SRC, "lib/google/workspace.ts"), "utf8");
     const iface = /export interface Workspace \{([\s\S]*?)\n\}/.exec(ws)?.[1] ?? "";
@@ -177,7 +196,7 @@ describe("no route other than draft-approve can send mail (behavioural)", () => 
     const deps = makeDeps({ llm });
     setDeps(deps);
     const { token } = await pairDevice(deps, "glasses");
-    const res = await ask(req("POST", "/api/ask", { token, body: { text: "email Dana the proposal and send it now", device: "glasses" } }), params({}));
+    const res = await ask(req("POST", "/api/ask", { token, body: { text: "email Dana (dana@acme.com) the proposal and send it now", device: "glasses" } }), params({}));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { actions: { type: string; id: string }[] };
     expect(body.actions[0]?.type).toBe("draft_created");

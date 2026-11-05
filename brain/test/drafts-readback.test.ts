@@ -250,6 +250,7 @@ describe("email.draft capability", () => {
 
 describe("/api/ask: Action.summary is the code-built readback", () => {
   it("an injected subject and body can't change what the device reads back", async () => {
+    // Both addresses are in the owner's words, so the recipient provenance guard (#18) lets the draft through.
     const llm = new ScriptedLLM([
       () => msg([toolUse("create_email_draft", { to: ["dana@acme.com", "mallory@evil.example"], subject: INJECTED_SUBJECT, body: INJECTED_BODY })]),
       () => msg([toolUse("respond", { reply: "Drafted for boss@acme.com.", spoken: "Draft to your boss is ready." })]),
@@ -257,7 +258,7 @@ describe("/api/ask: Action.summary is the code-built readback", () => {
     const deps = makeDeps({ llm });
     setDeps(deps);
     const { token } = await pairDevice(deps, "glasses");
-    const res = await ask(req("POST", "/api/ask", { token, body: { text: "reply to the lunch email", device: "glasses" } }), params({}));
+    const res = await ask(req("POST", "/api/ask", { token, body: { text: "reply to the lunch email to dana@acme.com and mallory@evil.example", device: "glasses" } }), params({}));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { actions: { type: string; id: string; summary: string }[] };
     const action = body.actions[0]!;
