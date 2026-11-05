@@ -5,7 +5,44 @@ import { usePathname } from "next/navigation";
 import { icons, type IconName } from "./icons";
 import { cx } from "./cx";
 
-export type NavItem = { href: string; label: string; icon: IconName; count?: number; countLabel?: string; urgent?: boolean };
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: IconName;
+  count?: number;
+  countLabel?: string;
+  urgent?: boolean;
+  /** false = not in the mobile bottom tab bar (five fit); shown as an icon link in the mobile top bar instead. */
+  tabBar?: boolean;
+};
+
+/** Mobile top bar: the items that don't fit in the tab bar, as icon links. */
+export function TopBarLinks({ items }: { items: NavItem[] }) {
+  const pathname = usePathname();
+  return (
+    <>
+      {items
+        .filter((i) => i.tabBar === false)
+        .map((item) => {
+          const active = isActive(pathname, item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-label={item.label}
+              aria-current={active ? "page" : undefined}
+              className={cx(
+                "flex h-11 w-11 items-center justify-center rounded-md focus-visible:outline-accent",
+                active ? "text-nav-text" : "text-nav-muted hover:text-nav-text",
+              )}
+            >
+              {icons[item.icon]}
+            </Link>
+          );
+        })}
+    </>
+  );
+}
 
 function isActive(pathname: string, href: string) {
   return href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
@@ -61,7 +98,7 @@ export function TabBar({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
   return (
     <ul className="grid grid-cols-5">
-      {items.map((item) => {
+      {items.filter((i) => i.tabBar !== false).map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <li key={item.href}>

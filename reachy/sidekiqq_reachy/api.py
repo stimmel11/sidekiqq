@@ -1,9 +1,10 @@
 """Minimal SideKiqq brain client (stdlib only).
 
 Endpoints used (ARCHITECTURE.md): /api/devices/pair, /api/transcribe, /api/ask, /api/speak,
-/api/alerts, /api/brief, /api/drafts (GET, read-only) and /api/drafts/:id/approve.
+/api/alerts, /api/commands (+ ack), /api/brief, /api/drafts (GET, read-only) and
+/api/drafts/:id/approve.
 
-Only GETs are retried. /api/ask is never retried (it may create a draft), and approve is
+Only GETs and command acks (idempotent) are retried. /api/ask is never retried (it may create a draft), and approve is
 never retried automatically (the user said "send it" once).
 """
 
@@ -166,6 +167,18 @@ class BrainClient:
             q["since"] = since
         j = self._json("GET", "/api/alerts?" + urllib.parse.urlencode(q), retries=1)
         return AlertsPage(items=list(j.get("items") or []), cursor=str(j.get("cursor", since or "")), more=bool(j.get("more")))
+
+    def commands(self, limit: int = 20) -> list[dict[str, Any]]:
+        """This device's pending, unexpired commands, oldest first (GET /api/commands).
+        A command stays listed until acked or expired, so callers dedupe by id."""
+        j = self._json("GET", "/api/commands?" + urllib.parse.urlencode({"limit": str(limit)}), retries=1)
+        return [c for c in (j.get("items") or []) if isinstance(c, dict)]
+
+    def ack_command(self, command_id: str, result: str) -> None:
+        """POST /api/commands/:id/ack. Safe to repeat: the same result again is a no-op on the brain."""
+        if result not in ("opened", "dismissed", "failed"):
+            raise ValueError(f"bad ack result {result!r}")
+        self._json("POST", f"/api/commands/{urllib.parse.quote(command_id, safe='')}/ack", {"result": result}, retries=1)
 
     def brief(self, kind: str = "daily") -> dict[str, Any]:
         return self._json("GET", f"/api/brief?kind={urllib.parse.quote(kind)}", retries=1, timeout=60)

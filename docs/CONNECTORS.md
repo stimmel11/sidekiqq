@@ -7,12 +7,18 @@ call `invokeCapability`; `deps.workspace()` is gone), and the sender registry wi
 `lib/connectors/google/send.ts`. Slice 2 (2026-10-26): `ConnectionStore` (`lib/connectors/store.ts`:
 per-connector AAD, `TOKEN_ENCRYPTION_KEY_PREV` rotation, single-use state carrying the PKCE verifier),
 the Google token migration (§8 step 3), and per-connection enabled capabilities, granted scopes and
-`needs_reauth` checked in `invokeCapability` (§4 step 3). From slice 2, still open in §7: the owner
-alert on `needs_reauth`, provider revoke on disconnect, incremental scopes. Not yet built: Draft `kind`/`readback` (§5), the generic
-connections routes and the Connections screen (§9), the `search_email` tool rename, and remote MCP.
-Slice 1 differences from §2, to settle in the next slice: `email.draft` returns
-`{providerDraftId, threadId?}` and the caller (the `create_email_draft` tool) still creates the
-pending Draft record; `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
+`needs_reauth` checked in `invokeCapability` (§4 step 3). Slice 3 (2026-10-28): Draft
+`kind`/`connectorId`/`readback` (§5; readback built in `lib/connectors/readback.ts` and set by
+`DraftsRepo.create`, used as `Action.summary`), legacy records upgraded on read, `email.draft` now
+returns `{draftId, providerDraftId, readback}` and `invokeCapability` creates the Draft record, `GET
+/api/drafts` adds `kind`/`readback`/`when`, sender key is `(connectorId, kind)` and approve answers 422
+when none is registered. Calendar kinds are modelled only. Slice 4 (2026-10-28): the `/api/connections`
+routes and the dashboard Connections screen (§9), shared OAuth flows (`lib/connectors/oauth.ts`,
+`lib/connectors/google/oauth.ts`; `/api/google/*` are now aliases), provider revoke on disconnect,
+the one owner alert on `needs_reauth` (alert kind `connection_needs_reauth`), and the `search_email`
+tool (`search_gmail` kept as an alias). Still open: §5 lazy 7-day expiry, incremental per-capability
+scopes (§7), deleting the legacy `google:tokens` key, and remote MCP. Remaining difference from §2:
+`email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
@@ -65,7 +71,7 @@ prompts do not change per provider.
 | `grocery.search` | auto | `{query, locationId?, max}` → `Product[] {id, name, size, price?, inStock?}` | |
 | `grocery.cart.add` | auto (capped) | `{items: {productId, quantity}[]}` → `{ok, count}` | No money moves. Kroger's cart API is add-only (`PUT /v1/cart/add`, 204, no read or remove), so the brain cannot undo an add and cannot report per-line results; "reversible" means the owner can remove items in the Kroger app. Caps: ≤ 50 lines per call, quantity 1–10 per line, product ids only from `grocery.search`. The assistant reads back what it asked to add. |
 | `grocery.checkout` | **user_finishes** | `{}` → `Handoff {url, label}` | The brain never places an order, picks a pickup slot or touches payment. It sends the phone a link to the provider's cart (section 4.3). |
-| `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. |
+| `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. Implemented 2026-10-28 as the `/api/ask` tool `call_on_phone` (`lib/commands/call.ts`): `contactId` must be the clear match of a lookup in the same request and a saved contact (not Google "Other contacts"); `spokenNumber` must be a whole number span in the owner's request text. |
 | `device.open_url` | **user_finishes** | `{url}` → `Handoff` | `https` only, host on a per-capability allowlist (provider cart pages, meeting join links the brain created). `sms:`, `mailto:`, `tel:`, `intent:`, `wa.me`, payment and app-link schemes are rejected. |
 
 Capabilities that are **forbidden** and have no interface at all: payments and checkout,
@@ -130,7 +136,12 @@ can be either; prefer MCP when a maintained server exists and its tools map clea
 ## 4. Safety policy (enforced by the brain)
 
 All capability calls go through one function, `invokeCapability(cap, input, ctx)` in
-`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. It:
+`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. The one exception is
+`device.call`, which has no connector: the `/api/ask` tool `call_on_phone` queues the hand-off
+directly on the device command queue. Its caller is fixed to `ask`, it refuses without the owner
+request's context, its number is bound in `lib/commands/call.ts` (section 2 row), and every attempt,
+refusals included, writes a `device.call` audit row. `invokeCapability("device.call")` itself
+still fails closed. `invokeCapability`:
 
 1. Looks up the tier from the fixed `POLICY` table (code constant, section 2). Executor-only
    entries (`email.send`, the invite/hold executors) are not callable here at all.
@@ -173,7 +184,11 @@ instructions. The assistant prompt already says so; the policy makes it structur
 - `ctx.caller` decides what is allowed. Only owner-initiated callers (`ask`, `task`, `dashboard`)
   may run `auto` writes or create handoffs. A `task` must trace back to one specific owner request
   and cannot re-schedule itself. The cron scan (`cron`) and the briefing (`brief`) may only use
-  `email.read`, `calendar.read` and `contacts.lookup`; anything else fails closed.
+  `email.read`, `calendar.read` and `contacts.lookup`; anything else fails closed. `call_on_phone`
+  (the `device.call` exception above) is `ask`-only: it exists only in the `/api/ask` tool loop and
+  needs that request's context. Known gap, bounded by the tap: injected text can still steer which
+  name the model looks up, so the phone may show a saved contact the owner didn't mean. The phone
+  shows the name and number, and nothing happens unless the owner taps.
 - Reads that send arguments to a third party (`grocery.search {query}`, any MCP tool) are also a
   leak channel. Each capability caps argument length and allowed characters (for example
   `grocery.search.query`: ≤ 80 chars, letters, digits, spaces and basic punctuation).
@@ -213,10 +228,17 @@ before the change still approve. The `to.min(1)` rule becomes a refinement that 
 
 **`readback` is built in code, never by the model.** It is a template over the structured fields:
 kind, every recipient or attendee address in full, subject or title, and the time for calendar
-kinds (for example "Email to dana@acme.com, cc ops@acme.com, subject 'Proposal follow-up'" or
-"Calendar invite to dana@acme.com and lee@acme.com, 'Kickoff', Tue Oct 27 2–3 pm"). The model
+kinds (for example "Email to dana@acme.com, cc ops@acme.com, with the subject: Proposal follow-up." or
+"Calendar invite to dana@acme.com and lee@acme.com, Tue Oct 27 2–3 pm, with the title: Kickoff."). The model
 writes none of it, so injected text in a subject or body cannot disguise who receives what. A test
 covers a subject and body containing injected instructions.
+
+- Recipients are strict bare ASCII addresses (`lib/address.ts`: no display names, lists, groups or
+  comments; IDN only as `xn--`), normalised once in `EmailDraftInput`, and that one list feeds the
+  provider draft's To/Cc, the stored record and the readback. The subject comes last, framed as
+  "with the subject: …", with format characters stripped and email-like tokens replaced by
+  "[address]". The readback must fit `/api/speak` (1000 chars): longer is refused before the
+  provider draft is made, never truncated.
 
 - It is generated when the draft is created, not by the device. (The open QA item about a body
   summary is a separate, optional addition; the readback stays fact-only.)
@@ -234,9 +256,12 @@ covers a subject and body containing injected instructions.
     a `draft_created` with `kind: "calendar_invite"`.
 - The approve route stays the only executor. It looks up the sender for `(connectorId, kind)` in
   the sender registry and runs it, with the same guards it has today (auth, pending, per-draft
-  lock, re-check under lock). Each registry entry also defines its own `stillValid(draft)` check
-  (→ 410 when false): provider draft still exists for Gmail/Outlook; always true for IMAP/SMTP
-  (our record is the draft); for calendar kinds, the start time is still in the future.
+  lock, re-check under lock). Each registry entry also defines its own `check(draft)`: provider
+  draft still exists for Gmail/Outlook (→ 410); always true for IMAP/SMTP (our record is the
+  draft); for calendar kinds, the start time is still in the future. For Gmail (implemented) the
+  check also compares the provider draft's sorted bare To/Cc, an empty Bcc and the subject with the
+  stored record, so an edit made in Gmail after the readback is refused (409
+  `changed_in_provider`, marked discarded, nothing sent).
 - Expiry is checked lazily by the approve route and by `GET /api/drafts` (no new cron): a pending
   draft older than 7 days, or a calendar draft whose start has passed, is marked `discarded` and
   refused.
@@ -356,9 +381,20 @@ Owner API (owner secret header or dashboard session; not device tokens):
 ```ts
 interface Connection { connectorId: string; displayName: string;
   status: "connected"|"needs_reauth"|"error"|"disabled"|"not_connected";
-  account?: string; capabilities: { id: CapabilityId; enabled: boolean; tier: Tier }[];
+  account?: string; capabilities: { id: CapabilityId; enabled: boolean; tier: Tier;
+    ownerEnabled: boolean; granted: boolean; label: string; tierLabel: string }[];
   connectedAt?: string; lastUsedAt?: string; lastError?: string; }
 ```
+
+As built (slice 4): `enabled` = usable now (owner switch on **and** scopes granted); `ownerEnabled` is
+the switch itself, `granted` whether the provider granted its scopes (true when unknown). `error` =
+a stored record that can't be decrypted; `disabled` = connected with every capability off.
+`lastUsedAt` is the newest successful audit row (the audit log is bounded). Auth is the owner secret
+header or the dashboard session cookie; any header credential must be the owner secret, and
+cookie writes refuse a cross-site `Origin`/`Sec-Fetch-Site`. `GET .../connect?ticket=` opens the
+sign-in; the callback only ever puts a fixed result code in the dashboard URL. Google's registered
+redirect URI is still `/api/google/callback` (it shows a page linking back to Connections) unless
+`GOOGLE_REDIRECT_URI` points at `/api/connections/google/callback`.
 
 Devices get no new endpoints for connectors. They see results through `/api/ask` replies, Drafts
 and (later) handoffs in the device command queue.

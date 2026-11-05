@@ -9,7 +9,7 @@ import {
   type Caller,
   type ImplementedCapability,
   type In,
-  type Out,
+  type ProviderOut,
 } from "@/lib/connectors/capabilities";
 import { GoogleConnector } from "@/lib/connectors/google";
 import { invokeCapability, readEmail } from "@/lib/connectors/invoke";
@@ -145,7 +145,7 @@ describe("invokeCapability", () => {
       firstParty: false,
       capabilities: ["files.read"],
       scopesFor: () => [],
-      invoke: async <C extends ImplementedCapability>() => [] as unknown as Out<C>,
+      invoke: async <C extends ImplementedCapability>() => [] as unknown as ProviderOut<C>,
     };
     const withThird: TestDeps = { ...deps, connectors: () => [third] };
     await invokeCapability(withThird, "files.read", validInputs["files.read"], { caller: "ask" });
@@ -162,7 +162,7 @@ describe("invokeCapability", () => {
       firstParty: false,
       capabilities: ["email.draft"],
       scopesFor: () => [],
-      invoke: async <C extends ImplementedCapability>() => ({ providerDraftId: "p1" }) as unknown as Out<C>,
+      invoke: async <C extends ImplementedCapability>() => ({ providerDraftId: "p1" }) as unknown as ProviderOut<C>,
     };
     await invokeCapability({ ...deps, connectors: () => [third] }, "email.draft", validInputs["email.draft"], { caller: "ask" });
     const [row] = await deps.repos.audit.recent();

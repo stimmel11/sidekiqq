@@ -187,7 +187,7 @@ describe("no route other than draft-approve can send mail (behavioural)", () => 
     const deps = makeDeps();
     setDeps(deps);
     const { token } = await pairDevice(deps);
-    const d = await deps.repos.drafts.create({ gmailDraftId: "g1", to: ["a@b.co"], subject: "s", body: "b" });
+    const d = await deps.repos.drafts.create({ providerDraftId: "g1", to: ["a@b.co"], subject: "s", body: "b" });
     expect((await discard(req("POST", "/x", { token }), params({ id: d.id }))).status).toBe(200);
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
   });
@@ -200,7 +200,7 @@ describe("draft approve route", () => {
     const { token } = await pairDevice(deps);
     const g = await deps.ws.createDraft({ to: ["dana@acme.com"], subject: "Hi", body: "Body" });
     const fu = await deps.repos.followups.upsert({ person: "Dana", client: "ACME", reason: "waiting", importance: "HIGH" });
-    const d = await deps.repos.drafts.create({ gmailDraftId: g.gmailDraftId, to: ["dana@acme.com"], subject: "Hi", body: "Body", client: "ACME", followupId: fu.followUp.id });
+    const d = await deps.repos.drafts.create({ providerDraftId: g.gmailDraftId, to: ["dana@acme.com"], subject: "Hi", body: "Body", client: "ACME", followupId: fu.followUp.id });
     return { deps, token, d, fu };
   }
 
@@ -220,7 +220,7 @@ describe("draft approve route", () => {
     const res = await approve(req("POST", "/x", { token }), params({ id: d.id }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(deps.sender.sendDraft).toHaveBeenCalledExactlyOnceWith(d.gmailDraftId);
+    expect(deps.sender.sendDraft).toHaveBeenCalledExactlyOnceWith(d.providerDraftId);
     expect((await deps.repos.drafts.get(d.id))?.status).toBe("sent");
     expect((await deps.repos.followups.get(fu.followUp.id))?.resolved).toBe(true);
 

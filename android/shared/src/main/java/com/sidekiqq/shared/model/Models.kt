@@ -100,6 +100,48 @@ data class Action(
     val summary: String,
 )
 
+// ---- Drafts (GET /api/drafts) ----
+
+/** Start and end (ISO-8601) of a calendar draft. */
+@Serializable
+data class DraftWhen(
+    val start: String,
+    val end: String,
+)
+
+/**
+ * A pending draft from `GET /api/drafts`: an action the owner must confirm before
+ * `POST /api/drafts/:id/approve` executes it.
+ *
+ * [readback] is the one sentence to speak or show before asking for confirmation. The brain builds
+ * it in code (every recipient address in full, the subject, the time for calendar kinds), so prefer
+ * it over composing your own from [to]/[subject]. It is also what `Action.summary` carries for
+ * `draft_created`. Older brains don't send it, hence the empty default.
+ *
+ * [kind] is a plain string (see [DraftKind]) so a newer brain can add kinds without breaking
+ * parsing; absent = "email". Don't offer to approve a kind you don't know.
+ */
+@Serializable
+data class Draft(
+    val id: String,
+    val kind: String = DraftKind.EMAIL,
+    val to: List<String> = emptyList(),
+    val cc: List<String> = emptyList(),
+    val subject: String = "",
+    val body: String = "",
+    val readback: String = "",
+    /** Calendar kinds only. */
+    val `when`: DraftWhen? = null,
+    val client: String? = null,
+    val createdAt: String,
+)
+
+object DraftKind {
+    const val EMAIL = "email"
+    const val CALENDAR_INVITE = "calendar_invite"
+    const val CALENDAR_HOLD = "calendar_hold"
+}
+
 @Serializable
 enum class BriefKind(val wire: String) {
     @SerialName("daily") DAILY("daily"),
@@ -196,6 +238,17 @@ object CommandKind {
     const val OPEN_URL = "open_url"
     const val CALL_CONTACT = "call_contact"
     const val REACHY_WAKE = "reachy_wake"
+}
+
+/**
+ * Values of the `kind` key in alert pushes (FCM data) and `GET /api/alerts` items. A plain string
+ * on the wire, so a newer brain can add kinds; show unknown kinds as a plain notification.
+ */
+object AlertKind {
+    const val EMAIL = "email"
+    const val COMMITMENT_OVERDUE = "commitment_overdue"
+    /** A connected account (e.g. Google) stopped working; the owner reconnects it from the dashboard. */
+    const val CONNECTION_NEEDS_REAUTH = "connection_needs_reauth"
 }
 
 /** Values for [DeviceCommand.app] / [CreateCommandRequest.app]. WhatsApp needs a "+" international number. */

@@ -16,6 +16,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     { href: "/dashboard/drafts", label: "Drafts", icon: "drafts", count: counts.drafts, countLabel: "awaiting approval" },
     { href: "/dashboard/commitments", label: "Commitments", icon: "commitments", count: counts.overdue, countLabel: "overdue", urgent: true },
     { href: "/dashboard/devices", label: "Devices", icon: "devices" },
+    { href: "/dashboard/connections", label: "Connections", icon: "connections", tabBar: false },
   ];
   const signOut = (
     <form action={logoutAction}>
