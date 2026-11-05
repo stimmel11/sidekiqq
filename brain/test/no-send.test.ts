@@ -50,17 +50,14 @@ const P = {
   buildSenders: /\bbuildSenders\b/,
   importInsert: /\bmessages\s*\.\s*import\b|\bmessages\s*\.\s*insert\b/, // other ways to put mail into Gmail
   smtp: /nodemailer|smtp/i,
-<<<<<<< HEAD
   // Microsoft Graph endpoints that send at once (docs/CONNECTORS.md §6). Allowed only in a future
   // lib/connectors/outlook/send.ts; nothing may contain them today. Line-based and case-insensitive
   // so concatenation, `${ id }` and OData `messages('x')/send` forms are caught too.
   // createReply/createReplyAll/createForward only make drafts, so they are not here.
   graphSend: /\bsendMail\b|\bmessages\b.*\/\s*(send|reply|replyAll|forward)\b/i,
-=======
   // Zoom meeting creation (CONNECTORS.md §6): only lib/connectors/zoom/meetings.ts, with its fixed body.
   // Also any other meetings endpoint (PATCH /meetings/{id}, /registrants) and the fields that make Zoom email people.
   zoomApi: /api\.zoom(gov)?\.(us|com)|\bmeetings\/|users\/[^"'`\s]*\/meetings|meeting_invitees|alternative_hosts|schedule_for|registrants\b/,
->>>>>>> origin/main
 } as const;
 type Prim = keyof typeof P;
 
