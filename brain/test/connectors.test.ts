@@ -37,6 +37,7 @@ const validInputs: Record<ImplementedCapability, unknown> = {
   "calendar.read": { timeMin: "2026-10-16T00:00:00.000Z", timeMax: "2026-10-17T00:00:00.000Z", max: 10 },
   "files.read": { query: "proposal", max: 3, includeContent: false },
   "contacts.lookup": { name: "Dana", max: 5 },
+  "video.create_room": { topic: "Sync with Dana" },
 };
 
 describe("policy table (docs/CONNECTORS.md §2, §4 floor)", () => {
@@ -117,7 +118,8 @@ describe("invokeCapability", () => {
   it("an allowed but unbuilt capability is unavailable, not silently ignored", async () => {
     const deps = setup();
     await expect(invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" })).rejects.toBeInstanceOf(CapabilityUnavailableError);
-    await expect(invokeCapability(deps, "video.create_room", {}, { caller: "ask" })).rejects.toBeInstanceOf(CapabilityUnavailableError);
+    // Built, but Zoom isn't configured in these deps, so no connector offers it.
+    await expect(invokeCapability(deps, "video.create_room", { topic: "x" }, { caller: "ask" })).rejects.toBeInstanceOf(CapabilityUnavailableError);
   });
 
   it("validates input before the connector sees it", async () => {

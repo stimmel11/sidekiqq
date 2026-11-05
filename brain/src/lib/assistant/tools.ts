@@ -2,7 +2,10 @@ import { z, type ZodType } from "zod";
 import type { Deps } from "../deps";
 import { GoogleNotConnectedError } from "../google/auth";
 import { invokeCapability, readEmail } from "../connectors/invoke";
-import { EMAIL_CC_MAX, EMAIL_TO_MAX } from "../connectors/capabilities";
+import { EMAIL_CC_MAX, EMAIL_TO_MAX, VIDEO_ROOM_MAX_MINUTES } from "../connectors/capabilities";
+import { ZoomApiError } from "../connectors/zoom/errors";
+import { ZoomAuthError } from "../connectors/zoom/auth";
+import { ReauthRequiredError } from "../connectors/types";
 import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx } from "../connectors/types";
 import { isPlausibleEmail } from "../google/mime";
 import { ContactQueryError, ContactsAccessError, ContactsUnavailableError, CONTACTS_DEFAULT_MAX, CONTACTS_MAX } from "../google/contacts";
@@ -22,6 +25,7 @@ import { recordLookup, resolveCallNumber, type LookedUpContacts } from "../comma
 import { nudgeCommandTarget } from "../commands/nudge";
 import { normalizeOwnerDate, truncate } from "../util";
 import { toolSchema, type ToolDef } from "./llm";
+import { isSingleAddress, type KnownAddresses } from "./recipients";
 
 /**
  * Tools exposed to Claude in /api/ask. Each tool = zod input schema + handler.
@@ -37,6 +41,11 @@ export interface ToolContext {
   now: Date;
   device: DeviceKind;
   actions: Action[];
+  /**
+   * Addresses the model has seen in this conversation (owner's words, history, tool results).
+   * When set, create_email_draft rejects any recipient not in it (see ./recipients.ts).
+   */
+  knownAddresses?: KnownAddresses;
   /**
    * The owner request this loop serves: its text (the owner's own words, for call_on_phone's
    * spoken-number rule) and the authenticated asking device (its token, not the body's `device`).
@@ -169,6 +178,41 @@ const lookupContact = tool({
   },
 });
 
+const startVideoRoom = tool({
+  name: "start_video_room",
+  description:
+    "Create a Zoom meeting room for the owner to open: right now (no start) or at a given start time. Nobody is invited and Zoom emails no one. Returns the join link; show it on screen. To invite people, say that calendar invites aren't available yet; never paste the link into an email draft unless the owner asks for exactly that.",
+  input: z.object({
+    topic: z.string().trim().min(1).max(200).describe('Short meeting name, e.g. "Call with Dana"'),
+    start: isoish.optional().describe("Start time for a scheduled room. Omit for an instant room."),
+    durationMin: z.number().int().min(5).max(VIDEO_ROOM_MAX_MINUTES).optional(),
+  }),
+  async run(input, ctx) {
+    let start: string | undefined;
+    if (input.start) {
+      // ISO only (a free-form string would be parsed in the server's zone, not the owner's).
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/.test(input.start.trim())) {
+        throw new ToolInputError("start must be an ISO date and time, e.g. 2026-10-20T15:00 (owner's time) or with an offset");
+      }
+      const d = new Date(normalizeOwnerDate(input.start, { timeZone: config.ownerTimezone() }) ?? Number.NaN);
+      if (Number.isNaN(d.getTime())) throw new ToolInputError("start must be a valid date and time");
+      if (d.getTime() < ctx.now.getTime() - 5 * 60_000) throw new ToolInputError("start is in the past; omit it for an instant room");
+      if (d.getTime() > ctx.now.getTime() + 366 * 86_400_000) throw new ToolInputError("start is more than a year away");
+      start = d.toISOString();
+    }
+    const room = await invokeCapability(
+      ctx.deps,
+      "video.create_room",
+      { topic: input.topic, ...(start ? { start } : {}), ...(input.durationMin ? { durationMin: input.durationMin } : {}) },
+      conn(ctx),
+    );
+    return {
+      ...room,
+      note: "Room created. Nobody was invited and nothing was sent. Show the join link on screen (never in spoken text).",
+    };
+  },
+});
+
 // ---------------------------------------------------------------------------------------
 // Device hand-offs (task layer slice 2b)
 // ---------------------------------------------------------------------------------------
@@ -264,7 +308,8 @@ const getClientTimeline = tool({
       repos.decisions.list({ client: input.client }),
     ]);
     if (!profile && !timeline.length && !commitments.length && !followups.length && !decisions.length) {
-      return { client: input.client, found: false, note: "No stored history for this client. Try search_email." };
+      // No echo of input.client: tool results feed recipient provenance (./recipients.ts).
+      return { found: false, note: "No stored history for this client. Try search_email." };
     }
     return { client: input.client, found: true, profile, timeline, commitments, followups, decisions };
   },
@@ -368,6 +413,7 @@ const createEmailDraft = tool({
     followupId: optStr(100).describe("Link the draft to an existing follow-up id"),
   }),
   async run(input, ctx) {
+    assertKnownRecipients(ctx, [...input.to, ...(input.cc ?? [])]);
     const { deps, actions } = ctx;
     const bad = [...input.to, ...(input.cc ?? [])].filter((a) => !isPlausibleEmail(a));
     if (bad.length) {
@@ -400,6 +446,22 @@ const createEmailDraft = tool({
     };
   },
 });
+
+/** Recipients must come from the owner or a lookup, never from the model's imagination. */
+function assertKnownRecipients(ctx: ToolContext, addrs: string[], refused = "No draft created."): void {
+  if (!ctx.knownAddresses) return;
+  const multi = addrs.filter((a) => !isSingleAddress(a));
+  if (multi.length) {
+    throw new ToolInputError(`${refused} Use one bare address per entry (name@example.com), no lists or quoted names: ${multi.join(" | ")}`);
+  }
+  const unknown = ctx.knownAddresses.unknown(addrs);
+  if (unknown.length) {
+    throw new ToolInputError(
+      `${refused} These addresses did not come from the owner or a lookup in this request: ${unknown.join(" | ")}. ` +
+        "Call lookup_contact with the person's name (or get_email_thread for a reply), or ask the owner for the address. Never guess an address.",
+    );
+  }
+}
 
 const recordDecision = tool({
   name: "record_decision",
@@ -459,12 +521,30 @@ const upsertClientProfile = tool({
     nextAction: optStr(1000),
     notes: optStr(4000),
   }),
-  async run(input, { deps }) {
-    const { client, created } = await deps.repos.clients.upsert(input);
+  async run(input, ctx) {
+    // A stored profile email is later read back as "known", so it needs provenance too.
+    if (input.email) assertKnownRecipients(ctx, [input.email], "Profile not saved.");
+    const { client, created } = await ctx.deps.repos.clients.upsert(input);
     return { created, client };
   },
 });
 
+/**
+ * Tools whose successful results count as recipient provenance: they return provider or stored
+ * data, never the model's own input. Write tools (add_commitment, upsert_client_profile, ...)
+ * echo what the model passed, so an address in their result proves nothing.
+ */
+export const PROVENANCE_TOOLS: ReadonlySet<string> = new Set([
+  "search_email",
+  "search_gmail", // alias of search_email (TOOL_ALIASES)
+  "get_email_thread",
+  "list_calendar_events",
+  "search_drive",
+  "lookup_contact",
+  "get_client_timeline",
+  "list_commitments",
+  "list_followups",
+]);
 // ---------------------------------------------------------------------------------------
 // Connector requests (docs/CONNECTOR_REQUESTS.md)
 // ---------------------------------------------------------------------------------------
@@ -501,6 +581,7 @@ export const ALL_TOOLS = [
   listCalendarEvents,
   searchDrive,
   lookupContact,
+  startVideoRoom,
   callOnPhone,
   getClientTimeline,
   listCommitments,
@@ -574,6 +655,7 @@ export async function executeTool(
     }
     if (err instanceof CapabilityDeniedError || err instanceof CapabilityUnavailableError) return { content: err.message, isError: true };
     if (err instanceof CommandError) return { content: err.message, isError: true };
+    if (err instanceof ZoomApiError || err instanceof ZoomAuthError || err instanceof ReauthRequiredError) return { content: err.message, isError: true };
     console.error(`[tool ${name}] failed`, err);
     return { content: `Tool ${name} failed: ${(err as Error).message ?? "unknown error"}`, isError: true };
   }
