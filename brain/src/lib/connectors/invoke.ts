@@ -24,7 +24,10 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *  2. Background callers (cron, brief) may only use BACKGROUND_ALLOWED reads.
  *  3. Auto writes and handoffs need an owner-initiated caller (ask, task, dashboard).
  *  4. `confirm` and `user_finishes` never run here. Their prepare/handoff paths arrive with the
- *     calendar and device-queue items; until then they fail closed.
+ *     calendar and device-queue items; until then they fail closed. The one exception is
+ *     `device.call`, which has no connector: the /api/ask tool `call_on_phone` queues it directly
+ *     (caller fixed to "ask", needs the owner request's context, number bound by
+ *     lib/commands/call.ts, audited as `device.call`).
  *  5. Input is validated against the capability's schema before any connector sees it.
  *  6. The stored connection must be usable for this capability (§4 step 3): not `needs_reauth`,
  *     the capability enabled by the owner, and its scopes granted. With no stored connection the
@@ -79,7 +82,14 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
     throw new CapabilityDeniedError(cap, `not allowed for background caller "${ctx.caller}"`);
   }
   if (tier === "confirm") throw new CapabilityDeniedError(cap, "needs the owner's confirmation and must be prepared as a draft");
-  if (tier === "user_finishes") throw new CapabilityDeniedError(cap, "the owner finishes this on the phone; handoffs are not available yet");
+  if (tier === "user_finishes") {
+    throw new CapabilityDeniedError(
+      cap,
+      cap === "device.call"
+        ? "calls are handed off by the call_on_phone tool, not through invokeCapability"
+        : "the owner finishes this on the phone; connector handoffs are not available yet",
+    );
+  }
   if (!READ_ONLY.includes(cap) && background) throw new CapabilityDeniedError(cap, "writes need an owner request");
 
   if (!implemented(cap)) throw new CapabilityUnavailableError(cap);
