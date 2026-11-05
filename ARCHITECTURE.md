@@ -38,7 +38,9 @@ the thinking.
 | GET | /api/followups | – | `{ "items": FollowUp[] }` |
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval |
+| GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation |
+| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
+| POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
 | POST | /api/commands | `CreateCommandRequest` | `201 { "command": DeviceCommand, "deviceId": string, "device": DeviceKind }`. Queues a command started on this device to run on another. 400 bad fields/URL/number, 404 unknown `target.deviceId`, 409 no device that can run it (`no_target_device`, `wrong_target`), 429 `queue_full` |
@@ -49,17 +51,33 @@ the thinking.
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
 
+Drafts: every action the owner must confirm is a stored Draft (`docs/CONNECTORS.md` §5). Today only `kind: "email"`
+is created; calendar kinds are in the model but are not created or approvable until the phone's confirm dialog
+depends on `kind`. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
+(replaces `gmailDraftId`), `providerMessageId` (replaces `gmailMessageId`), `threadId`, `followupId` and `sentAt`;
+records written before these fields existed are upgraded on read, so old pending drafts still list and approve.
+Recipients are strict bare ASCII addresses (`name@example.com`, IDN only as `xn--` punycode; no display names,
+lists or groups), at most 5 To and 5 Cc.
+
 Pairing / owner endpoints (not device-token auth):
 
 | Method | Path | Auth | Body → Returns |
 |---|---|---|---|
 | POST | /api/devices/pair-code | owner secret header | `{ "label"?: string }` → `{ "code": "123456", "expiresAt": string, "ttlSeconds": number }` |
 | POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "name"?: string }` → `{ "token": string, "deviceId": string, "device": string }` |
-| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link) |
+| POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link). Alias of the connections route below for one release |
+| GET | /api/connections | owner secret header or dashboard session | → `{ "items": Connection[] }` |
+| POST | /api/connections/:connectorId/connect | owner secret header or dashboard session | → `{ "url": string, "expiresAt": string }` (single-use 5-min link; `GET` on it starts the provider sign-in) |
+| GET | /api/connections/:connectorId/callback | none (single-use OAuth `state` + PKCE) | redirects to `/dashboard/connections?connect=<code>` |
+| POST | /api/connections/:connectorId/disconnect | owner secret header or dashboard session | → `{ "ok": true, "revoked": boolean }` (provider revoke is best effort; the stored sign-in is always deleted) |
+| POST | /api/connections/:connectorId/capabilities | owner secret header or dashboard session | `{ "enabled": CapabilityId[] }` → `Connection`. Only that connector's own capabilities; tiers are fixed in code |
 | GET / POST | /api/connector-requests | owner secret header | "Request a connector" log, see `docs/CONNECTOR_REQUESTS.md`. Logging a request builds, connects and enables nothing |
 | PATCH | /api/connector-requests/:id | owner secret header | `{ "status"?, "prUrl"?, "note"? }` → `{ "request" }` (owner bookkeeping only) |
 
-Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"), optional
+Device tokens are never accepted on `/api/connections*` (a device token plus a session cookie is refused too). `Connection`
+is defined in `docs/CONNECTORS.md` §9. Devices get no connector endpoints.
+
+Push (FCM) messages are **data-only**: `title`, `body`, `kind` ("email"\|"commitment_overdue"\|"connection_needs_reauth"), optional
 `importance`, `client`, `messageId`, `threadId`, `commitmentId`. The phone builds the notification itself.
 One more FCM data message is **not an alert**: the command nudge `{ "kind": "command", "commandId": string }`, with
 no `title`/`body`, sent only to the target device of a newly queued command (see Device commands). Clients must check
@@ -77,11 +95,21 @@ interface Commitment { id; who: string; what: string; madeAt: string; dueAt?: st
 interface FollowUp { id; person: string; client?: string; reason: string; daysQuiet?: number;
   importance: Importance; suggestedMessage?: string; draftId?: string; }
 interface TopItem { id; title: string; why: string; importance: Importance; dueAt?: string; }
-interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id: string; summary: string; }
+interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id: string;
+  summary: string /* for draft_created: the draft's `readback` */; }
+type DraftKind = "email"|"calendar_invite"|"calendar_hold";  // clients must not offer to approve kinds they don't know
+interface DraftItem { id: string; kind: DraftKind /* absent from older brains = "email" */;
+  to: string[] /* recipients, or attendees for calendar_invite; empty for calendar_hold */; cc: string[];
+  subject: string /* or event title */; body: string /* or event description */;
+  readback: string /* ONE sentence (<= 1000 chars), built by the brain in code, never by the model: kind, every
+                      address in full, the time for calendar kinds, then "with the subject: <subject>." Absent from
+                      older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
+  when?: { start: string; end: string } /* calendar kinds only */; client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
-  kind: "email"|"commitment_overdue"; importance?: Importance; priority: "high"|"normal";
+  kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
+  importance?: Importance; priority: "high"|"normal";
   client?: string; messageId?: string; threadId?: string; commitmentId?: string; }
 type CommandKind = "open_url"|"call_contact"|"reachy_wake";   // clients must ignore kinds they don't know
 interface DeviceCommand { id: string; at: string; expiresAt: string /* at + 15 min */; kind: CommandKind;
@@ -107,10 +135,16 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   `number` on its own line, not only inside `label`.
 - Liveness: a device treats a command as live only while `GET /api/commands` returns it. An `opened` ack is accepted up
   to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
-- This endpoint is the owner-device path. Hand-offs created later from `/api/ask` or connectors go through
-  `invokeCapability` with the caller rules and per-capability allowlists in `docs/CONNECTORS.md` §4.4.
+- `POST /api/commands` is the owner-device path. "Call Dana on my phone" said to any device goes through `/api/ask`:
+  Claude's `call_on_phone` tool queues a `call_contact` for the phone (`from` = the asking device). Its number comes only
+  from the clear match of a `lookup_contact` in the same request (a saved contact's id, plus which of its numbers when
+  it has several; any candidate of an ambiguous lookup, and Google "Other contacts", are refused so the assistant asks)
+  or from a whole number span in the owner's request text; never a number the model typed from email, files or
+  calendar (`lib/commands/call.ts`). One call per request; every attempt, refusals included, is audited as
+  `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
+  phone. Other connector hand-offs will go through `invokeCapability` with the caller rules in `docs/CONNECTORS.md` §4.4.
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
-  best-effort FCM nudge to the target device's own push token right after `POST /api/commands` (high priority,
+  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands` or `call_on_phone`) (high priority,
   data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
   Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
   The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no
@@ -140,9 +174,21 @@ with its own device token (device kind `"reachy"`): mic → endpointing → 16 k
 from its settings page (port 8042); an on-device wake word is optional and off by default, so room audio is not
 streamed to the cloud. Draft approval uses the same "send it" rule and still goes only through `/api/drafts/:id/approve`.
 
+`reachy_wake` on Reachy: the robot has no screen, so the owner's tap is the one on the device that created the command
+(only paired owner devices can). Reachy polls `GET /api/commands` every 30 s (or the alert interval if shorter, same
+backoff) and runs a wake only while the latest successful GET lists it: `chat` = greeting + one Talk-style listen,
+`brief` = daily brief, `dance` = motion only, `game` = not built yet (spoken "coming soon", acked `failed`); an unknown
+`activity` does nothing and is acked `failed`. A wake never interrupts a turn, listening, speech or a pending "send it":
+it waits for an idle robot, and is acked `dismissed` without acting if it waited more than 2 minutes (a `chat`, which
+opens the mic, also if its `at` is more than 2 minutes + 60 s clock skew old). Handled ids are
+claimed and persisted before acting, so re-delivery, lost acks or a restart never repeat one (lost acks are re-sent
+while the command is still listed). Kinds Reachy doesn't run are ignored and not acked.
+
 ## Connectors
 Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (framework
-slice 1 implemented: every Gmail/Calendar/Drive call goes through `invokeCapability` and its fixed policy table): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+slices 1–4 implemented: every Gmail/Calendar/Drive/Contacts call goes through `invokeCapability` and its fixed policy table;
+`email.draft` creates the pending Draft with its code-built `readback`; the owner manages connections on the dashboard Connections
+screen; a refresh failure marks the connection `needs_reauth` and raises one `connection_needs_reauth` alert): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
 `/api/drafts/:id/approve` stays the only executor.
 
 ## Auth
