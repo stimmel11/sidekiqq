@@ -29,7 +29,7 @@ class Speaker(context: Context) {
 
     private val appContext = context
     private val audioManager = context.getSystemService(AudioManager::class.java)
-    private val pending = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val speakLock = Mutex()
     private val ready = CompletableDeferred<Boolean>()
 
@@ -52,22 +52,26 @@ class Speaker(context: Context) {
         tts.setLanguage(Locale.getDefault()) // returns Int, so it is not a Kotlin property setter
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) {}
-            override fun onDone(utteranceId: String) { pending.remove(utteranceId)?.complete(Unit) }
+            override fun onDone(utteranceId: String) { pending.remove(utteranceId)?.complete(true) }
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String) { pending.remove(utteranceId)?.complete(Unit) }
-            override fun onError(utteranceId: String, errorCode: Int) { pending.remove(utteranceId)?.complete(Unit) }
-            override fun onStop(utteranceId: String, interrupted: Boolean) { pending.remove(utteranceId)?.complete(Unit) }
+            override fun onError(utteranceId: String) { pending.remove(utteranceId)?.complete(false) }
+            override fun onError(utteranceId: String, errorCode: Int) { pending.remove(utteranceId)?.complete(false) }
+            override fun onStop(utteranceId: String, interrupted: Boolean) { pending.remove(utteranceId)?.complete(false) }
         })
     }
 
-    /** Speaks [text] and suspends until playback ends (or ~60 s safety timeout). */
-    suspend fun speak(text: String) {
-        if (text.isBlank()) return
-        if (!ready.await()) return
-        speakLock.withLock {
+    /**
+     * Speaks [text] and suspends until playback ends (or a safety timeout). Returns true only if
+     * playback finished normally; false if TTS wasn't ready, failed, was stopped (barge-in) or timed
+     * out. A draft confirmation is armed only on true, so the owner has heard the whole read-back.
+     */
+    suspend fun speak(text: String): Boolean {
+        if (text.isBlank()) return false
+        if (!ready.await()) return false
+        return speakLock.withLock {
             configure()
             val id = UUID.randomUUID().toString()
-            val done = CompletableDeferred<Unit>()
+            val done = CompletableDeferred<Boolean>()
             pending[id] = done
             val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(attrs)
@@ -76,9 +80,10 @@ class Speaker(context: Context) {
             try {
                 if (tts.speak(text, TextToSpeech.QUEUE_ADD, Bundle(), id) != TextToSpeech.SUCCESS) {
                     pending.remove(id)
-                    return
+                    return@withLock false
                 }
-                withTimeoutOrNull(60_000) { done.await() }
+                // A 1000-char brain readback plus a body excerpt can run past a minute.
+                withTimeoutOrNull(SPEAK_TIMEOUT_MS) { done.await() } ?: false
             } finally {
                 pending.remove(id)
                 audioManager?.abandonAudioFocusRequest(focus)
@@ -88,7 +93,7 @@ class Speaker(context: Context) {
 
     fun stop() {
         tts.stop()
-        pending.values.forEach { it.complete(Unit) }
+        pending.values.forEach { it.complete(false) }
         pending.clear()
     }
 
@@ -97,7 +102,10 @@ class Speaker(context: Context) {
         tts.shutdown()
     }
 
-    private companion object { const val TAG = "SideKiqqSpeaker" }
+    private companion object {
+        const val TAG = "SideKiqqSpeaker"
+        const val SPEAK_TIMEOUT_MS = 180_000L
+    }
 }
 
 /** Short "listening" / "error" cue sounds without needing audio assets. */
