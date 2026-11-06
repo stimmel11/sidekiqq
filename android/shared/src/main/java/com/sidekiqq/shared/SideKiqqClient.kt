@@ -12,6 +12,7 @@ import com.sidekiqq.shared.model.CreateCommandRequest
 import com.sidekiqq.shared.model.CreateCommandResponse
 import com.sidekiqq.shared.model.Device
 import com.sidekiqq.shared.model.DeviceCommand
+import com.sidekiqq.shared.model.Draft
 import com.sidekiqq.shared.model.FollowUp
 import com.sidekiqq.shared.model.ItemsResponse
 import com.sidekiqq.shared.model.PairRequest
@@ -128,6 +129,13 @@ class SideKiqqClient(
     suspend fun completeCommitment(id: String) {
         http.post(url("/api/commitments/${id.encodeURLPathPart()}/complete")) { auth() }.ensureOkUnit()
     }
+
+    /**
+     * Pending drafts (GET /api/drafts), for the voice read-back: speak [Draft.readback] plus a body
+     * excerpt before asking for "send it". Reading drafts sends nothing.
+     */
+    suspend fun pendingDrafts(): List<Draft> =
+        http.get(url("/api/drafts")) { auth() }.ensureOk().body<ItemsResponse<Draft>>().items
 
     /**
      * Sends a drafted message. This is the ONLY call that causes anything to be sent on the user's
