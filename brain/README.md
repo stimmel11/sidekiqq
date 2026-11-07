@@ -132,9 +132,10 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
 7. Pair devices as described above.
 8. **Zoom (optional)**: create a user-managed *General* OAuth app in the Zoom App Marketplace with the single
    granular scope `meeting:write:meeting` and redirect URL `https://<your-domain>/api/connections/zoom/callback`,
-   then set `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET` (`ZOOM_REDIRECT_URI` overrides the default). The connect
-   route arrives with the Connections screen; until then Zoom is registered but not connected. Rooms are created
-   with a fixed request (no invitees, no Zoom emails); see `src/lib/connectors/zoom/meetings.ts`.
+   then set `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET` (`ZOOM_REDIRECT_URI` overrides the default). Then press
+   **Connect** next to Zoom on the dashboard's Connections screen (or `POST /api/connections/zoom/connect` with the
+   owner secret for a one-time link). Disconnect revokes the token at Zoom. Rooms are created with a fixed request
+   (no invitees, no Zoom emails); see `src/lib/connectors/zoom/meetings.ts`.
 
 ## Testing
 
