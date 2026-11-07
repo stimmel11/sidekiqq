@@ -12,6 +12,7 @@ import type { MailSender } from "@/lib/connectors/google/send";
 import { GoogleConnector, type ContactsLookup } from "@/lib/connectors/google";
 import { ZoomConnector } from "@/lib/connectors/zoom";
 import type { ZoomRooms } from "@/lib/connectors/zoom/meetings";
+import type { ZoomAuth } from "@/lib/connectors/zoom/auth";
 import type { In, VideoRoom } from "@/lib/connectors/capabilities";
 import type { ContactLookup, ContactQuery } from "@/lib/google/contacts";
 import { buildSenders } from "@/lib/connectors/senders";
@@ -209,7 +210,7 @@ export class FakeZoomRooms implements ZoomRooms {
 }
 
 export function makeDeps(
-  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean } = {},
+  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean; zoomAuth?: (connections: ConnectionStore) => ZoomAuth } = {},
 ): TestDeps {
   let now = opts.now ?? new Date("2026-10-16T15:00:00Z");
   const clock = () => now;
@@ -247,7 +248,8 @@ export function makeDeps(
     },
     connections,
     googleTokens: new GoogleTokenStore(connections),
-    connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom ? [new ZoomConnector(async () => zoom)] : [])],
+    connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : [])],
+    zoomAuth: () => opts.zoomAuth?.(connections) ?? null,
     senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
     push: () => pushFake,
     transcriber: () =>

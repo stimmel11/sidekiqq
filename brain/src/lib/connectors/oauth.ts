@@ -1,5 +1,6 @@
 import type { Deps } from "../deps";
 import { googleOAuth } from "./google/oauth";
+import { zoomOAuth } from "./zoom/oauth";
 
 /**
  * Per-connector OAuth flows behind the generic connections routes (docs/CONNECTORS.md §7, §9).
@@ -19,11 +20,12 @@ export interface OAuthFlow {
   /** Handles the provider redirect: validates `state`, exchanges the code, stores the credential. */
   complete(deps: Deps, query: URLSearchParams): Promise<ConnectResult>;
   /** Revokes the stored credential at the provider. Throws on failure; callers treat it as best effort. */
-  revoke?(secret: string): Promise<void>;
+  revoke?(secret: string, deps: Deps): Promise<void>;
 }
 
 const FLOWS: Record<string, OAuthFlow> = {
   google: googleOAuth,
+  zoom: zoomOAuth,
 };
 
 export function oauthFlow(connectorId: string): OAuthFlow | undefined {

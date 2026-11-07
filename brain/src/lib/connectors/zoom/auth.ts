@@ -21,8 +21,8 @@ import { CapabilityDeniedError, ReauthRequiredError } from "../types";
  * This module only signs in and mints tokens. It cannot create meetings (./meetings.ts) and
  * nothing in it can send anything.
  *
- * Slice 1 ships the helpers; the connect/callback routes come with the generic
- * `/api/connections/:id/*` routes (an `OAuthFlow` wrapper around `authorizeUrl` + `exchangeCode`).
+ * The connect/callback/disconnect legs are the generic `/api/connections/zoom/*` routes, through
+ * the `OAuthFlow` in ./oauth.ts.
  */
 
 export const ZOOM_CONNECTOR_ID = "zoom";
@@ -158,11 +158,15 @@ export class ZoomAuth {
   async exchangeCode(code: string, codeVerifier: string, connectedAt: string): Promise<StoredConnection> {
     const t = await this.tokenRequest({ grant_type: "authorization_code", code, redirect_uri: this.cfg.redirectUri, code_verifier: codeVerifier });
     if (!t.refreshToken) throw new ZoomAuthError("Zoom did not return a refresh token.");
+    // A reconnect keeps the owner's capability switches (a record we can't read is just replaced).
+    const previous = await this.connections.load(ZOOM_CONNECTOR_ID).catch(() => null);
     const saved = await this.connections.save(ZOOM_CONNECTOR_ID, {
       secret: t.refreshToken,
       secretKind: "refresh_token",
       grantedScopes: t.scopes,
       connectedAt,
+      ...(previous?.enabled ? { enabled: previous.enabled } : {}),
+      status: "connected",
     });
     this.pending = null;
     this.cached = { token: t.accessToken, expiresAt: this.now() + t.expiresInSec * 1000, connectedAt: saved.connectedAt };
@@ -192,7 +196,7 @@ export class ZoomAuth {
     this.cached = null;
   }
 
-  /** Best-effort revoke at Zoom (disconnect route, later slice). */
+  /** Best-effort revoke at Zoom (the `zoom` OAuth flow's `revoke`, called by disconnect). */
   async revoke(token: string): Promise<void> {
     const res = await this.fetchFn(`${ZOOM_OAUTH}/revoke`, {
       method: "POST",
@@ -200,8 +204,12 @@ export class ZoomAuth {
       body: new URLSearchParams({ token }).toString(),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) throw new ZoomAuthError(`Zoom revoke failed (HTTP ${res.status}).`);
     this.cached = null;
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const code = typeof body.error === "string" ? body.error.slice(0, 40) : "";
+      throw new ZoomAuthError(`Zoom revoke failed (HTTP ${res.status}${code ? `, ${code}` : ""}).`);
+    }
   }
 
   private async refresh(): Promise<string> {
