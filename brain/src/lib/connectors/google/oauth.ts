@@ -69,6 +69,13 @@ export const googleOAuth: OAuthFlow = {
 
   /** Revokes the grant at Google (a refresh token revokes the whole grant). */
   async revoke(secret: string): Promise<void> {
-    await createOAuthClient().revokeToken(secret);
+    try {
+      await createOAuthClient().revokeToken(secret);
+    } catch (err) {
+      // Google answers invalid_token / invalid_grant for a token that is already revoked or expired.
+      const code = String((err as { response?: { data?: { error?: unknown } } })?.response?.data?.error ?? (err as Error)?.message);
+      if (/invalid_(token|grant)/.test(code)) return;
+      throw err;
+    }
   },
 };

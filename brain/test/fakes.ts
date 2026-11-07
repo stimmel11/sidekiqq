@@ -223,6 +223,7 @@ export function makeDeps(
   const sender = new SpyMailSender();
   const pushFake = new FakePush();
   const zoom = new FakeZoomRooms();
+  let zoomAuth: ZoomAuth | null | undefined; // one shared instance, like buildDeps
   const connected = opts.googleConnected ?? true;
   const workspace = async (): Promise<Workspace> => {
     if (!connected) {
@@ -249,7 +250,7 @@ export function makeDeps(
     connections,
     googleTokens: new GoogleTokenStore(connections),
     connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : [])],
-    zoomAuth: () => opts.zoomAuth?.(connections) ?? null,
+    zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
     senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
     push: () => pushFake,
     transcriber: () =>

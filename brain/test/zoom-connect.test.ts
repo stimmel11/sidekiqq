@@ -9,7 +9,7 @@ import type { Connection } from "@/lib/connectors/manage";
 import { oauthFlow } from "@/lib/connectors/oauth";
 import type { ConnectionStore } from "@/lib/connectors/store";
 import { ZOOM_MEETING_SCOPE, ZoomAuth, type FetchLike } from "@/lib/connectors/zoom/auth";
-import { makeDeps, params, req, type TestDeps } from "./fakes";
+import { makeDeps, pairDevice, params, req, type TestDeps } from "./fakes";
 
 const OWNER = { "x-owner-secret": "test-owner-secret-0123456789" };
 const CFG = { clientId: "zoom-cid", clientSecret: "zoom-csecret", redirectUri: "https://brain.example.com/api/connections/zoom/callback" };
@@ -229,5 +229,79 @@ describe("Zoom disconnect", () => {
     const res = await disconnectPost(req("POST", "/api/connections/zoom/disconnect", { headers: OWNER }), P);
     expect(await res.json()).toEqual({ ok: true, revoked: true });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("one shared ZoomAuth across connect, refresh and disconnect", () => {
+  const saveLive = (deps: TestDeps, secret = "zoom-rt-OLD", connectedAt = "2026-10-01T00:00:00.000Z") =>
+    deps.connections.save("zoom", { secret, secretKind: "refresh_token", grantedScopes: [ZOOM_MEETING_SCOPE], connectedAt });
+
+  it("after a reconnect the next access token comes from the new sign-in, not the cached old one", async () => {
+    let n = 0;
+    const { deps } = zoomDeps((_u, init) => {
+      const f = new URLSearchParams(String(init.body));
+      n++;
+      return f.get("grant_type") === "refresh_token"
+        ? json(200, { access_token: "at-OLD", refresh_token: "zoom-rt-OLD2", expires_in: 3600, scope: ZOOM_MEETING_SCOPE })
+        : json(200, { access_token: "at-NEW", refresh_token: "zoom-rt-NEW", expires_in: 3600, scope: ZOOM_MEETING_SCOPE });
+    });
+    await saveLive(deps);
+    expect(await deps.zoomAuth()!.accessToken()).toBe("at-OLD");
+    const { state } = await issueState(deps);
+    expect(await callback(`code=zc-1&state=${state}`)).toBe("connected");
+    expect(await deps.zoomAuth()!.accessToken()).toBe("at-NEW");
+    expect(n).toBe(2);
+  });
+
+  it("a refresh still running on the old sign-in neither overwrites the reconnect nor caches its token", async () => {
+    let releaseRefresh!: () => void;
+    const gate = new Promise<void>((r) => (releaseRefresh = r));
+    const { deps } = zoomDeps(() => json(200, {})); // replaced below
+    const auth = new ZoomAuth(CFG, deps.connections, async (_u, init) => {
+      const f = new URLSearchParams(String(init.body));
+      if (f.get("grant_type") === "refresh_token") {
+        await gate;
+        return json(200, { access_token: "at-OLD", refresh_token: "zoom-rt-OLD2", expires_in: 3600, scope: ZOOM_MEETING_SCOPE });
+      }
+      return json(200, { access_token: "at-NEW", refresh_token: "zoom-rt-NEW", expires_in: 3600, scope: ZOOM_MEETING_SCOPE });
+    });
+    await saveLive(deps);
+    const old = auth.accessToken();
+    await new Promise((r) => setTimeout(r, 5));
+    await auth.exchangeCode("zc-1", "zoom-verifier-abcdefghijklmnopqrstuvwxyz-0123", "2026-11-07T00:00:00.000Z");
+    releaseRefresh();
+    expect(await old).toBe("at-OLD"); // the caller that was already waiting
+    const stored = await deps.connections.load("zoom");
+    expect(stored).toMatchObject({ secret: "zoom-rt-NEW", connectedAt: "2026-11-07T00:00:00.000Z" });
+    expect(await auth.accessToken()).toBe("at-NEW");
+  });
+
+  it("after disconnect the shared instance has no usable token, even when Zoom's revoke fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps } = zoomDeps((url) =>
+      url.endsWith("/revoke") ? (() => { throw new Error("network down"); })() : json(200, { access_token: "at-1", refresh_token: "zoom-rt-OLD2", expires_in: 3600, scope: ZOOM_MEETING_SCOPE }),
+    );
+    await saveLive(deps);
+    expect(await deps.zoomAuth()!.accessToken()).toBe("at-1");
+    const res = await disconnectPost(req("POST", "/api/connections/zoom/disconnect", { headers: OWNER }), P);
+    expect(await res.json()).toEqual({ ok: true, revoked: false });
+    await expect(deps.zoomAuth()!.accessToken()).rejects.toThrow(/not connected/i);
+  });
+
+  it("an invalid_token answer from Zoom's revoke is reported as not revoked (only Google maps that to success)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps } = zoomDeps(() => json(400, { error: "invalid_token" }));
+    await saveLive(deps);
+    const res = await disconnectPost(req("POST", "/api/connections/zoom/disconnect", { headers: OWNER }), P);
+    expect(await res.json()).toEqual({ ok: true, revoked: false });
+  });
+
+  it("refuses a paired device's token on the owner-only connect and disconnect routes", async () => {
+    const { deps } = zoomDeps();
+    const { token } = await pairDevice(deps, "phone");
+    expect((await connectPost(req("POST", "/api/connections/zoom/connect", { token }), P)).status).toBe(401);
+    await saveLive(deps);
+    expect((await disconnectPost(req("POST", "/api/connections/zoom/disconnect", { token }), P)).status).toBe(401);
+    expect(await deps.connections.load("zoom")).not.toBeNull();
   });
 });
