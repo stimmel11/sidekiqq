@@ -39,7 +39,7 @@ the thinking.
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
 | GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation. Calendar drafts whose start has passed are marked discarded and not listed |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 410 `expired` (a calendar invite whose start time has passed; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
+| POST | /api/drafts/:id/approve | – | `{ "ok": true, "warning"?: string }` (`warning`: sent, but not exactly as read back, e.g. "no Meet link"; show/speak it) — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 410 `expired` (a calendar invite whose start time has passed; marked discarded), 422 `unsupported_kind` (no executor for this kind yet), `no_provider_draft` (email) or `invalid_draft` (other kinds), 422 `provider_refused` (the provider definitely refused it, e.g. missing calendar permission; still pending); nothing is sent on any error |
 | POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
@@ -105,7 +105,9 @@ interface DraftItem { id: string; kind: DraftKind /* absent from older brains = 
   to: string[] /* recipients, or attendees for calendar_invite; empty for calendar_hold */; cc: string[];
   subject: string /* or event title */; body: string /* or event description */;
   readback: string /* ONE sentence (<= 1000 chars), built by the brain in code, never by the model: kind, every
-                      address in full, the time for calendar kinds, then "with the subject: <subject>." Absent from
+                      address in full, the time for calendar kinds, "with a Google Meet link" for invites that add
+                      one, then "with the subject: <subject>." (invites: "with the title: <title>", then ", and the
+                      location: <location>." when set; both cleaned of addresses/format characters). Absent from
                       older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
   when?: { start: string; end: string } /* calendar kinds only */;
   location?: string /* calendar kinds only */; conference?: "meet" /* calendar_invite only: Meet link added when sent */;

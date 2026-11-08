@@ -25,9 +25,9 @@ beforeEach(() => insert.mockReset());
 
 describe("GoogleCalendarInviter", () => {
   it("inserts on the primary calendar with the draft's fields, a Meet request, and notifies attendees", async () => {
-    insert.mockResolvedValue({ data: { id: "skqabc123" } });
+    insert.mockResolvedValue({ data: { id: "skqabc123", hangoutLink: "https://meet.google.com/abc-defg-hij" } });
     const out = await new GoogleCalendarInviter({} as never).insertInvite(event);
-    expect(out).toEqual({ eventId: "skqabc123", alreadyExisted: false });
+    expect(out).toEqual({ eventId: "skqabc123", alreadyExisted: false, meetLink: true });
     expect(insert).toHaveBeenCalledTimes(1);
     expect(insert.mock.calls[0]![0]).toEqual({
       calendarId: "primary",
@@ -60,7 +60,18 @@ describe("GoogleCalendarInviter", () => {
   it("409 (this event id already exists) means an earlier approve created it; other errors throw", async () => {
     insert.mockRejectedValueOnce(Object.assign(new Error("duplicate"), { code: 409 }));
     await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).resolves.toEqual({ eventId: "skqabc123", alreadyExisted: true });
-    insert.mockRejectedValueOnce(Object.assign(new Error("forbidden"), { code: 403 }));
-    await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).rejects.toThrow("forbidden");
+    insert.mockRejectedValueOnce(Object.assign(new Error("duplicate"), { status: 409 })); // gaxios 7+
+    await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).resolves.toMatchObject({ alreadyExisted: true });
+    insert.mockRejectedValueOnce(Object.assign(new Error("forbidden"), { status: 403 }));
+    await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).rejects.toMatchObject({ name: "ProviderRefusedError" });
+    insert.mockRejectedValueOnce(Object.assign(new Error("backend"), { status: 503 }));
+    await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).rejects.toThrow("backend");
+    insert.mockRejectedValueOnce(new Error("socket hang up"));
+    await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).rejects.toThrow("socket hang up");
+  });
+
+  it("Meet asked for but not created: reported, not hidden", async () => {
+    insert.mockResolvedValue({ data: { id: "skqabc123", conferenceData: { createRequest: { status: { statusCode: "failure" } } } } });
+    await expect(new GoogleCalendarInviter({} as never).insertInvite(event)).resolves.toEqual({ eventId: "skqabc123", alreadyExisted: false, meetLink: false });
   });
 });

@@ -17,6 +17,8 @@ export type { DraftKind };
 export interface SendResult {
   messageId?: string;
   threadId?: string;
+  /** It was sent, but not quite as read back (e.g. Google made no Meet link). Told to the owner. */
+  warning?: string;
 }
 
 /**

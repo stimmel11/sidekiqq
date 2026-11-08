@@ -68,7 +68,10 @@ const P = {
   // Also any other meetings endpoint (PATCH /meetings/{id}, /registrants) and the fields that make Zoom email people.
   // Google Calendar event writes (CONNECTORS.md §6): every one of them can notify attendees, and a
   // regex can't check a `sendUpdates` value, so ANY events write is allowed only in google/send.ts.
-  calendarWrite: /\bevents\s*\.\s*(insert|patch|update|delete|move|import|quickAdd)\b/,
+  // Also other Calendar writes that notify people (acl.insert shares a calendar by email), bracket
+  // access (`events["insert"]`) and a raw REST path to the events collection.
+  calendarWrite:
+    /\bevents\s*\.\s*(insert|patch|update|delete|move|import|quickAdd)\b|\bevents\s*\[\s*["'`](insert|patch|update|delete|move|import|quickAdd)["'`]\s*\]|\b(acl|calendars|calendarList)\s*\.\s*(insert|patch|update)\b|calendar\/v3\/calendars\/[^"'`\s]*\/events/,
   inviter: /\bGoogleCalendarInviter\b|\binsertInvite\b/,
   inviteExecutor: /\bgoogleInviteExecutor\b/,
   zoomApi: /api\.zoom(gov)?\.(us|com)|\bmeetings\/|users\/[^"'`\s]*\/meetings|meeting_invitees|alternative_hosts|schedule_for|registrants\b/,
@@ -139,7 +142,10 @@ describe("no route other than draft-approve can send mail (static)", () => {
   }
 
   it("the calendar write pattern catches every Google events write, not reads", () => {
-    for (const c of ["calendar.events.insert({", "cal.events . patch(", "events.update(", "events.delete(", "events.move(", "events.import(", "events.quickAdd("]) {
+    for (const c of [
+      "calendar.events.insert({", "cal.events . patch(", "events.update(", "events.delete(", "events.move(", "events.import(", "events.quickAdd(",
+      'events["insert"](', "calendar.acl.insert(", "calendars.insert(", "calendarList.insert(", "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+    ]) {
       expect(P.calendarWrite.test(c), c).toBe(true);
     }
     for (const c of ["calendar.events.list({", "events.get(", "events.watch(", "const events = []"]) expect(P.calendarWrite.test(c), c).toBe(false);

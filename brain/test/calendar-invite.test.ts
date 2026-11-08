@@ -59,7 +59,7 @@ describe("calendar.invite.prepare (the prepare path)", () => {
   it("makes one pending calendar_invite Draft with a code-built readback, and writes nothing anywhere", async () => {
     const { deps } = await setup();
     const out = await prepareCalendarInvite(deps, invite({ conference: "meet", location: "Room 4", body: "Agenda: scope" }), { caller: "ask", device: "phone" });
-    expect(out.readback).toBe("Calendar invite to dana@acme.com, Tue Nov 3 2–2:30 pm, with a Google Meet link, with the title: Kickoff.");
+    expect(out.readback).toBe("Calendar invite to dana@acme.com, Tue Nov 3 2–2:30 pm, with a Google Meet link, with the title: Kickoff, and the location: Room 4.");
     const d = await deps.repos.drafts.get(out.draftId);
     expect(d).toMatchObject({
       kind: "calendar_invite",
@@ -222,6 +222,57 @@ describe("approving an invite (the only path that writes the event)", () => {
     const again = await approve(req("POST", "/x", { token }), params({ id: out.draftId }));
     expect(again.status).toBe(409);
     expect(deps.inviter.insertInvite).toHaveBeenCalledTimes(1);
+  });
+
+  it("an invalid invite gets its own code, not the Gmail one", async () => {
+    const { deps, token } = await setup();
+    const d = await deps.repos.drafts.create({ kind: "calendar_invite", to: ["dana@acme.com, x@evil.example"], subject: "x", body: "", when: { start: "2026-11-03T21:00:00Z", end: "2026-11-03T21:30:00Z" } });
+    const res = await approve(req("POST", "/x", { token }), params({ id: d.id }));
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_draft");
+  });
+
+  it("Google refusing (4xx) is a definite not-sent: 422 provider_refused, still pending", async () => {
+    const { deps, token } = await setup();
+    const { ProviderRefusedError } = await import("@/lib/connectors/types");
+    const out = await prepareCalendarInvite(deps, invite(), { caller: "ask" });
+    deps.inviter.error = new ProviderRefusedError("Google refused the invite (HTTP 403).");
+    const res = await approve(req("POST", "/x", { token }), params({ id: out.draftId }));
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe("provider_refused");
+    expect((await deps.repos.drafts.get(out.draftId))?.status).toBe("pending");
+  });
+
+  it("no Meet link created: still sent, but the owner is told", async () => {
+    const { deps, token } = await setup();
+    const out = await prepareCalendarInvite(deps, invite({ conference: "meet" }), { caller: "ask" });
+    deps.inviter.insertInvite.mockResolvedValueOnce({ eventId: inviteEventId(out.draftId), alreadyExisted: false, meetLink: false });
+    const res = await approve(req("POST", "/x", { token }), params({ id: out.draftId }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { warning?: string }).warning).toMatch(/without one/);
+    const [t] = await deps.repos.timeline.since("2000-01-01T00:00:00Z");
+    expect(t?.event).toMatch(/Meet link/);
+  });
+
+  it("a lazy-expiry discard never overwrites a sent invite", async () => {
+    const { deps } = await setup();
+    const out = await prepareCalendarInvite(deps, invite(), { caller: "ask" });
+    await deps.repos.drafts.markSent(out.draftId, "evt");
+    await deps.repos.drafts.markDiscarded(out.draftId);
+    expect((await deps.repos.drafts.get(out.draftId))?.status).toBe("sent");
+  });
+
+  it("GET /api/drafts doesn't discard an expired invite while an approve holds its lock", async () => {
+    const { deps, token } = await setup();
+    const out = await prepareCalendarInvite(deps, invite(), { caller: "ask" });
+    deps.setNow(new Date("2026-11-03T21:00:00Z"));
+    expect(await deps.repos.drafts.acquireSendLock(out.draftId)).toBe(true);
+    const res = await listDrafts(req("GET", "/api/drafts", { token }), params({}));
+    expect(((await res.json()) as { items: unknown[] }).items).toEqual([]);
+    expect((await deps.repos.drafts.get(out.draftId))?.status).toBe("pending");
+  });
+
+  it("the registry has exactly the Gmail and invite executors", () => {
+    expect(makeDeps().senders().keys().sort()).toEqual(["google:calendar_invite", "google:email"]);
   });
 
   it("no Meet link unless the draft asked for one", async () => {

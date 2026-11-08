@@ -347,6 +347,8 @@ function upgradeLegacyDraft(raw: unknown): unknown {
       cc: strs(d.cc),
       subject: typeof d.subject === "string" ? d.subject : "",
       ...(when.success ? { when: when.data } : {}),
+      ...(d.conference === "meet" ? { conference: "meet" as const } : {}),
+      ...(typeof d.location === "string" ? { location: d.location } : {}),
     });
   }
   return d;

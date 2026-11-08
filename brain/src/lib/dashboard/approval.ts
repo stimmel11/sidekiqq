@@ -47,6 +47,8 @@ const CODE_MESSAGES: Record<string, string> = {
   changed_in_provider: "The draft was changed in Gmail after it was drafted, so nothing was sent. It has been marked discarded; review it in Gmail.",
   no_provider_draft: "This draft has no Gmail draft attached, so it can't be sent from here.",
   unsupported_kind: "This kind of draft can't be approved yet. Nothing was sent.",
+  invalid_draft: "This draft can't be sent as stored, so nothing was sent. Ask SideKiqq to prepare it again.",
+  provider_refused: "The provider refused it, so nothing was sent. It is still pending; reconnecting the account from Connections may help.",
   expired: "The invite's start time has passed, so nothing was sent. It has been marked discarded; ask SideKiqq for a new invite.",
 };
 

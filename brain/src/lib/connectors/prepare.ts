@@ -1,4 +1,5 @@
 import type { Deps } from "../deps";
+import { config } from "../env";
 import { truncate } from "../util";
 import { CalendarInvitePrepareInput, OWNER_INITIATED, POLICY, type CalendarInvitePrepareIn, type PrepareOutput } from "./capabilities";
 import { connectorFor } from "./invoke";
@@ -23,7 +24,7 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *  4. Input is validated (strict bare attendee addresses, end after start, max length) and the
  *     start must be in the future (and within a year) by the brain's clock.
  *  5. The read-back must fit one /api/speak call; longer is refused, never truncated.
- *  6. Every attempt that passes rule 2 writes an audit row (body redacted: only title, time and
+ *  6. Every attempt that passes rule 2 writes an audit row, refusals included (body redacted: only title, time and
  *     attendee count).
  */
 
@@ -37,21 +38,6 @@ export async function prepareCalendarInvite(deps: Deps, input: unknown, ctx: Con
 
   const connector = connectorFor(deps.connectors(), cap);
   if (!connector) throw new CapabilityUnavailableError(cap);
-
-  const stored = await deps.connections.load(connector.id);
-  if (stored) {
-    if (stored.status === "needs_reauth") {
-      throw new ConnectionUnusableError(cap, connector.id, "needs_reauth", `${connector.displayName} needs to be reconnected before SideKiqq can use it. Ask the owner to reconnect it.`);
-    }
-    if (!effectiveCapabilities(connector, stored).includes(cap)) {
-      throw new ConnectionUnusableError(
-        cap,
-        connector.id,
-        "disabled",
-        `Calendar invites are turned off for ${connector.displayName}, or the calendar permission was not granted. The owner can turn it on by reconnecting Google from Connections.`,
-      );
-    }
-  }
 
   const audit = async (ok: boolean, summary: string, error?: string) => {
     await deps.repos.audit
@@ -67,6 +53,23 @@ export async function prepareCalendarInvite(deps: Deps, input: unknown, ctx: Con
       })
       .catch((err: unknown) => console.warn("[audit] write failed", err));
   };
+
+  const stored = await deps.connections.load(connector.id);
+  if (stored) {
+    if (stored.status === "needs_reauth") {
+      await audit(false, "invite (connection needs reauth)", "needs_reauth");
+      throw new ConnectionUnusableError(cap, connector.id, "needs_reauth", `${connector.displayName} needs to be reconnected before SideKiqq can use it. Ask the owner to reconnect it.`);
+    }
+    if (!effectiveCapabilities(connector, stored).includes(cap)) {
+      await audit(false, "invite (capability off or not granted)", "disabled");
+      throw new ConnectionUnusableError(
+        cap,
+        connector.id,
+        "disabled",
+        `Calendar invites are turned off for ${connector.displayName}, or the calendar permission was not granted. The owner can turn it on by reconnecting Google from Connections.`,
+      );
+    }
+  }
 
   const parsed = CalendarInvitePrepareInput.safeParse(input);
   if (!parsed.success) {
@@ -88,7 +91,10 @@ export async function prepareCalendarInvite(deps: Deps, input: unknown, ctx: Con
   if (start.getTime() > now + INVITE_MAX_AHEAD_MS) await refuse("the start time is more than a year away");
 
   const when = { start: start.toISOString(), end: end.toISOString() };
-  const rb = buildReadback({ kind: "calendar_invite", to: i.attendees, subject: i.title, when, ...(i.conference ? { conference: i.conference } : {}) });
+  const rb = buildReadback(
+    { kind: "calendar_invite", to: i.attendees, subject: i.title, when, ...(i.conference ? { conference: i.conference } : {}), ...(i.location ? { location: i.location } : {}) },
+    config.ownerTimezone(),
+  );
   if (rb.length > READBACK_MAX_CHARS) await refuse(new ReadbackTooLongError(rb.length).message);
 
   try {

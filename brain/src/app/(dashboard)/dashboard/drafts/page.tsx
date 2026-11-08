@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Drafts" };
 export const dynamic = "force-dynamic";
 
 const DONE: Record<string, string> = {
-  sent: "Sent. The email went out from your Gmail and the follow-up is closed.",
+  sent: "Sent. It went out from your Google account, and any linked follow-up is closed.",
   discarded: "Discarded. Nothing was sent; the Gmail copy is still in your Drafts folder.",
 };
 
@@ -50,7 +50,7 @@ export default async function DraftsPage({ searchParams }: { searchParams: Promi
                   <span className="font-heading text-h3 text-text group-hover:underline">{d.subject || "(no subject)"}</span>
                   {d.client && <Tag>{d.client}</Tag>}
                 </span>
-                <span className="text-body text-text-muted">To {d.to.join(", ")}</span>
+                <span className="text-body text-text-muted">{d.kind === "calendar_invite" ? "Invite" : "To"} {d.to.join(", ")}</span>
                 <span className="line-clamp-2 text-small text-text-muted">{d.body}</span>
                 <span className="mt-1 font-mono text-data text-text-muted">drafted {formatDateTime(d.createdAt)}</span>
               </Link>

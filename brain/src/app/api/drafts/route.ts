@@ -17,7 +17,17 @@ export const GET = withDevice(async (_req, { deps }) => {
   const listed: Draft[] = [];
   for (const d of await deps.repos.drafts.listPending()) {
     if (d.kind !== "email" && d.when && Date.parse(d.when.start) <= now) {
-      await deps.repos.drafts.markDiscarded(d.id).catch(() => undefined);
+      // Under the approve route's per-draft lock, so an approve already running can't be overwritten.
+      if (await deps.repos.drafts.acquireSendLock(d.id).catch(() => false)) {
+        try {
+          const fresh = await deps.repos.drafts.get(d.id);
+          if (fresh?.status === "pending") await deps.repos.drafts.markDiscarded(d.id);
+        } catch {
+          // best effort
+        } finally {
+          await deps.repos.drafts.releaseSendLock(d.id).catch(() => undefined);
+        }
+      }
       continue;
     }
     listed.push(d);

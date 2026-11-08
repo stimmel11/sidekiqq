@@ -1,5 +1,6 @@
 import { withDevice } from "@/lib/auth";
 import { HttpError, json } from "@/lib/http";
+import { ProviderRefusedError } from "@/lib/connectors/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +41,7 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
     const executor = registry.for(fresh);
     const check = await executor.check(fresh);
     if (!check.ok) {
-      if (check.reason === "invalid") throw new HttpError(422, check.message, "no_provider_draft");
+      if (check.reason === "invalid") throw new HttpError(422, check.message, fresh.kind === "email" ? "no_provider_draft" : "invalid_draft");
       // Gone or changed in the provider: the stored read-back no longer describes what would be
       // sent, so the record is retired and nothing is sent.
       await drafts.markDiscarded(fresh.id);
@@ -49,7 +50,14 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
       throw new HttpError(410, check.message, "gone");
     }
 
-    const sent = await executor.execute(fresh);
+    let sent;
+    try {
+      sent = await executor.execute(fresh);
+    } catch (err) {
+      // A definite refusal: nothing was sent and the draft stays pending.
+      if (err instanceof ProviderRefusedError) throw new HttpError(422, err.message, "provider_refused");
+      throw err;
+    }
     await drafts.markSent(fresh.id, sent.messageId);
 
     if (fresh.followupId) await followups.resolve(fresh.followupId).catch(() => undefined);
@@ -58,7 +66,7 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
         ...(fresh.client ? { client: fresh.client } : {}),
         event:
           fresh.kind === "calendar_invite"
-            ? `Calendar invite sent to ${fresh.to.join(", ")}: "${fresh.subject}" (approved on ${device.kind})`
+            ? `Calendar invite sent to ${fresh.to.join(", ")}: "${fresh.subject}" (approved on ${device.kind})${sent.warning ? `. ${sent.warning}` : ""}`
             : `Email sent to ${fresh.to.join(", ")}: "${fresh.subject}" (approved on ${device.kind})`,
         people: fresh.to,
         categories: fresh.kind === "calendar_invite" ? ["Scheduling"] : ["Follow-Up"],
@@ -67,7 +75,7 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
       })
       .catch(() => undefined);
     await state.invalidateTop5().catch(() => undefined);
-    return json({ ok: true as const });
+    return json({ ok: true as const, ...(sent.warning ? { warning: sent.warning } : {}) });
   } finally {
     await drafts.releaseSendLock(draft.id);
   }

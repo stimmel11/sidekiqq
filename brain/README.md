@@ -115,7 +115,7 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
    Configure the OAuth consent screen (External, add yourself as a test user, or publish). Create an OAuth client of
    type *Web application* with redirect URI `https://<your-domain>/api/google/callback` (plus
    `http://localhost:3000/api/google/callback` for dev). Scopes requested: `gmail.readonly`, `gmail.compose`,
-   `calendar.readonly`, `drive.readonly`, `contacts.readonly`, `contacts.other.readonly`, `openid email`.
+   `calendar.readonly`, `calendar.events` (calendar invites, only after you approve one), `drive.readonly`, `contacts.readonly`, `contacts.other.readonly`, `openid email`.
    An account connected before the contacts scopes were added must reconnect once to grant them.
    Note: while the app is in "Testing" status, Google expires refresh tokens after 7 days. Publish the app for a
    long-lived connection.

@@ -27,7 +27,7 @@ struct DraftConfirmSheet: View {
                     if let location = draft.location, draft.isInvite { field("Location", location) }
                     field(draft.isInvite ? "Attendees" : "To", draft.to.joined(separator: ", "))
                     if !draft.cc.isEmpty { field("Cc", draft.cc.joined(separator: ", ")) }
-                    field(draft.isInvite ? "Title" : "Subject", draft.subject.isEmpty ? "(no subject)" : draft.subject)
+                    field(draft.isInvite ? "Title" : "Subject", draft.subject.isEmpty ? (draft.isInvite ? "(no title)" : "(no subject)") : draft.subject)
                     if let client = draft.client { field("Client", client) }
                     Divider()
                     Text(draft.body)
@@ -107,7 +107,9 @@ struct DraftConfirmSheet: View {
             return
         }
         uncertain = true
-        error = "Not sure this was sent: SideKiqq didn't answer clearly. Check your Sent mail and the Drafts tab before trying again."
+        error = draft.isInvite
+            ? "Not sure this invite was sent: SideKiqq didn't answer clearly. Check your calendar and the Drafts tab before trying again."
+            : "Not sure this was sent: SideKiqq didn't answer clearly. Check your Sent mail and the Drafts tab before trying again."
     }
 }
 

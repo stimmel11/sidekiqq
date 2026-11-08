@@ -137,7 +137,7 @@ export class SpyMailSender implements MailSender {
 export class SpyCalendarInviter implements CalendarInviter {
   events = new Map<string, InviteEvent>();
   error: Error | null = null;
-  insertInvite = vi.fn(async (e: InviteEvent) => {
+  insertInvite = vi.fn(async (e: InviteEvent): Promise<{ eventId: string; alreadyExisted: boolean; meetLink?: boolean }> => {
     if (this.error) throw this.error;
     if (this.events.has(e.eventId)) return { eventId: e.eventId, alreadyExisted: true };
     this.events.set(e.eventId, e);

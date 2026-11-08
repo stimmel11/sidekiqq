@@ -35,7 +35,13 @@ runs only from approve: re-checks strict attendees and a future start (else 410 
 `events.insert` on `primary` with `sendUpdates: "all"`, `guestsCanInviteOthers: false`, a Meet
 `conferenceData.createRequest` when asked, and an event id derived from the draft id (a retried approve
 can't make a second event). Scope `calendar.events`, so existing owners reconnect Google to turn it on.
-`GET /api/drafts` discards calendar drafts whose start has passed. Claude tool: `create_calendar_invite`.
+`GET /api/drafts` discards calendar drafts whose start has passed (under the send lock; a sent draft is never
+overwritten). Claude tool: `create_calendar_invite`. The readback adds "with a Google Meet link" and, last,
+the cleaned location. A 4xx from Google at approve is 422 `provider_refused` (still pending); a Meet link
+Google didn't create is reported as an approve `warning`. Deviations to resolve later: `calendar.events` is
+requested for every owner at connect (no incremental scopes yet, §7), and an already-pending invite stays
+approvable if the owner switches invites off afterwards (approve doesn't re-check the switch).
+Attendees see each other (Google's default `guestsCanSeeOtherGuests`).
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 
@@ -344,7 +350,7 @@ Initial scope plan (verify each against the provider's current docs when impleme
 |---|---|---|
 | Google | email.read / email.draft / email.send | `gmail.readonly`, `gmail.compose` (today's scopes; compose also permits `messages.send`, which is why the scan bans it outside `send.ts`) |
 | Google | calendar.read | `calendar.readonly` (today) |
-| Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (new, only when enabled) |
+| Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (requested at connect since 2026-11-08; per-capability scopes later) |
 | Google | files.read | `drive.readonly` (today) |
 | Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (requested since 2026-10-25; People API search needs an empty warm-up query first) |
 | Microsoft 365 | email.read | `Mail.Read`, `offline_access`, `User.Read` (slice 1, `lib/microsoft/mail.ts`) |

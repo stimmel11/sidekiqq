@@ -5,6 +5,7 @@ import { addressesIn, normalizeAddress } from "../../address";
 import type { DraftEnvelope, Workspace } from "../../google/workspace";
 import type { Draft } from "../../models";
 import type { DraftCheck, DraftExecutor } from "../senders";
+import { ProviderRefusedError } from "../types";
 
 /**
  * THE ONLY CODE THAT SENDS GMAIL OR WRITES GOOGLE CALENDAR EVENTS.
@@ -93,8 +94,12 @@ export interface InviteEvent {
 }
 
 export interface CalendarInviter {
-  /** Inserts the event and notifies the attendees. `alreadyExisted`: an earlier attempt created it. */
-  insertInvite(e: InviteEvent): Promise<{ eventId: string; alreadyExisted: boolean }>;
+  /**
+   * Inserts the event and notifies the attendees. `alreadyExisted`: an earlier attempt created it.
+   * `meetLink`: false when a Meet link was asked for but Google didn't create one.
+   * Throws ProviderRefusedError on a definite refusal (4xx other than 409).
+   */
+  insertInvite(e: InviteEvent): Promise<{ eventId: string; alreadyExisted: boolean; meetLink?: boolean }>;
 }
 
 export class GoogleCalendarInviter implements CalendarInviter {
@@ -121,15 +126,29 @@ export class GoogleCalendarInviter implements CalendarInviter {
           ...(e.meet ? { conferenceData: { createRequest: { requestId: e.requestId, conferenceSolutionKey: { type: "hangoutsMeet" } } } } : {}),
         },
       });
-      return { eventId: res.data.id ?? e.eventId, alreadyExisted: false };
+      // Google can still create the event (and email everyone) when it can't make the Meet link,
+      // e.g. Meet turned off by a Workspace admin: report that rather than claim a link.
+      const meetLink = e.meet ? Boolean(res.data.hangoutLink) || res.data.conferenceData?.createRequest?.status?.statusCode === "pending" : undefined;
+      return { eventId: res.data.id ?? e.eventId, alreadyExisted: false, ...(meetLink === undefined ? {} : { meetLink }) };
     } catch (err) {
+      const status = httpStatus(err);
       // 409: an event with this id exists, i.e. an earlier approve of this same draft created it.
-      if ((err as { code?: unknown; status?: unknown })?.code === 409 || (err as { status?: unknown })?.status === 409) {
-        return { eventId: e.eventId, alreadyExisted: true };
+      // (Ids of deleted events stay reserved too; then no event exists, which the owner can see.)
+      if (status === 409) return { eventId: e.eventId, alreadyExisted: true };
+      // Any other 4xx: Google refused it, so nothing was created or sent.
+      if (status !== undefined && status >= 400 && status < 500) {
+        throw new ProviderRefusedError(status === 403 || status === 401 ? "Google refused the invite: SideKiqq lacks calendar permission. Reconnect Google from Connections." : `Google refused the invite (HTTP ${status}). Nothing was sent.`);
       }
       throw err;
     }
   }
+}
+
+/** HTTP status of a googleapis (gaxios) error: `status` (gaxios 7+), `code` or `response.status`. */
+function httpStatus(err: unknown): number | undefined {
+  const e = err as { status?: unknown; code?: unknown; response?: { status?: unknown } } | null;
+  for (const v of [e?.status, e?.response?.status, e?.code]) if (typeof v === "number") return v;
+  return undefined;
 }
 
 /**
@@ -171,7 +190,10 @@ export function googleInviteExecutor(inviter: () => Promise<CalendarInviter>, cl
         meet: d.conference === "meet",
         requestId: d.id,
       });
-      return { messageId: created.eventId };
+      return {
+        messageId: created.eventId,
+        ...(created.meetLink === false ? { warning: "Google didn't add a Meet link, so the invite went out without one." } : {}),
+      };
     },
   };
 }
