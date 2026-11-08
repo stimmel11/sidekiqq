@@ -22,9 +22,12 @@ struct DraftConfirmSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: SideKiqqTheme.Space.s4) {
-                    field("To", draft.to.joined(separator: ", "))
+                    // The brain's code-built sentence: every attendee/recipient, the time, Meet, the title.
+                    if draft.isInvite, !draft.readback.isEmpty { field("Invite", draft.readback) }
+                    if let location = draft.location, draft.isInvite { field("Location", location) }
+                    field(draft.isInvite ? "Attendees" : "To", draft.to.joined(separator: ", "))
                     if !draft.cc.isEmpty { field("Cc", draft.cc.joined(separator: ", ")) }
-                    field("Subject", draft.subject.isEmpty ? "(no subject)" : draft.subject)
+                    field(draft.isInvite ? "Title" : "Subject", draft.subject.isEmpty ? "(no subject)" : draft.subject)
                     if let client = draft.client { field("Client", client) }
                     Divider()
                     Text(draft.body)
@@ -32,7 +35,9 @@ struct DraftConfirmSheet: View {
                         .foregroundStyle(SideKiqqTheme.Palette.text)
                         .textSelection(.enabled)
                         .accessibilityLabel("Message: \(draft.body)")
-                    Text("Nothing is sent until you tap Send.")
+                    Text(!draft.isApprovable ? "This app can't approve this kind of draft yet. Nothing was sent."
+                         : draft.isInvite ? "Nothing is sent until you tap Send. Google Calendar then emails an invitation to every attendee."
+                         : "Nothing is sent until you tap Send.")
                         .font(SKFont.small)
                         .foregroundStyle(SideKiqqTheme.Palette.textMuted)
                     if let error { ErrorBanner(message: error) }
@@ -51,10 +56,10 @@ struct DraftConfirmSheet: View {
                     if sending {
                         ProgressView().accessibilityLabel("Sending")
                     } else {
-                        Button("Send") { send() }
+                        Button(draft.isInvite ? "Send invite" : "Send") { send() }
                             .fontWeight(.semibold)
-                            .disabled(uncertain)
-                            .accessibilityLabel("Send email to \(DraftConfirmation.spokenRecipients(draft.to))")
+                            .disabled(uncertain || !draft.isApprovable)
+                            .accessibilityLabel("\(draft.isInvite ? "Send invite" : "Send email") to \(DraftConfirmation.spokenRecipients(draft.to))")
                     }
                 }
             }
@@ -75,7 +80,7 @@ struct DraftConfirmSheet: View {
     }
 
     private func send() {
-        guard !sending, !uncertain else { return } // no double send from a double tap
+        guard !sending, !uncertain, draft.isApprovable else { return } // no double send from a double tap
         sending = true
         error = nil
         Task {

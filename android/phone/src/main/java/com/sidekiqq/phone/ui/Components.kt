@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.sidekiqq.phone.ui.theme.color
+import com.sidekiqq.shared.model.DraftKind
 import com.sidekiqq.shared.model.Importance
 
 @Composable
@@ -66,25 +67,46 @@ fun ApproveDraftDialog(
     message: String?,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    /** The draft's kind ([DraftKind]); null = email (older brains). Unknown kinds get no Send button. */
+    kind: String? = null,
 ) {
+    val k = DraftKind.of(kind)
+    val invite = k == DraftKind.CALENDAR_INVITE
+    val approvable = k in DraftKind.APPROVABLE
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (recipient != null) "Send to $recipient?" else "Send this draft?") },
+        title = {
+            Text(
+                when {
+                    !approvable -> "Review in the dashboard"
+                    invite -> "Send this invite?"
+                    recipient != null -> "Send to $recipient?"
+                    else -> "Send this draft?"
+                }
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    message ?: "Send the draft SideKiqq prepared. Review it in Gmail first if you're unsure.",
+                    message ?: if (invite) "Send the calendar invite SideKiqq prepared." else "Send the draft SideKiqq prepared. Review it in Gmail first if you're unsure.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "This message will be sent from your account. It can't be unsent.",
+                    when {
+                        !approvable -> "This app can't approve this kind of draft yet. Nothing was sent."
+                        invite -> "Google Calendar will email an invitation to every attendee from your account. It can't be unsent."
+                        else -> "This message will be sent from your account. It can't be unsent."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        confirmButton = { Button(onClick = onConfirm) { Text("Send") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            if (approvable) Button(onClick = onConfirm) { Text(if (invite) "Send invite" else "Send") }
+            else TextButton(onClick = onDismiss) { Text("OK") }
+        },
+        dismissButton = { if (approvable) TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

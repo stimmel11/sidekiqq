@@ -38,8 +38,8 @@ the thinking.
 | GET | /api/followups | – | `{ "items": FollowUp[] }` |
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
-| GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
+| GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation. Calendar drafts whose start has passed are marked discarded and not listed |
+| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 410 `expired` (a calendar invite whose start time has passed; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
 | POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
@@ -51,9 +51,11 @@ the thinking.
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
 
-Drafts: every action the owner must confirm is a stored Draft (`docs/CONNECTORS.md` §5). Today only `kind: "email"`
-is created; calendar kinds are in the model but are not created or approvable until the phone's confirm dialog
-depends on `kind`. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
+Drafts: every action the owner must confirm is a stored Draft (`docs/CONNECTORS.md` §5). `kind: "email"` and
+`kind: "calendar_invite"` (from the `/api/ask` tool `create_calendar_invite`, optionally with a Google Meet link) are
+created and approvable; approving an invite inserts the event on the owner's Google Calendar and Google emails every
+attendee. `calendar_hold` is modelled only (422 `unsupported_kind`). Devices word their confirm step by kind
+(`Action.draftKind` / `DraftItem.kind`) and never offer to approve a kind they don't know. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
 (replaces `gmailDraftId`), `providerMessageId` (replaces `gmailMessageId`), `threadId`, `followupId` and `sentAt`;
 records written before these fields existed are upgraded on read, so old pending drafts still list and approve.
 Recipients are strict bare ASCII addresses (`name@example.com`, IDN only as `xn--` punycode; no display names,
@@ -96,7 +98,8 @@ interface FollowUp { id; person: string; client?: string; reason: string; daysQu
   importance: Importance; suggestedMessage?: string; draftId?: string; }
 interface TopItem { id; title: string; why: string; importance: Importance; dueAt?: string; }
 interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id: string;
-  summary: string /* for draft_created: the draft's `readback` */; }
+  summary: string /* for draft_created: the draft's `readback` */;
+  draftKind?: DraftKind /* draft_created only; absent from older brains = "email" */; }
 type DraftKind = "email"|"calendar_invite"|"calendar_hold";  // clients must not offer to approve kinds they don't know
 interface DraftItem { id: string; kind: DraftKind /* absent from older brains = "email" */;
   to: string[] /* recipients, or attendees for calendar_invite; empty for calendar_hold */; cc: string[];
@@ -104,7 +107,9 @@ interface DraftItem { id: string; kind: DraftKind /* absent from older brains = 
   readback: string /* ONE sentence (<= 1000 chars), built by the brain in code, never by the model: kind, every
                       address in full, the time for calendar kinds, then "with the subject: <subject>." Absent from
                       older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
-  when?: { start: string; end: string } /* calendar kinds only */; client?: string; createdAt: string; }
+  when?: { start: string; end: string } /* calendar kinds only */;
+  location?: string /* calendar kinds only */; conference?: "meet" /* calendar_invite only: Meet link added when sent */;
+  client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;

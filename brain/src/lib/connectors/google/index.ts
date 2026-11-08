@@ -6,18 +6,23 @@ import { CapabilityUnavailableError, type Connector } from "../types";
 /**
  * The built-in Google connector: Gmail, Calendar, Drive and Contacts (docs/CONNECTORS.md §8 step 1).
  * A thin wrapper over `Workspace`, so behaviour is unchanged. It has NO send path: sending a
- * Gmail draft lives only in ./send.ts, registered in the sender registry.
+ * Gmail draft and inserting a calendar invite live only in ./send.ts, registered in the sender
+ * registry. `calendar.invite.prepare` is offered here (so the owner can switch it on or off and its
+ * scope is checked) but never reaches `invoke`: lib/connectors/prepare.ts makes only the Draft.
  */
 
 const SCOPES: Partial<Record<CapabilityId, string[]>> = {
   "email.read": ["https://www.googleapis.com/auth/gmail.readonly"],
   "email.draft": ["https://www.googleapis.com/auth/gmail.compose"],
   "calendar.read": ["https://www.googleapis.com/auth/calendar.readonly"],
+  // Prepare makes only a Draft record; the scope is what the approve-time executor
+  // (./send.ts, `google:calendar_invite`) needs, so the capability is off until it is granted.
+  "calendar.invite.prepare": ["https://www.googleapis.com/auth/calendar.events"],
   "files.read": ["https://www.googleapis.com/auth/drive.readonly"],
   "contacts.lookup": ["https://www.googleapis.com/auth/contacts.readonly", "https://www.googleapis.com/auth/contacts.other.readonly"],
 };
 
-export const GOOGLE_CAPABILITIES = ["email.read", "email.draft", "calendar.read", "files.read", "contacts.lookup"] as const satisfies readonly CapabilityId[];
+export const GOOGLE_CAPABILITIES = ["email.read", "email.draft", "calendar.read", "calendar.invite.prepare", "files.read", "contacts.lookup"] as const satisfies readonly CapabilityId[];
 
 /** What the connector needs from lib/google/contacts.ts (`GoogleContacts`). Read-only. */
 export interface ContactsLookup {

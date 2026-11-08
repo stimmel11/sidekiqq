@@ -78,6 +78,11 @@ export const ActionSchema = z.object({
   type: z.enum(["draft_created", "commitment_added", "event_proposed"]),
   id: z.string(),
   summary: z.string(),
+  /**
+   * `draft_created` only: the Draft's kind, so a device can word its confirm step ("Send invite?")
+   * and refuse kinds it doesn't know. Absent from older brains = "email".
+   */
+  draftKind: z.enum(["email", "calendar_invite", "calendar_hold"]).optional(),
 });
 export type Action = z.infer<typeof ActionSchema>;
 
@@ -308,6 +313,10 @@ export type DraftKind = z.infer<typeof DraftKindSchema>;
 export const DraftWhenSchema = z.object({ start: isoDate, end: isoDate });
 export type DraftWhen = z.infer<typeof DraftWhenSchema>;
 
+/** Video link added to a calendar invite when it is executed. Zoom comes in a later slice. */
+export const DraftConferenceSchema = z.enum(["meet"]);
+export type DraftConference = z.infer<typeof DraftConferenceSchema>;
+
 /**
  * Stored records written before the connector framework (slice 3) have `gmailDraftId` /
  * `gmailMessageId` and no `kind`, `connectorId` or `readback`. Map them on read so pending drafts
@@ -382,6 +391,10 @@ export const DraftSchema = z.preprocess(
       readback: z.string().min(1),
       /** Calendar kinds only. */
       when: DraftWhenSchema.optional(),
+      /** Calendar kinds only: the event location (untrusted model text, shown, never spoken). */
+      location: z.string().optional(),
+      /** calendar_invite only: a video link the executor adds ("meet" = Google Meet). */
+      conference: DraftConferenceSchema.optional(),
       threadId: z.string().optional(),
       client: z.string().optional(),
       followupId: z.string().optional(),
@@ -391,11 +404,14 @@ export const DraftSchema = z.preprocess(
       if (d.kind === "email") {
         if (d.to.length < 1) issue("an email needs at least one recipient", "to");
         if (d.when) issue("an email has no time", "when");
+        if (d.location !== undefined) issue("an email has no location", "location");
+        if (d.conference) issue("an email has no conference link", "conference");
       } else {
         if (!d.when) issue("a calendar draft needs a start and end", "when");
         else if (Date.parse(d.when.end) <= Date.parse(d.when.start)) issue("end must be after start", "when");
         if (d.kind === "calendar_invite" && d.to.length < 1) issue("an invite needs at least one attendee", "to");
         if (d.kind === "calendar_hold" && (d.to.length > 0 || d.cc.length > 0)) issue("a hold has no attendees", "to");
+        if (d.kind === "calendar_hold" && d.conference) issue("a hold has no conference link", "conference");
         if (d.providerDraftId) issue("only email drafts have a provider draft", "providerDraftId");
       }
     }),
@@ -412,6 +428,8 @@ export const DraftListItemSchema = z.object({
   body: z.string(),
   readback: z.string(),
   when: DraftWhenSchema.optional(),
+  location: z.string().optional(),
+  conference: DraftConferenceSchema.optional(),
   client: z.string().optional(),
   createdAt: isoDate,
 });

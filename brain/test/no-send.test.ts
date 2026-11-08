@@ -66,6 +66,11 @@ const P = {
   graphVerb: /\/\s*(microsoft\.graph\.)?(send|reply|replyAll|forward)\b|["'`](microsoft\.graph\.)?(send|reply|replyAll|forward)["'`]/i,
   // Zoom meeting creation (CONNECTORS.md §6): only lib/connectors/zoom/meetings.ts, with its fixed body.
   // Also any other meetings endpoint (PATCH /meetings/{id}, /registrants) and the fields that make Zoom email people.
+  // Google Calendar event writes (CONNECTORS.md §6): every one of them can notify attendees, and a
+  // regex can't check a `sendUpdates` value, so ANY events write is allowed only in google/send.ts.
+  calendarWrite: /\bevents\s*\.\s*(insert|patch|update|delete|move|import|quickAdd)\b/,
+  inviter: /\bGoogleCalendarInviter\b|\binsertInvite\b/,
+  inviteExecutor: /\bgoogleInviteExecutor\b/,
   zoomApi: /api\.zoom(gov)?\.(us|com)|\bmeetings\/|users\/[^"'`\s]*\/meetings|meeting_invitees|alternative_hosts|schedule_for|registrants\b/,
 } as const;
 type Prim = keyof typeof P;
@@ -73,10 +78,10 @@ type Prim = keyof typeof P;
 /** EXACTLY which send primitives each file contains. Every other source file: none. */
 const ALLOWED: Record<string, Prim[]> = {
   // `senders` here is its type-only `import type { DraftExecutor } from "../senders"`.
-  [GOOGLE_SEND]: ["draftsSend", "sendDraft", "gmailSender", "googleExecutor", "executor", "execute", "senders"],
-  [SENDER_REGISTRY]: ["googleExecutor", "buildSenders", "registry", "executor", "execute"],
+  [GOOGLE_SEND]: ["draftsSend", "sendDraft", "gmailSender", "googleExecutor", "executor", "execute", "senders", "calendarWrite", "inviter", "inviteExecutor"],
+  [SENDER_REGISTRY]: ["googleExecutor", "inviteExecutor", "buildSenders", "registry", "executor", "execute"],
   // The container constructs the registry (and declares `senders()`), but never calls a sender.
-  [DEPS_MODULE]: ["gmailSender", "buildSenders", "registry", "senders"],
+  [DEPS_MODULE]: ["gmailSender", "inviter", "buildSenders", "registry", "senders"],
   [APPROVE_ROUTE]: ["senders", "execute"],
   [ZOOM_MEETINGS]: ["zoomApi"],
 };
@@ -132,6 +137,21 @@ describe("no route other than draft-approve can send mail (static)", () => {
       expect(hits(file).sort()).toEqual([...(ALLOWED[file] ?? [])].sort());
     });
   }
+
+  it("the calendar write pattern catches every Google events write, not reads", () => {
+    for (const c of ["calendar.events.insert({", "cal.events . patch(", "events.update(", "events.delete(", "events.move(", "events.import(", "events.quickAdd("]) {
+      expect(P.calendarWrite.test(c), c).toBe(true);
+    }
+    for (const c of ["calendar.events.list({", "events.get(", "events.watch(", "const events = []"]) expect(P.calendarWrite.test(c), c).toBe(false);
+    // The read path really is a read.
+    expect(code(path.join(SRC, "lib/google/workspace.ts"))).not.toMatch(P.calendarWrite);
+  });
+
+  it("the invite executor inserts with the approved draft only, from send.ts", () => {
+    const c = code(GOOGLE_SEND);
+    expect(c).toMatch(/events\s*\.\s*insert\(/);
+    expect(c).not.toMatch(/events\s*\.\s*(patch|update|delete|move|import|quickAdd)\b/);
+  });
 
   it("the Google send module uses drafts.send only, never messages.send", () => {
     expect(code(GOOGLE_SEND)).toMatch(P.draftsSend);

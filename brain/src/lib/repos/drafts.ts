@@ -35,7 +35,12 @@ export class DraftsRepo {
       kind,
       connectorId: input.connectorId ?? "google",
       cc,
-      readback: assertReadbackFits(buildReadback({ kind, to: input.to, cc, subject: input.subject, ...(input.when ? { when: input.when } : {}) }, this.timeZone())),
+      readback: assertReadbackFits(
+        buildReadback(
+          { kind, to: input.to, cc, subject: input.subject, ...(input.when ? { when: input.when } : {}), ...(input.conference ? { conference: input.conference } : {}) },
+          this.timeZone(),
+        ),
+      ),
       id: newId("drf"),
       status: "pending",
       createdAt: this.clock().toISOString(),

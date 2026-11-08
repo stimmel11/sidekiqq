@@ -80,6 +80,28 @@ class JsonSerializationTest {
     }
 
     @Test
+    fun draftKindOnActionsAndInviteFieldsOnDrafts() {
+        val r = json.decodeFromString(
+            AskResponse.serializer(),
+            """{"reply":"r","spoken":"s","conversationId":"c",
+               "actions":[{"type":"draft_created","id":"d2","summary":"Calendar invite to dana@acme.com","draftKind":"calendar_invite"}]}"""
+        )
+        assertEquals(Action(ActionType.DRAFT_CREATED, "d2", "Calendar invite to dana@acme.com", "calendar_invite"), r.actions.single())
+        assertEquals(DraftKind.CALENDAR_INVITE, DraftKind.of(r.actions.single().draftKind))
+        assertEquals(DraftKind.EMAIL, DraftKind.of(null))
+        assertEquals(false, "calendar_hold" in DraftKind.APPROVABLE)
+
+        val d = json.decodeFromString(
+            Draft.serializer(),
+            """{"id":"d2","kind":"calendar_invite","to":["dana@acme.com"],"cc":[],"subject":"Kickoff","body":"",
+               "readback":"Calendar invite to dana@acme.com","when":{"start":"2026-11-03T21:00:00.000Z","end":"2026-11-03T21:30:00.000Z"},
+               "location":"Room 4","conference":"meet","createdAt":"2026-11-02T15:00:00.000Z"}"""
+        )
+        assertEquals("Room 4", d.location)
+        assertEquals("meet", d.conference)
+    }
+
+    @Test
     fun commitmentDecodesWithOptionalsMissing() {
         val items = json.decodeFromString(
             ItemsResponse.serializer(Commitment.serializer()),

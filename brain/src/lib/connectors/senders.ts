@@ -1,6 +1,6 @@
 import type { Workspace } from "../google/workspace";
 import type { Draft, DraftKind } from "../models";
-import { googleEmailExecutor, type MailSender } from "./google/send";
+import { googleEmailExecutor, googleInviteExecutor, type CalendarInviter, type MailSender } from "./google/send";
 
 export type { DraftKind };
 
@@ -23,9 +23,10 @@ export interface SendResult {
  * Whether a pending draft may be executed right now (docs/CONNECTORS.md §5). Not ok → nothing is
  * sent. `gone`: the provider draft no longer exists (410, marked discarded). `changed`: the
  * provider draft no longer matches what the read-back described (409, marked discarded).
- * `invalid`: the record can't be executed by this sender (422, left as is).
+ * `invalid`: the record can't be executed by this sender (422, left as is). `expired`: a calendar
+ * draft whose start time has passed (410 `expired`, marked discarded).
  */
-export type DraftCheck = { ok: true } | { ok: false; reason: "gone" | "changed" | "invalid"; message: string };
+export type DraftCheck = { ok: true } | { ok: false; reason: "gone" | "changed" | "invalid" | "expired"; message: string };
 
 export interface DraftExecutor {
   check(draft: Draft): Promise<DraftCheck>;
@@ -48,9 +49,8 @@ export class SenderRegistry {
 
   /**
    * `(connectorId, kind)`. Drafts created before slice 3 have neither field; DraftSchema defaults
-   * them to ("google", "email") on read. Calendar kinds have no executor registered yet, so they
-   * can't be approved until the calendar connector item adds one (and the phone's confirm dialog
-   * depends on `kind`).
+   * them to ("google", "email") on read. `calendar_hold` has no executor yet, so it can't be
+   * approved (422 `unsupported_kind`).
    */
   static keyFor(draft: Pick<Draft, "connectorId" | "kind">): string {
     return `${draft.connectorId}:${draft.kind}`;
@@ -74,11 +74,13 @@ export class SenderRegistry {
 }
 
 export interface SenderFactories {
-  google: { workspace: () => Promise<Workspace>; mailer: () => Promise<MailSender> };
+  google: { workspace: () => Promise<Workspace>; mailer: () => Promise<MailSender>; calendar: () => Promise<CalendarInviter> };
+  clock?: () => Date;
 }
 
 export function buildSenders(f: SenderFactories): SenderRegistry {
   return new SenderRegistry({
     "google:email": googleEmailExecutor(f.google.workspace, f.google.mailer),
+    "google:calendar_invite": googleInviteExecutor(f.google.calendar, f.clock),
   });
 }

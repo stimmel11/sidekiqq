@@ -25,6 +25,8 @@ export interface ReadbackFields {
   cc?: readonly string[];
   subject: string;
   when?: { start: string; end: string };
+  /** calendar_invite only: a video link the executor will add. */
+  conference?: "meet";
 }
 
 /** Longest subject/title spoken. Addresses are never shortened. */
@@ -107,6 +109,7 @@ export function formatWhen(when: { start: string; end: string }, timeZone: strin
  * Examples:
  *  - `Email to dana@acme.com, cc ops@acme.com, with the subject: Proposal follow-up.`
  *  - `Calendar invite to dana@acme.com and lee@acme.com, Tue Oct 27 2–3 pm, with the title: Kickoff.`
+ *  - `Calendar invite to dana@acme.com, Tue Oct 27 2–3 pm, with a Google Meet link, with the title: Kickoff.`
  *  - `Calendar hold, Tue Oct 27 9–11 am, with the title: Focus time.`
  * Pure: it never throws. Callers that create drafts also call assertReadbackFits.
  */
@@ -119,7 +122,7 @@ export function buildReadback(d: ReadbackFields, timeZone = "UTC"): string {
   const titled = (word: string) => (subject ? `with the ${word}: ${subject}.` : `with no ${word}.`);
   switch (kind) {
     case "calendar_invite":
-      return `Calendar invite to ${list(to) || "no one"}, ${when}, ${titled("title")}`;
+      return `Calendar invite to ${list(to) || "no one"}, ${when}, ${d.conference === "meet" ? "with a Google Meet link, " : ""}${titled("title")}`;
     case "calendar_hold":
       return `Calendar hold, ${when}, ${titled("title")}`;
     default:

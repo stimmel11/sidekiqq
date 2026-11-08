@@ -10,7 +10,7 @@ import { ConnectionStore } from "./connectors/store";
 import { ZoomConnector } from "./connectors/zoom";
 import { ZoomAuth, zoomConfigFromEnv, zoomRefreshLock } from "./connectors/zoom/auth";
 import { ZoomMeetings } from "./connectors/zoom/meetings";
-import { GmailDraftSender } from "./connectors/google/send";
+import { GmailDraftSender, GoogleCalendarInviter } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
 import type { Connector } from "./connectors/types";
 import { llmFromEnv, type LLM } from "./assistant/llm";
@@ -83,7 +83,12 @@ export function buildDeps(kv: KV): Deps {
       ]),
     senders: () =>
       (senders ??= buildSenders({
-        google: { workspace: googleWorkspace, mailer: async () => new GmailDraftSender(await googleTokens.authorizedClient()) },
+        google: {
+          workspace: googleWorkspace,
+          mailer: async () => new GmailDraftSender(await googleTokens.authorizedClient()),
+          calendar: async () => new GoogleCalendarInviter(await googleTokens.authorizedClient()),
+        },
+        clock,
       })),
     push: () => (push ??= pushSenderFromEnv()),
     transcriber: () => transcriberFromEnv(),
