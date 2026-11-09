@@ -308,6 +308,8 @@ const startReachy = tool({
     const origin = ctx.request;
     if (!origin) throw new ToolInputError("Reachy can only be started from an owner request.");
     if (ctx.reachyStartQueued) throw new ToolInputError("A Reachy start is already waiting on the phone for this request.");
+    // Reachy can only hear the owner when its app is already running.
+    if (origin.deviceKind === "reachy") throw new ToolInputError("Reachy is already on: you are talking to it. Just go ahead.");
     const audit = (ok: boolean, error?: string) =>
       deps.repos.audit
         .add({

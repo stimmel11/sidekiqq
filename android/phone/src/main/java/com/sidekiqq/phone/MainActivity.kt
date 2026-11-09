@@ -301,13 +301,16 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
                 command = cmd,
                 plan = plan,
                 onOpen = open@{
-                    if (!settled() || !vm.claimHandoff(cmd, CommandResult.OPENED)) return@open
+                    if (!settled()) return@open
                     if (plan is HandoffPlan.StartReachy) {
                         // Same daemon start as the Reachy card; its snackbar reports the outcome.
-                        // Acked OPENED only once the wake is queued.
-                        vm.startReachy(plan.activity) { ok -> vm.ackHandoff(cmd, if (ok) CommandResult.OPENED else CommandResult.FAILED) }
+                        // Claimed in flight (no ack re-sent by polls) and acked OPENED only once the
+                        // wake is queued.
+                        if (!vm.claimHandoff(cmd, CommandResult.OPENED, inFlight = true)) return@open
+                        vm.startReachy(plan.activity) { result -> vm.ackHandoff(cmd, result) }
                         return@open
                     }
+                    if (!vm.claimHandoff(cmd, CommandResult.OPENED)) return@open
                     val opened = openHandoff(ctx, plan)
                     vm.ackHandoff(cmd, if (opened) CommandResult.OPENED else CommandResult.FAILED)
                     if (!opened) scope.launch { snackbar.showSnackbar("No app on this phone could open that.") }

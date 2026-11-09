@@ -126,4 +126,16 @@ class HandoffPlanTest {
         assertEquals(listOf("a" to CommandResult.FAILED, "b" to CommandResult.DISMISSED), inbox.unackedHandled(listOf(a, b, c, a)))
         assertEquals(emptyList<Pair<String, CommandResult>>(), inbox.unackedHandled(listOf(c)))
     }
+
+    @Test
+    fun inFlightClaimsResendNothingUntilTheOutcomeIsKnown() {
+        val inbox = CommandInbox()
+        val r = cmd("reachy_start", id = "s", activity = "chat")
+        assertTrue(inbox.markHandled("s", CommandResult.OPENED, inFlight = true))
+        assertEquals(emptyList<DeviceCommand>(), inbox.visible(listOf(r)))
+        assertEquals(emptyList<Pair<String, CommandResult>>(), inbox.unackedHandled(listOf(r)))
+        assertFalse(inbox.markHandled("s", CommandResult.OPENED))
+        inbox.setResult("s", CommandResult.FAILED)
+        assertEquals(listOf("s" to CommandResult.FAILED), inbox.unackedHandled(listOf(r)))
+    }
 }

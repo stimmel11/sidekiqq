@@ -39,6 +39,7 @@ export const POLICY = {
   "grocery.checkout": "user_finishes",
   "device.call": "user_finishes",
   "device.open_url": "user_finishes",
+  "device.reachy_start": "user_finishes",
 } as const satisfies Record<string, Tier>;
 
 export type CapabilityId = keyof typeof POLICY;
@@ -224,4 +225,5 @@ export const CAPABILITY_LABEL: Record<CapabilityId, string> = {
   "grocery.checkout": "Check out a grocery order",
   "device.call": "Start a phone call",
   "device.open_url": "Open a link on your phone",
+  "device.reachy_start": "Start Reachy from your phone",
 };

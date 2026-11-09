@@ -120,15 +120,24 @@ class CommandInbox(private val maxRemembered: Int = 200) {
     /** id -> what the owner chose, so a failed ack can be re-sent. Insertion-ordered for the cap. */
     private val handled = LinkedHashMap<String, CommandResult>()
 
+    /** Claimed ids whose outcome isn't known yet (a Reachy start still running): no ack is re-sent. */
+    private val inFlight = HashSet<String>()
+
     /**
      * Marks [id] handled with [result]. Returns false if it already was (a second tap must not act
-     * again; the first result stands).
+     * again; the first result stands). With [inFlight], the id is hidden but no ack is (re-)sent for
+     * it until [setResult] gives the real outcome.
      */
     @Synchronized
-    fun markHandled(id: String, result: CommandResult): Boolean {
+    fun markHandled(id: String, result: CommandResult, inFlight: Boolean = false): Boolean {
         if (id in handled) return false
         handled[id] = result
-        while (handled.size > maxRemembered) handled.remove(handled.keys.first())
+        if (inFlight) this.inFlight.add(id)
+        while (handled.size > maxRemembered) {
+            val oldest = handled.keys.first()
+            handled.remove(oldest)
+            this.inFlight.remove(oldest)
+        }
         return true
     }
 
@@ -136,6 +145,7 @@ class CommandInbox(private val maxRemembered: Int = 200) {
     @Synchronized
     fun setResult(id: String, result: CommandResult) {
         if (id in handled) handled[id] = result
+        inFlight.remove(id)
     }
 
     /**
@@ -144,7 +154,7 @@ class CommandInbox(private val maxRemembered: Int = 200) {
      */
     @Synchronized
     fun unackedHandled(polled: List<DeviceCommand>): List<Pair<String, CommandResult>> =
-        polled.mapNotNull { c -> handled[c.id]?.let { c.id to it } }.distinctBy { it.first }
+        polled.filter { it.id !in inFlight }.mapNotNull { c -> handled[c.id]?.let { c.id to it } }.distinctBy { it.first }
 
     @Synchronized
     fun isHandled(id: String): Boolean = id in handled

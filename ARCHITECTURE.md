@@ -150,7 +150,7 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
   phone. Other connector hand-offs will go through `invokeCapability` with the caller rules in `docs/CONNECTORS.md` §4.4.
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
-  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands` or `call_on_phone`) (high priority,
+  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands`, `call_on_phone` or `start_reachy`) (high priority,
   data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
   Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
   The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no

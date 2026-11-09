@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { buildCommand, CommandError, COMMAND_TARGETS } from "@/lib/commands";
 import { executeTool, TOOL_NAMES } from "@/lib/assistant/tools";
+import { invokeCapability } from "@/lib/connectors/invoke";
+import { CapabilityDeniedError } from "@/lib/connectors/types";
 import { CommandsResponseSchema, CreateCommandResponseSchema, type DeviceCommand } from "@/lib/models";
 import { makeDeps, msg, pairDevice, params, req, ScriptedLLM, toolUse } from "./fakes";
 import { POST as ask } from "@/app/api/ask/route";
@@ -151,6 +153,20 @@ describe("start_reachy via /api/ask", () => {
     const row = (await deps.repos.audit.recent()).find((a) => a.capability === "device.reachy_start");
     expect(row).toMatchObject({ ok: false });
     expect(row?.error).toMatch(/^no_target_device/);
+  });
+
+  it("asked from Reachy itself: nothing queued (it is already on)", async () => {
+    const { phone, llm, reachy } = await setup([() => msg([toolUse("start_reachy", {})]), respond], { reachy: true });
+    await askAs(reachy!.token, "start up Reachy", "reachy");
+    expect(results(llm.calls[1]!)[0]).toMatchObject({ is_error: true });
+    expect(results(llm.calls[1]!)[0]!.content).toMatch(/already on/);
+    expect(await queued(phone!.token)).toEqual([]);
+  });
+
+  it("invokeCapability('device.reachy_start') fails closed and points at start_reachy", async () => {
+    const deps = makeDeps({ now: NOW });
+    await expect(invokeCapability(deps, "device.reachy_start", {}, { caller: "ask" })).rejects.toBeInstanceOf(CapabilityDeniedError);
+    await expect(invokeCapability(deps, "device.reachy_start", {}, { caller: "ask" })).rejects.toThrow(/start_reachy/);
   });
 
   it("refuses outside an owner request", async () => {

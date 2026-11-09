@@ -30,7 +30,8 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *     calendar and device-queue items; until then they fail closed. The one exception is
  *     `device.call`, which has no connector: the /api/ask tool `call_on_phone` queues it directly
  *     (caller fixed to "ask", needs the owner request's context, number bound by
- *     lib/commands/call.ts, audited as `device.call`).
+ *     lib/commands/call.ts, audited as `device.call`). Likewise `device.reachy_start`: the /api/ask
+ *     tool `start_reachy` queues a `reachy_start` hand-off for the phone (audited the same way).
  *  5. Input is validated against the capability's schema before any connector sees it.
  *  6. The stored connection must be usable for this capability (§4 step 3): not `needs_reauth`,
  *     the capability enabled by the owner, and its scopes granted. With no stored connection the
@@ -93,7 +94,9 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
       cap,
       cap === "device.call"
         ? "calls are handed off by the call_on_phone tool, not through invokeCapability"
-        : "the owner finishes this on the phone; connector handoffs are not available yet",
+        : cap === "device.reachy_start"
+          ? "Reachy starts are handed off by the start_reachy tool, not through invokeCapability"
+          : "the owner finishes this on the phone; connector handoffs are not available yet",
     );
   }
   if (!READ_ONLY.includes(cap) && background) throw new CapabilityDeniedError(cap, "writes need an owner request");
