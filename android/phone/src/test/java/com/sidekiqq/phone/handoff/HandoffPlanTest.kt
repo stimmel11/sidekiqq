@@ -15,9 +15,10 @@ class HandoffPlanTest {
         url: String? = null,
         number: String? = null,
         app: String? = null,
+        activity: String? = null,
     ) = DeviceCommand(
         id = id, at = "2026-10-27T10:00:00Z", expiresAt = "2026-10-27T10:15:00Z", kind = kind,
-        label = "label", from = "watch", url = url, number = number, app = app,
+        label = "label", from = "watch", url = url, number = number, app = app, activity = activity,
     )
 
     @Test
@@ -63,6 +64,17 @@ class HandoffPlanTest {
             "https://meet.google.com:8443/x", "javascript:alert(1)", "intent://meet.google.com#Intent;end",
             "https://kroger.com/cart", "file:///sdcard/x", "//meet.google.com/x", "https://meet.google.com@evil.com/",
         ).forEach { assertTrue("$it", Handoffs.planFor(cmd("open_url", url = it)) is HandoffPlan.CantOpen) }
+    }
+
+    @Test
+    fun reachyStartRunsOnlyCardActivities() {
+        assertTrue(Handoffs.isPhoneKind(cmd("reachy_start")))
+        assertEquals(HandoffPlan.StartReachy("dance"), Handoffs.planFor(cmd("reachy_start", activity = "dance")))
+        assertEquals(HandoffPlan.StartReachy("brief"), Handoffs.planFor(cmd("reachy_start", activity = "brief")))
+        assertEquals(HandoffPlan.StartReachy("chat"), Handoffs.planFor(cmd("reachy_start")))
+        for (a in listOf("game", "", "Dance", "sing")) {
+            assertTrue(a, Handoffs.planFor(cmd("reachy_start", activity = a)) is HandoffPlan.CantOpen)
+        }
     }
 
     @Test

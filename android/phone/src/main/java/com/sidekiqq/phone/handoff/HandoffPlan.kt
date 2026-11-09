@@ -4,6 +4,7 @@ import com.sidekiqq.shared.model.CallApp
 import com.sidekiqq.shared.model.CommandKind
 import com.sidekiqq.shared.model.CommandResult
 import com.sidekiqq.shared.model.DeviceCommand
+import com.sidekiqq.shared.model.ReachyActivity
 import java.net.URI
 
 /**
@@ -16,6 +17,8 @@ import java.net.URI
  * - call_contact: `+?` and 3–15 digits only (the brain's normalised form). The phone opens the
  *   dialer with ACTION_DIAL, never ACTION_CALL, so the owner still taps Call.
  * - open_url: https, no credentials or port, host on the same allowlist as the brain.
+ * - reachy_start: activity chat / brief / dance only (what the Reachy card offers). The tap runs
+ *   the same daemon start as the Reachy card ([com.sidekiqq.phone.MainViewModel.startReachy]).
  */
 sealed interface HandoffPlan {
     /** Text for the main button. */
@@ -37,6 +40,14 @@ sealed interface HandoffPlan {
         override val actionLabel get() = "Open link"
     }
 
+    /**
+     * Start the SideKiqq app on Reachy through its LAN daemon (if it isn't running) and queue a
+     * `reachy_wake` with [activity]: the Reachy card's flow, run only from the dialog's button.
+     */
+    data class StartReachy(val activity: String) : HandoffPlan {
+        override val actionLabel get() = "Start Reachy"
+    }
+
     /** Shown so the owner can dismiss it, but there is no button that opens anything. */
     data class CantOpen(val reason: String) : HandoffPlan {
         override val actionLabel get() = ""
@@ -45,7 +56,10 @@ sealed interface HandoffPlan {
 
 object Handoffs {
     /** Kinds the phone runs. Other kinds (reachy_wake, kinds added later) are not shown or acked here. */
-    val PHONE_KINDS: Set<String> = setOf(CommandKind.OPEN_URL, CommandKind.CALL_CONTACT)
+    val PHONE_KINDS: Set<String> = setOf(CommandKind.OPEN_URL, CommandKind.CALL_CONTACT, CommandKind.REACHY_START)
+
+    /** Mirrors `REACHY_START_ACTIVITIES` in brain/src/lib/models.ts (the Reachy card's buttons). */
+    val REACHY_START_ACTIVITIES: Set<String> = setOf(ReachyActivity.CHAT, ReachyActivity.BRIEF, ReachyActivity.DANCE)
 
     /** Mirrors `OPEN_URL_HOSTS` / `OPEN_URL_DOMAINS` in brain/src/lib/commands/index.ts. Keep in sync. */
     val OPEN_URL_HOSTS: Set<String> = setOf("meet.google.com", "www.kroger.com", "www.kingsoopers.com")
@@ -58,6 +72,7 @@ object Handoffs {
     fun planFor(cmd: DeviceCommand): HandoffPlan = when (cmd.kind) {
         CommandKind.CALL_CONTACT -> planCall(cmd)
         CommandKind.OPEN_URL -> planUrl(cmd.url)
+        CommandKind.REACHY_START -> planReachyStart(cmd.activity)
         else -> HandoffPlan.CantOpen("This phone app doesn't know how to run this yet.")
     }
 
@@ -71,6 +86,13 @@ object Handoffs {
                 else HandoffPlan.CantOpen("WhatsApp needs an international number starting with +.")
             else -> HandoffPlan.CantOpen("This phone app doesn't know that calling app yet.")
         }
+    }
+
+    private fun planReachyStart(activity: String?): HandoffPlan {
+        // The brain defaults to chat; a missing activity from an older brain means the same.
+        val a = activity ?: ReachyActivity.CHAT
+        return if (a in REACHY_START_ACTIVITIES) HandoffPlan.StartReachy(a)
+        else HandoffPlan.CantOpen("This phone app can't start Reachy for that yet.")
     }
 
     private fun planUrl(raw: String?): HandoffPlan {

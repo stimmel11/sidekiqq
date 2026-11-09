@@ -302,6 +302,12 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
                 plan = plan,
                 onOpen = open@{
                     if (!settled() || !vm.claimHandoff(cmd, CommandResult.OPENED)) return@open
+                    if (plan is HandoffPlan.StartReachy) {
+                        // Same daemon start as the Reachy card; its snackbar reports the outcome.
+                        // Acked OPENED only once the wake is queued.
+                        vm.startReachy(plan.activity) { ok -> vm.ackHandoff(cmd, if (ok) CommandResult.OPENED else CommandResult.FAILED) }
+                        return@open
+                    }
                     val opened = openHandoff(ctx, plan)
                     vm.ackHandoff(cmd, if (opened) CommandResult.OPENED else CommandResult.FAILED)
                     if (!opened) scope.launch { snackbar.showSnackbar("No app on this phone could open that.") }
@@ -335,7 +341,8 @@ private fun openHandoff(ctx: Context, plan: HandoffPlan): Boolean {
         is HandoffPlan.Dial -> Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", plan.number, null))
         is HandoffPlan.WhatsApp -> Intent(Intent.ACTION_VIEW, Uri.parse(plan.url)).addCategory(Intent.CATEGORY_BROWSABLE)
         is HandoffPlan.Browser -> Intent(Intent.ACTION_VIEW, Uri.parse(plan.url)).addCategory(Intent.CATEGORY_BROWSABLE)
-        is HandoffPlan.CantOpen -> return false
+        // Not an intent: MainViewModel.startReachy runs it (see the dialog's onOpen).
+        is HandoffPlan.StartReachy, is HandoffPlan.CantOpen -> return false
     }
     return try {
         ctx.startActivity(intent)

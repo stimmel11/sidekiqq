@@ -1,5 +1,5 @@
 import { HttpError } from "../http";
-import type { CommandKind, CreateCommandRequest, DeviceCommand, DeviceKind, DeviceRecord } from "../models";
+import { REACHY_START_ACTIVITIES, type CommandKind, type CreateCommandRequest, type DeviceCommand, type DeviceKind, type DeviceRecord } from "../models";
 
 /**
  * Task layer + device routing (slice 1): validation, labels and target resolution for device
@@ -24,6 +24,8 @@ export const COMMAND_TARGETS: Record<CommandKind, readonly DeviceKind[]> = {
   open_url: ["phone"],
   call_contact: ["phone"],
   reachy_wake: ["reachy"],
+  // The phone runs the LAN start (daemon on the home network) and then queues the reachy_wake.
+  reachy_start: ["phone"],
 };
 
 /**
@@ -129,6 +131,14 @@ export function buildCommand(req: CreateCommandRequest): CommandFields {
       if (req.url || req.number || req.name || req.app) throw new CommandError("reachy_wake takes only activity");
       const activity = req.activity ?? "chat";
       return { kind: "reachy_wake", activity, label: `Wake Reachy ${ACTIVITY_LABEL[activity]}` };
+    }
+    case "reachy_start": {
+      if (req.url || req.number || req.name || req.app) throw new CommandError("reachy_start takes only activity");
+      const activity = req.activity ?? "chat";
+      if (!(REACHY_START_ACTIVITIES as readonly string[]).includes(activity)) {
+        throw new CommandError(`Reachy can't start ${ACTIVITY_LABEL[activity]} yet`, "bad_activity");
+      }
+      return { kind: "reachy_start", activity, label: `Start Reachy ${ACTIVITY_LABEL[activity]}` };
     }
   }
 }

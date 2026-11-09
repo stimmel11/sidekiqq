@@ -146,12 +146,19 @@ export type AlertsResponse = z.infer<typeof AlertsResponseSchema>;
  * or sends anything because of one. Fields are flat and optional per kind so clients that don't
  * know a new kind can still parse (and ignore) it.
  */
-export const COMMAND_KINDS = ["open_url", "call_contact", "reachy_wake"] as const;
+/**
+ * `reachy_start` (phone): "start up Reachy" said to any device. The phone shows it and, only on the
+ * owner's tap, starts the SideKiqq app on the robot through the LAN daemon and then queues a
+ * `reachy_wake` (the same flow as the phone's Reachy card). The brain can't reach the robot's LAN.
+ */
+export const COMMAND_KINDS = ["open_url", "call_contact", "reachy_wake", "reachy_start"] as const;
 export const CommandKindSchema = z.enum(COMMAND_KINDS);
 export type CommandKind = z.infer<typeof CommandKindSchema>;
 
 export const CALL_APPS = ["phone", "whatsapp"] as const;
 export const REACHY_ACTIVITIES = ["chat", "brief", "dance", "game"] as const;
+/** Activities a `reachy_start` may carry: what the phone's Reachy card offers (no game until Reachy has one). */
+export const REACHY_START_ACTIVITIES = ["chat", "brief", "dance"] as const;
 export const COMMAND_RESULTS = ["opened", "dismissed", "failed"] as const;
 export const CommandResultSchema = z.enum(COMMAND_RESULTS);
 export type CommandResult = z.infer<typeof CommandResultSchema>;
@@ -173,7 +180,7 @@ export const DeviceCommandSchema = z.object({
   name: z.string().optional(),
   /** call_contact: which app's dialer to open. */
   app: z.enum(CALL_APPS).optional(),
-  /** reachy_wake: what Reachy should offer once awake. */
+  /** reachy_wake / reachy_start: what Reachy should offer once awake (reachy_start: chat, brief or dance). */
   activity: z.enum(REACHY_ACTIVITIES).optional(),
 });
 export type DeviceCommand = z.infer<typeof DeviceCommandSchema>;

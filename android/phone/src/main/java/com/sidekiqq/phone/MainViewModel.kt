@@ -9,6 +9,7 @@ import com.sidekiqq.phone.handoff.CommandInbox
 import com.sidekiqq.phone.reachy.ReachyDaemonHttp
 import com.sidekiqq.phone.reachy.ReachySettings
 import com.sidekiqq.phone.reachy.ReachyStarter
+import com.sidekiqq.phone.reachy.StartOutcome
 import com.sidekiqq.phone.reachy.message
 import com.sidekiqq.phone.push.SideKiqqMessagingService
 import com.sidekiqq.shared.SideKiqqApiException
@@ -263,14 +264,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * The owner tapped Chat / Brief / Dance on the Reachy card. Starts the SideKiqq app on the
      * robot through its LAN daemon if it isn't running, then queues a `reachy_wake` for it on the
-     * brain. Only from that tap; it never stops another app and never sends a message.
+     * brain. Only from that tap (or the Start button of a `reachy_start` hand-off); it never stops
+     * another app and never sends a message. [onDone] gets true only when the wake was queued; it is
+     * called exactly once, also when nothing ran (not paired, or a start already in progress).
      */
-    fun startReachy(activity: String) {
-        val c = client() ?: return
-        if (reachyJob?.isActive == true) return
+    fun startReachy(activity: String, onDone: (Boolean) -> Unit = {}) {
+        val c = client() ?: return onDone(false)
+        if (reachyJob?.isActive == true) {
+            _ui.update { it.copy(snackbar = "Reachy is already starting.") }
+            return onDone(false)
+        }
         _ui.update { it.copy(reachyStarting = true, error = null) }
         reachyJob = viewModelScope.launch {
             val daemon = ReachyDaemonHttp(reachySettings.host)
+            var woken = false
             try {
                 val outcome = ReachyStarter(
                     daemon = daemon,
@@ -299,6 +306,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ).start(activity)
                 Log.i(TAG, "Start Reachy ($activity): $outcome")
                 _ui.update { it.copy(snackbar = outcome.message()) }
+                woken = outcome is StartOutcome.Woken
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -307,6 +315,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 daemon.close()
                 _ui.update { it.copy(reachyStarting = false) }
+                onDone(woken)
             }
         }
     }
