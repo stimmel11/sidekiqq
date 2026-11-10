@@ -179,6 +179,9 @@ Dance) it calls the robot's daemon over plain HTTP at a `.local` mDNS name (defa
 if that route is 404). It never stops or evicts another app or remote session, sends the daemon no token or owner
 data, and doesn't follow redirects. Once the app reports `running`, the phone queues `reachy_wake` with
 `POST /api/commands` (`target.device: "reachy"`); that tap is the hand-off's "user finishes" step.
+**Find Reachy** (phone only, no brain call): legacy-unicast mDNS questions for `_reachy-mini._tcp.local` (PTR, then SRV
+if missing) from an ephemeral UDP port, about 3 s. Results are SRV target `.local` names + ports that pass the same
+host rule as a typed address (never an IP) and are saved only when the owner taps one.
 
 `reachy_wake` on Reachy: the robot has no screen, so the owner's tap is the one on the device that created the command
 (only paired owner devices can). Reachy polls `GET /api/commands` every 30 s (or the alert interval if shorter, same

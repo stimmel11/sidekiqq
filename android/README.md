@@ -108,6 +108,12 @@ The Home tab's **Reachy** card starts the SideKiqq app on a Reachy Mini and asks
 (`phone/reachy/`). On tap, the phone asks the robot's daemon (`http://reachy-mini.local:8000`, changeable with
 **Change address**) for the current app. It starts `sidekiqq_reachy` if nothing is running, waits up to 45 s for
 `running`, then queues a `reachy_wake` command on the brain. If another app is running, it says so and leaves it alone.
+- **Find Reachy** searches the Wi-Fi for the daemon's mDNS service (`_reachy-mini._tcp`, about 3 s) and lists what it
+  finds; tapping one saves it like a typed address (`reachy/MdnsWire.kt`, `ReachyDiscovery.kt`, `MdnsUdp.kt`). It sends
+  legacy-unicast questions (RFC 6762 §6.7) from an ephemeral port, so no multicast lock or extra permission is needed.
+  Answers can come from any device on the Wi-Fi, so they are only suggestions, and they must still be `.local` names. A hostile device could also flood the list
+  (first 8 results win) so the real robot doesn't show; type the address then. The socket isn't bound to the Wi-Fi
+  `Network` yet, so with a VPN or Wi-Fi without internet (default network elsewhere) the search may find nothing.
 - Only `.local` names are accepted. `network_security_config.xml` allows cleartext to `*.local` for this; HTTPS is still
   required everywhere else. IP addresses are not supported yet.
 - The robot must already have the app installed and paired (see `reachy/README.md`).
@@ -120,6 +126,7 @@ The Home tab's **Reachy** card starts the SideKiqq app on a Reachy Mini and asks
 ```
 - `:shared` covers `WavEncoder`, JSON (de)serialization and `SideKiqqClient` against the Ktor MockEngine.
 - `:phone` covers `UtteranceAssembler` (sequence wrap, gaps, duplicates and late packets) and `DraftConfirmation`.
+- `:phone` also covers "Find Reachy" (`ReachyDiscoveryTest`: DNS parsing incl. pointer loops, truncation and fuzzing, candidate rules, the search loop with a fake LAN).
 - `:phone` also covers the Reachy start flow (`ReachyStartTest`: host parsing, daemon states, timeouts, never stopping another app) and `ReachyDaemonHttp` against the Ktor MockEngine.
 
 ## Phone ↔ watch contract (`com.sidekiqq.shared.wear.WearProtocol`)
