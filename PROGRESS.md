@@ -45,6 +45,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-11-06: Voice read-back (`crew/voice-readback`, Android unverified): phone/glasses/medallion speak the brain `readback` + "Message begins:" body sentence from `GET /api/drafts`, arm only after the read-back fully played, decline speech that began earlier, re-check the draft before approve. 19 JVM tests via kotlinc. Closes QA M6.
 - 2026-11-11: Kroger slice 2a (`crew/kroger-signin`): `KrogerAuth` (PKCE sign-in, rotation-safe refresh, client-credentials search token) + KV-backed `SearchedProducts`. Not wired yet. 671 brain tests.
 - 2026-11-12: Deploy guide (`crew/deploy-guide`): `docs/DEPLOY.md`, secrets → Upstash → Vercel (Hobby cron note) → Google OAuth → dashboard connect → pairing, with troubleshooting.
+- 2026-11-12: Owner priority change: customer web app (PWA, no app stores) first, then native apps for the wearables. Backlog sections added (`crew/webapp-backlog`).
 - 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 - 2026-11-05: Task layer slice 4b (`crew/open-on-phone`): `handoffCapability` user_finishes path + `open_on_phone` tool (only a join link created in the same request, tap to open), FCM token de-dup across device records. 667 brain tests.
 - 2026-11-07: Zoom slice 2 (`crew/zoom-connect`): Zoom OAuth flow behind the generic `/api/connections/zoom/*` routes (PKCE connect, encrypted callback store, revoke on disconnect, reconnect/refresh race guards). 664 brain tests.
@@ -56,7 +57,29 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 
 Bots take the first unchecked item that is NOT tagged `[needs-human]`.
 
-### Next up: connectors + tasks (owner priority, 2026-10-21)
+### Customer web app (owner priority, 2026-11-12)
+Customers get SideKiqq as an installable web app (PWA: "Add to Home Screen" on iPhone and Android, plus desktop), with no app stores. It grows out of the owner dashboard in `brain/src/app/(dashboard)`. Native apps come after this, for what a browser can't do: Galaxy Watch, Galaxy Glasses, the medallion over background BLE, always-on voice, Android Auto/CarPlay. Safety rules are unchanged: nothing is sent except through `POST /api/drafts/:id/approve` after an explicit confirm.
+- [ ] Design `docs/WEBAPP.md` before building. It covers:
+  - the PWA scope (screens; what works in a browser and what stays native)
+  - multi-tenant accounts: tenant id on every KV key, sign-up and sign-in with Google, per-user `ConnectionStore`, one customer's data never reachable from another's, and a migration path for the owner's existing data
+  - web sessions vs device tokens
+  - Web Push (VAPID) next to FCM, including the iOS 16.4+ Home Screen requirement
+  - browser tap-to-talk (mic → 16 kHz PCM16 WAV for `/api/transcribe` → `/api/ask` → `/api/speak`)
+  - hand-offs as tap-to-open links (`tel:`, meeting links)
+  - the limits that keep the native apps (no background mic or BLE; Web Bluetooth is foreground-only Chrome and absent on iOS)
+- [ ] Web app slice 1: installable PWA shell. `manifest.webmanifest`, icons from `/design`, a service worker (offline shell only, never caches API responses or drafts), a mobile-first layout for Today/Top 5, Follow-ups, Commitments, and Drafts with the existing confirm-to-send. Still single-owner sign-in until accounts land.
+- [ ] Web app slice 2: tap-to-talk in the browser. AudioWorklet capture → WAV → `/api/transcribe` → `/api/ask` with a new `web` device kind (contract + TS + Kotlin + Swift) → spoken reply via `/api/speak`. A draft from voice still needs a tap on Send; a spoken "send it" can be added later with the same 30 s rule.
+- [ ] Web app slice 3: Web Push alerts (VAPID keys, subscription per browser, alongside FCM in `lib/push`, clear on 404/410), with the alert log as fallback.
+- [ ] Web app slice 4: hand-offs on the web. `call_contact`/`open_url` commands targeted at the browser show a tap-to-open link (`tel:` or the allowlisted meeting link). Nothing opens automatically.
+- [ ] Brain: multi-tenant accounts per `docs/WEBAPP.md` (large; slice it). Google sign-in for customers, tenant-scoped repos and connections, per-tenant rate limits and caps, account deletion that wipes the tenant's keys, and tests proving no cross-tenant reads.
+- [ ] `[needs-human]` Google OAuth app verification for the Gmail restricted scopes (needed past 100 test users) and the yearly CASA security assessment; a public privacy policy and terms; choose a domain for the web app.
+- [ ] `[needs-human]` Pick billing (e.g. Stripe) and pricing once accounts exist.
+
+### Native apps for wearables (after the customer web app, owner priority 2026-11-12)
+The Android phone app becomes the companion for the wearables: Galaxy Watch, Galaxy Glasses, the medallion (background BLE press-to-talk) and Android Auto. It signs in to the same customer account as the web app. The existing Android, medallion and Apple items below stay the work list. Start with the first real Android build (`[needs-human]` in Earlier items, or a GitHub Actions workflow that builds a debug APK, which is bot-doable), then medallion BLE bonding, then sign-in for customer accounts in place of pairing codes.
+- [ ] CI: GitHub Actions workflow that builds the Android debug APK (`android/`, `-Psidekiqq.xr=false` fallback) and runs the JVM tests on every PR touching `android/`, uploading the APK as an artifact. Fix what the first real compile surfaces.
+
+### Connectors + tasks (owner priority, 2026-10-21)
 SideKiqq should connect to any email, video and grocery service, and run tasks started from any device.
 - [x] Design `docs/CONNECTORS.md`: capability interfaces (`email.send`, `email.read`, `contacts.lookup`, `video.start`, `grocery.cart`, `calendar.*`), the brain as an MCP client, per-connector OAuth with encrypted token storage and minimal scopes, and a per-capability safety policy enforced by the brain (auto / confirm / user-finishes). No connector can bypass draft approval.
 - [ ] Brain: implement the connector framework from that doc + a "Connections" screen in the dashboard. Move Gmail/Calendar/Drive onto it.
