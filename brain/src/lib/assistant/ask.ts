@@ -35,14 +35,15 @@ export async function runAsk(deps: Deps, req: AskRequest, origin?: { deviceId: s
   const knownAddresses = new KnownAddresses();
   for (const t of history) if (t.role === "user") knownAddresses.addText(t.content);
   knownAddresses.addText(req.text);
-  // `request` binds call_on_phone to this owner request: its text and the asking device.
+  // `request` binds call_on_phone / open_on_phone to this owner request: its text and the asking
+  // device. `createdLinks` collects links the brain creates in this request (open_on_phone's only source).
   const ctx: ToolContext = {
     deps,
     now,
     device: req.device,
     actions,
     knownAddresses,
-    ...(origin ? { request: { text: req.text, deviceId: origin.deviceId, deviceKind: origin.deviceKind }, lookedUp: new Map() } : {}),
+    ...(origin ? { request: { text: req.text, deviceId: origin.deviceId, deviceKind: origin.deviceKind }, lookedUp: new Map(), createdLinks: new Set<string>() } : {}),
   };
   const maxIterations = config.maxToolIterations();
   const llm = deps.llm();

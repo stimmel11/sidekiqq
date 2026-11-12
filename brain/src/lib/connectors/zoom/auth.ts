@@ -21,8 +21,8 @@ import { CapabilityDeniedError, ReauthRequiredError } from "../types";
  * This module only signs in and mints tokens. It cannot create meetings (./meetings.ts) and
  * nothing in it can send anything.
  *
- * Slice 1 ships the helpers; the connect/callback routes come with the generic
- * `/api/connections/:id/*` routes (an `OAuthFlow` wrapper around `authorizeUrl` + `exchangeCode`).
+ * The connect/callback/disconnect legs are the generic `/api/connections/zoom/*` routes, through
+ * the `OAuthFlow` in ./oauth.ts.
  */
 
 export const ZOOM_CONNECTOR_ID = "zoom";
@@ -132,6 +132,8 @@ export class ZoomAuth {
   private inflight: Promise<string> | null = null;
   /** A rotated refresh token we couldn't persist, and the stored one it replaced. */
   private pending: { from: string; secret: string } | null = null;
+  /** Bumped by every code exchange and revoke, so a refresh started before one can't cache its token after it. */
+  private generation = 0;
 
   constructor(
     private readonly cfg: ZoomAppConfig,
@@ -158,12 +160,25 @@ export class ZoomAuth {
   async exchangeCode(code: string, codeVerifier: string, connectedAt: string): Promise<StoredConnection> {
     const t = await this.tokenRequest({ grant_type: "authorization_code", code, redirect_uri: this.cfg.redirectUri, code_verifier: codeVerifier });
     if (!t.refreshToken) throw new ZoomAuthError("Zoom did not return a refresh token.");
-    const saved = await this.connections.save(ZOOM_CONNECTOR_ID, {
-      secret: t.refreshToken,
-      secretKind: "refresh_token",
-      grantedScopes: t.scopes,
-      connectedAt,
-    });
+    const refreshToken = t.refreshToken;
+    this.generation++;
+    // Hold the refresh lock so a refresh still running on the old sign-in can't write over this one.
+    const release = this.lock ? await this.lock.acquire() : null;
+    let saved: StoredConnection;
+    try {
+      // A reconnect keeps the owner's capability switches (a record we can't read is just replaced).
+      const previous = await this.connections.load(ZOOM_CONNECTOR_ID).catch(() => null);
+      saved = await this.connections.save(ZOOM_CONNECTOR_ID, {
+        secret: refreshToken,
+        secretKind: "refresh_token",
+        grantedScopes: t.scopes,
+        connectedAt,
+        ...(previous?.enabled ? { enabled: previous.enabled } : {}),
+        status: "connected",
+      });
+    } finally {
+      await release?.().catch((e: unknown) => console.warn("[zoom] refresh lock release failed", e));
+    }
     this.pending = null;
     this.cached = { token: t.accessToken, expiresAt: this.now() + t.expiresInSec * 1000, connectedAt: saved.connectedAt };
     return saved;
@@ -192,19 +207,28 @@ export class ZoomAuth {
     this.cached = null;
   }
 
-  /** Best-effort revoke at Zoom (disconnect route, later slice). */
+  /** Best-effort revoke at Zoom (the `zoom` OAuth flow's `revoke`, called by disconnect). */
   async revoke(token: string): Promise<void> {
+    // A rotated token we couldn't persist is the live one; the stored token it replaced is dead.
+    const live = this.pending && this.pending.from === token ? this.pending.secret : token;
+    this.cached = null;
+    this.pending = null;
+    this.generation++;
     const res = await this.fetchFn(`${ZOOM_OAUTH}/revoke`, {
       method: "POST",
       headers: { Authorization: this.basic(), "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token }).toString(),
+      body: new URLSearchParams({ token: live }).toString(),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) throw new ZoomAuthError(`Zoom revoke failed (HTTP ${res.status}).`);
-    this.cached = null;
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const code = typeof body.error === "string" ? body.error.slice(0, 40) : "";
+      throw new ZoomAuthError(`Zoom revoke failed (HTTP ${res.status}${code ? `, ${code}` : ""}).`);
+    }
   }
 
   private async refresh(): Promise<string> {
+    const generation = this.generation;
     const release = this.lock ? await this.lock.acquire() : null;
     try {
       // Read after taking the lock: the previous holder may have just rotated the token.
@@ -223,16 +247,16 @@ export class ZoomAuth {
         const again = await this.connections.load(ZOOM_CONNECTOR_ID);
         if (!again || again.secret === stored.secret) throw err;
         this.pending = null;
-        return await this.useRefreshed(again, await this.tokenRequest({ grant_type: "refresh_token", refresh_token: again.secret }, again.secret));
+        return await this.useRefreshed(again, await this.tokenRequest({ grant_type: "refresh_token", refresh_token: again.secret }, again.secret), generation);
       }
-      return await this.useRefreshed(stored, t);
+      return await this.useRefreshed(stored, t, generation);
     } finally {
       await release?.().catch((e: unknown) => console.warn("[zoom] refresh lock release failed", e));
     }
   }
 
   /** `from` is the stored record the refresh started from (its secret, or `pending` replacing it). */
-  private async useRefreshed(from: StoredConnection, t: TokenResponse): Promise<string> {
+  private async useRefreshed(from: StoredConnection, t: TokenResponse, generation: number): Promise<string> {
     const rotated = t.refreshToken && t.refreshToken !== (this.pending?.secret ?? from.secret) ? t.refreshToken : undefined;
     const newSecret = rotated ?? this.pending?.secret;
     if (newSecret) {
@@ -243,7 +267,7 @@ export class ZoomAuth {
       for (let attempt = 1; attempt <= SAVE_ATTEMPTS && !saved; attempt++) {
         try {
           const updated = await this.connections.update(ZOOM_CONNECTOR_ID, (v) => {
-            if (v.secret !== from.secret) return v;
+            if (v.secret !== from.secret || v.connectedAt !== from.connectedAt) return v;
             const { lastError: _drop, ...rest } = v;
             return { ...rest, secret: newSecret, status: "connected", ...(t.scopes.length ? { grantedScopes: t.scopes } : {}) };
           });
@@ -260,7 +284,11 @@ export class ZoomAuth {
       // stored token first, the connection is marked needs_reauth and the owner must reconnect.
       this.pending = saved ? null : { from: from.secret, secret: newSecret };
     }
-    this.cached = { token: t.accessToken, expiresAt: this.now() + t.expiresInSec * 1000, connectedAt: from.connectedAt };
+    // A reconnect or disconnect since this refresh started: don't cache the old sign-in's token
+    // (callers already waiting get it once; the next call sees the new sign-in).
+    if (generation === this.generation) {
+      this.cached = { token: t.accessToken, expiresAt: this.now() + t.expiresInSec * 1000, connectedAt: from.connectedAt };
+    }
     return t.accessToken;
   }
 
