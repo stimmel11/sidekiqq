@@ -33,8 +33,11 @@ interface GlassesBridge {
      */
     suspend fun listen(): ByteArray
 
-    /** Speak [text] through the glasses speakers and suspend until playback finishes. */
-    suspend fun speak(text: String)
+    /**
+     * Speak [text] through the glasses speakers and suspend until playback finishes.
+     * Returns true only if it played to the end (see [com.sidekiqq.phone.voice.Speaker.speak]).
+     */
+    suspend fun speak(text: String): Boolean
 
     /** Short audible cue that SideKiqq is listening. */
     suspend fun cueListening()

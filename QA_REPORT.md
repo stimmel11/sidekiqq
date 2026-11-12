@@ -78,7 +78,7 @@ Every device requires explicit confirmation before calling approve:
 - **Failure:** the fingerprint includes the Gmail message id. The same promise quoted in a later reply on the thread becomes a duplicate commitment.
 - **Recommendation:** fingerprint email commitments by `threadId` plus a normalized `who`/`what`.
 
-**M6. Voice confirmation reads only the draft's recipient and subject.** Status: **open, design**.
+**M6. Voice confirmation reads only the draft's recipient and subject.** Status: **fixed** (2026-11-06, `crew/voice-readback`; Android unverified).
 - **Where:** `android/phone/.../assistant/DraftConfirmation.kt:53`
 - **Failure:** on glasses and medallion, the owner confirms "send it" without hearing the body. A prompt-injected email could lead the model to draft a misleading body to a familiar recipient. The recipient is spoken, so this is limited.
 - **Recommendation:** speak the first sentence of the body.
