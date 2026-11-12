@@ -73,7 +73,7 @@ class BluetoothHeadsetGlassesBridge(
         }
     }
 
-    override suspend fun speak(text: String) = speaker.speak(text)
+    override suspend fun speak(text: String): Boolean = speaker.speak(text)
 
     override suspend fun cueListening() = Earcons.listen()
 

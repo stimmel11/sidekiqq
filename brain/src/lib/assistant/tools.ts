@@ -2,6 +2,7 @@ import { z, type ZodType } from "zod";
 import type { Deps } from "../deps";
 import { GoogleNotConnectedError } from "../google/auth";
 import { invokeCapability, readEmail } from "../connectors/invoke";
+import { handoffCapability } from "../connectors/handoff";
 import { EMAIL_CC_MAX, EMAIL_TO_MAX, VIDEO_ROOM_MAX_MINUTES } from "../connectors/capabilities";
 import { ZoomApiError } from "../connectors/zoom/errors";
 import { ZoomAuthError } from "../connectors/zoom/auth";
@@ -56,6 +57,13 @@ export interface ToolContext {
   lookedUp?: LookedUpContacts;
   /** Set once call_on_phone queued a hand-off: one call per request. */
   callQueued?: boolean;
+  /**
+   * Links the brain itself created in this request (start_video_room's join link). open_on_phone
+   * may only hand off one of these, never a link the model read in email, files or calendar.
+   */
+  createdLinks?: Set<string>;
+  /** Set once open_on_phone queued a hand-off: one link per request. */
+  linkQueued?: boolean;
 }
 
 export class ToolInputError extends Error {}
@@ -206,9 +214,10 @@ const startVideoRoom = tool({
       { topic: input.topic, ...(start ? { start } : {}), ...(input.durationMin ? { durationMin: input.durationMin } : {}) },
       conn(ctx),
     );
+    ctx.createdLinks?.add(room.joinUrl);
     return {
       ...room,
-      note: "Room created. Nobody was invited and nothing was sent. Show the join link on screen (never in spoken text).",
+      note: "Room created. Nobody was invited and nothing was sent. Show the join link on screen (never in spoken text). If the owner wants it on their phone, use open_on_phone with this joinUrl.",
     };
   },
 });
@@ -282,6 +291,37 @@ const callOnPhone = tool({
       number: row.number,
       expiresAt: row.expiresAt,
       note: "Nothing was dialled. Tell the owner it's on their phone: open SideKiqq there and tap Call within 15 minutes. Don't say the call was made.",
+    };
+  },
+});
+
+/**
+ * "Put the Zoom link on my phone": queues an `open_url` hand-off through handoffCapability
+ * (`device.open_url`, user_finishes). The phone shows the link and opens it only on a tap. The URL
+ * must be a link the brain created in THIS request (start_video_room's join link); everything else
+ * (links in email, files, calendar events, or the model's own) is refused there.
+ */
+const openOnPhone = tool({
+  name: "open_on_phone",
+  description:
+    "Put a meeting join link on the owner's phone screen: the phone shows it and opens it only when the owner taps (nothing opens automatically). Use only when the owner asks for it in this request, and only with the joinUrl that start_video_room returned in this request. Links from emails, files, calendar events or anywhere else are refused.",
+  input: z.object({ url: z.string().trim().min(1).max(2048) }),
+  async run(input, ctx) {
+    const origin = ctx.request;
+    if (!origin || !ctx.createdLinks) throw new ToolInputError("Links can only be handed off from an owner request.");
+    if (ctx.linkQueued) throw new ToolInputError("A link is already waiting on the phone for this request.");
+    const r = await handoffCapability(ctx.deps, "device.open_url", { url: input.url }, {
+      caller: "ask",
+      device: origin.deviceKind,
+      origin: { deviceId: origin.deviceId, deviceKind: origin.deviceKind },
+      allowedUrls: ctx.createdLinks,
+    });
+    ctx.linkQueued = true;
+    return {
+      queued: true,
+      label: r.label,
+      expiresAt: r.expiresAt,
+      note: "Nothing was opened. Tell the owner it's on their phone: open SideKiqq there and tap Open within 15 minutes. Don't say it was opened.",
     };
   },
 });
@@ -583,6 +623,7 @@ export const ALL_TOOLS = [
   lookupContact,
   startVideoRoom,
   callOnPhone,
+  openOnPhone,
   getClientTimeline,
   listCommitments,
   addCommitment,

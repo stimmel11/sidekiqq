@@ -25,6 +25,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.ParcelUuid
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.sidekiqq.phone.MainActivity
@@ -77,7 +78,9 @@ class MedallionService : Service() {
 
     private val queue = GattQueue(ble)
     private val assembler = UtteranceAssembler()
-    private val utterances = Channel<UtteranceAssembler.Utterance>(capacity = 2)
+    /** Each utterance with when its capture started (`SystemClock.elapsedRealtime`). */
+    private val utterances = Channel<Pair<UtteranceAssembler.Utterance, Long>>(capacity = 2)
+    @Volatile private var utteranceStartedAt = 0L
 
     private var gatt: BluetoothGatt? = null
     private var controlChar: BluetoothGattCharacteristic? = null
@@ -98,7 +101,7 @@ class MedallionService : Service() {
         super.onCreate()
         val app = sideKiqqApp
         assistant = VoiceAssistant(app::client, app.wearRelay)
-        scope.launch { for (u in utterances) process(u) }
+        scope.launch { for ((u, startedAt) in utterances) process(u, startedAt) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -354,6 +357,7 @@ class MedallionService : Service() {
             MedallionProtocol.CTRL_START -> {
                 if (assembler.isActive) Log.w(TAG, "START while already capturing; restarting utterance")
                 assembler.start()
+                utteranceStartedAt = SystemClock.elapsedRealtime()
                 // Barge-in: the user is speaking again, stop any reply still playing.
                 sideKiqqApp.speaker.stop()
                 setPhase(MedallionState.Phase.LISTENING)
@@ -374,6 +378,7 @@ class MedallionService : Service() {
             // Tolerate a lost START notification: begin capturing at the first audio packet.
             Log.w(TAG, "AUDIO without START; auto-starting utterance")
             assembler.start()
+            utteranceStartedAt = SystemClock.elapsedRealtime()
             setPhase(MedallionState.Phase.LISTENING)
         }
         assembler.onAudio(packet)
@@ -394,7 +399,7 @@ class MedallionService : Service() {
         } else null
         warning?.let { Log.w(TAG, it) }
         _state.update { it.copy(lastAudioWarning = warning) }
-        if (!utterances.trySend(u).isSuccess) {
+        if (!utterances.trySend(u to utteranceStartedAt).isSuccess) {
             Log.w(TAG, "Pipeline busy; dropping utterance")
         }
     }
@@ -406,7 +411,7 @@ class MedallionService : Service() {
 
     // ------------------------------------------------------------ pipeline (coroutine)
 
-    private suspend fun process(u: UtteranceAssembler.Utterance) {
+    private suspend fun process(u: UtteranceAssembler.Utterance, startedAt: Long) {
         setPhase(MedallionState.Phase.THINKING)
         writeControl(MedallionProtocol.CTRL_THINKING)
         val speaker = sideKiqqApp.speaker
@@ -415,7 +420,9 @@ class MedallionService : Service() {
             speaker.speak(text)
         }
         val outcome = try {
-            assistant.handleUtterance(u.pcm, Device.MEDALLION, output)
+            assistant.handleUtterance(u.pcm, Device.MEDALLION, output, startedAt)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "pipeline failed", e)
             VoiceAssistant.Outcome.Failed(e)
