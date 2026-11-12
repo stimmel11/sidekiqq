@@ -328,6 +328,7 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
         ApproveDraftDialog(
             recipient = null,
             message = a.summary,
+            kind = a.draftKind,
             onConfirm = { vm.approveAnswerDraftConfirmed(a.id, a.summary); approveAction = null },
             onDismiss = { approveAction = null },
         )

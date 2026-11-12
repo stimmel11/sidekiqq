@@ -21,7 +21,7 @@ import { makeDeps, pairDevice, params, req, type TestDeps } from "./fakes";
 const OWNER = { "x-owner-secret": "test-owner-secret-0123456789" };
 const SESSION_SECRET = "test-session-secret-0123456789abcdef";
 const G = "https://www.googleapis.com/auth/";
-const ALL_SCOPES = [`${G}gmail.readonly`, `${G}gmail.compose`, `${G}calendar.readonly`, `${G}drive.readonly`, `${G}contacts.readonly`, `${G}contacts.other.readonly`];
+const ALL_SCOPES = [`${G}gmail.readonly`, `${G}gmail.compose`, `${G}calendar.readonly`, `${G}calendar.events`, `${G}drive.readonly`, `${G}contacts.readonly`, `${G}contacts.other.readonly`];
 const P = (connectorId: string) => params({ connectorId });
 
 async function connectGoogle(deps: TestDeps, extra: Record<string, unknown> = {}) {
@@ -121,11 +121,11 @@ describe("GET /api/connections", () => {
     const [g] = await list(deps);
     expect(g).toMatchObject({ connectorId: "google", status: "not_connected" });
     expect(g!.account).toBeUndefined();
-    expect(g!.capabilities.map((c) => c.id)).toEqual(["email.read", "email.draft", "calendar.read", "files.read", "contacts.lookup"]);
+    expect(g!.capabilities.map((c) => c.id)).toEqual(["email.read", "email.draft", "calendar.read", "calendar.invite.prepare", "files.read", "contacts.lookup"]);
     for (const c of g!.capabilities) {
       expect(c.tier).toBe(POLICY[c.id]);
       expect(c.enabled).toBe(false);
-      expect(c.tierLabel).toBe("reads automatically");
+      expect(c.tierLabel).toBe(c.id === "calendar.invite.prepare" ? "asks you first" : "reads automatically");
       expect(c.label.length).toBeGreaterThan(5);
     }
     // No executor is ever listed.
@@ -186,7 +186,7 @@ describe("POST /api/connections/:id/capabilities", () => {
     const deps = makeDeps();
     setDeps(deps);
     await connectGoogle(deps, { enabled: ["email.read"] });
-    for (const bad of ["email.send", "grocery.checkout", "device.call", "calendar.invite.prepare", "send_email", "__proto__"]) {
+    for (const bad of ["email.send", "grocery.checkout", "device.call", "calendar.hold.prepare", "calendar_invite", "send_email", "__proto__"]) {
       const res = await capabilitiesPost(req("POST", "/api/connections/google/capabilities", { headers: OWNER, body: { enabled: ["email.read", bad] } }), P("google"));
       expect(res.status, bad).toBe(400);
     }

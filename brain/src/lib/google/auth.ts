@@ -16,6 +16,9 @@ export const GOOGLE_SCOPES = [
   // compose = create drafts + send drafts. Sending is still only reachable via /api/drafts/:id/approve.
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/calendar.readonly",
+  // calendar.invite (lib/connectors/google/send.ts): inserts an approved invite. Only the approve
+  // route reaches that executor; nothing else writes to the calendar.
+  "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/drive.readonly",
   // contacts.lookup (lib/google/contacts.ts): saved contacts + Gmail's auto-created "Other contacts". Read-only.
   "https://www.googleapis.com/auth/contacts.readonly",

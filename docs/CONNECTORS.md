@@ -27,6 +27,21 @@ Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/c
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
 row reflects its output shape (`id`, `match`, `ambiguous`).
+Meet invites slice 1 (2026-11-08): `calendar.invite.prepare` on the `google` connector, through the new
+prepare path `lib/connectors/prepare.ts` (owner callers only; makes ONE pending `calendar_invite` Draft, no
+provider call). Input as in §2 but `body?` ≤ 5,000 chars, ≤ 10 attendees, ≤ 12 h, start ≥ 1 min and ≤ 1 year
+ahead, `conference` is `"meet"` only (Zoom later). The executor `google:calendar_invite` (`google/send.ts`)
+runs only from approve: re-checks strict attendees and a future start (else 410 `expired`), then
+`events.insert` on `primary` with `sendUpdates: "all"`, `guestsCanInviteOthers: false`, a Meet
+`conferenceData.createRequest` when asked, and an event id derived from the draft id (a retried approve
+can't make a second event). Scope `calendar.events`, so existing owners reconnect Google to turn it on.
+`GET /api/drafts` discards calendar drafts whose start has passed (under the send lock; a sent draft is never
+overwritten). Claude tool: `create_calendar_invite`. The readback adds "with a Google Meet link" and, last,
+the cleaned location. A 4xx from Google at approve is 422 `provider_refused` (still pending); a Meet link
+Google didn't create is reported as an approve `warning`. Deviations to resolve later: `calendar.events` is
+requested for every owner at connect (no incremental scopes yet, §7), and an already-pending invite stays
+approvable if the owner switches invites off afterwards (approve doesn't re-check the switch).
+Attendees see each other (Google's default `guestsCanSeeOtherGuests`).
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 
@@ -269,8 +284,10 @@ covers a subject and body containing injected instructions.
   - `GET /api/drafts` adds `kind`, `readback` and `when`; Reachy is updated to prefer `readback`.
   - `Draft` and `GET /api/drafts` are added to `ARCHITECTURE.md`, and a `Draft` model with
     defaults for the new fields to `Models.kt`, in the framework item.
-  - Calendar kinds ship only after the phone's `ApproveDraftDialog` text depends on `kind` (today
-    it says "This message will be sent from your account. Review it in Gmail first").
+  - Calendar kinds ship only after the phone's `ApproveDraftDialog` text depends on `kind`. Done for
+    `calendar_invite` (2026-11-08, `crew/meet-invites`): `Action.draftKind` carries the kind; the
+    phone dialog, the dashboard and the iPhone sheet word invites as invites and offer no Send for
+    a kind they don't know.
   - `Action.type` `event_proposed` stays as is: it is a suggestion in the reply. A real invite is
     a `draft_created` with `kind: "calendar_invite"`.
 - The approve route stays the only executor. It looks up the sender for `(connectorId, kind)` in
@@ -348,7 +365,7 @@ Initial scope plan (verify each against the provider's current docs when impleme
 |---|---|---|
 | Google | email.read / email.draft / email.send | `gmail.readonly`, `gmail.compose` (today's scopes; compose also permits `messages.send`, which is why the scan bans it outside `send.ts`) |
 | Google | calendar.read | `calendar.readonly` (today) |
-| Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (new, only when enabled) |
+| Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (requested at connect since 2026-11-08; per-capability scopes later) |
 | Google | files.read | `drive.readonly` (today) |
 | Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (requested since 2026-10-25; People API search needs an empty warm-up query first) |
 | Microsoft 365 | email.read | `Mail.Read`, `offline_access`, `User.Read` (slice 1, `lib/microsoft/mail.ts`) |
