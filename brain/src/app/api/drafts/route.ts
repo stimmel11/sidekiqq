@@ -1,19 +1,39 @@
 import { withDevice } from "@/lib/auth";
 import { json } from "@/lib/http";
-import { DraftListItemSchema } from "@/lib/models";
+import { DraftListItemSchema, type Draft } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Pending drafts, so a device can show (or read back) what awaits approval (ARCHITECTURE.md).
- * `readback` is the code-built sentence to speak before asking for "send it"; `kind` is "email"
- * for every draft today (absent on old records = "email"); `when` is set for calendar kinds only.
+ * `readback` is the code-built sentence to speak before asking for "send it"; `kind` is "email" or
+ * "calendar_invite" (absent on old records = "email"); `when`, `location` and `conference` are set
+ * for calendar kinds only. A calendar draft whose start has passed is marked discarded here
+ * (lazy expiry, docs/CONNECTORS.md §5) and not listed: it could never be approved.
  */
 export const GET = withDevice(async (_req, { deps }) => {
-  const drafts = await deps.repos.drafts.listPending();
+  const now = deps.clock().getTime();
+  const listed: Draft[] = [];
+  for (const d of await deps.repos.drafts.listPending()) {
+    if (d.kind !== "email" && d.when && Date.parse(d.when.start) <= now) {
+      // Under the approve route's per-draft lock, so an approve already running can't be overwritten.
+      if (await deps.repos.drafts.acquireSendLock(d.id).catch(() => false)) {
+        try {
+          const fresh = await deps.repos.drafts.get(d.id);
+          if (fresh?.status === "pending") await deps.repos.drafts.markDiscarded(d.id);
+        } catch {
+          // best effort
+        } finally {
+          await deps.repos.drafts.releaseSendLock(d.id).catch(() => undefined);
+        }
+      }
+      continue;
+    }
+    listed.push(d);
+  }
   return json({
-    items: drafts.map((d) =>
+    items: listed.map((d) =>
       DraftListItemSchema.parse({
         id: d.id,
         kind: d.kind,
@@ -23,6 +43,8 @@ export const GET = withDevice(async (_req, { deps }) => {
         body: d.body,
         readback: d.readback,
         ...(d.when ? { when: d.when } : {}),
+        ...(d.location !== undefined ? { location: d.location } : {}),
+        ...(d.conference ? { conference: d.conference } : {}),
         ...(d.client ? { client: d.client } : {}),
         createdAt: d.createdAt,
       }),

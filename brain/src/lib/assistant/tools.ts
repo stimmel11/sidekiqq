@@ -3,7 +3,8 @@ import type { Deps } from "../deps";
 import { GoogleNotConnectedError } from "../google/auth";
 import { invokeCapability, readEmail } from "../connectors/invoke";
 import { handoffCapability } from "../connectors/handoff";
-import { EMAIL_CC_MAX, EMAIL_TO_MAX, VIDEO_ROOM_MAX_MINUTES } from "../connectors/capabilities";
+import { EMAIL_CC_MAX, EMAIL_TO_MAX, INVITE_ATTENDEES_MAX, INVITE_MAX_MINUTES, VIDEO_ROOM_MAX_MINUTES } from "../connectors/capabilities";
+import { prepareCalendarInvite } from "../connectors/prepare";
 import { ZoomApiError } from "../connectors/zoom/errors";
 import { ZoomAuthError } from "../connectors/zoom/auth";
 import { ReauthRequiredError } from "../connectors/types";
@@ -79,6 +80,17 @@ interface ToolSpec<S extends ZodType> {
 
 function tool<S extends ZodType>(spec: ToolSpec<S>): ToolSpec<S> {
   return spec;
+}
+
+/** ISO date and time, optional offset (no offset = the owner's time zone). */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/;
+
+/** Owner-time ISO date-time → UTC ISO, or a ToolInputError naming the field. */
+function ownerDateTime(field: string, v: string): string {
+  if (!ISO_DATETIME.test(v.trim())) throw new ToolInputError(`${field} must be an ISO date and time, e.g. 2026-10-20T15:00 (owner's time) or with an offset`);
+  const d = new Date(normalizeOwnerDate(v, { timeZone: config.ownerTimezone() }) ?? Number.NaN);
+  if (Number.isNaN(d.getTime())) throw new ToolInputError(`${field} must be a valid date and time`);
+  return d.toISOString();
 }
 
 const optStr = (max = 500) => z.string().trim().min(1).max(max).optional();
@@ -189,7 +201,7 @@ const lookupContact = tool({
 const startVideoRoom = tool({
   name: "start_video_room",
   description:
-    "Create a Zoom meeting room for the owner to open: right now (no start) or at a given start time. Nobody is invited and Zoom emails no one. Returns the join link; show it on screen. To invite people, say that calendar invites aren't available yet; never paste the link into an email draft unless the owner asks for exactly that.",
+    "Create a Zoom meeting room for the owner to open: right now (no start) or at a given start time. Nobody is invited and Zoom emails no one. Returns the join link; show it on screen. To invite people to a video call, use create_calendar_invite with conference \"meet\" instead (Zoom links in invites aren't available yet); never paste the link into an email draft unless the owner asks for exactly that.",
   input: z.object({
     topic: z.string().trim().min(1).max(200).describe('Short meeting name, e.g. "Call with Dana"'),
     start: isoish.optional().describe("Start time for a scheduled room. Omit for an instant room."),
@@ -199,7 +211,7 @@ const startVideoRoom = tool({
     let start: string | undefined;
     if (input.start) {
       // ISO only (a free-form string would be parsed in the server's zone, not the owner's).
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/.test(input.start.trim())) {
+      if (!ISO_DATETIME.test(input.start.trim())) {
         throw new ToolInputError("start must be an ISO date and time, e.g. 2026-10-20T15:00 (owner's time) or with an offset");
       }
       const d = new Date(normalizeOwnerDate(input.start, { timeZone: config.ownerTimezone() }) ?? Number.NaN);
@@ -477,12 +489,62 @@ const createEmailDraft = tool({
     if (input.followupId) await deps.repos.followups.attachDraft(input.followupId, created.draftId);
     // Devices speak Action.summary before asking for "send it": it is the readback (built in code,
     // every recipient in full), never text the model wrote (docs/CONNECTORS.md §5).
-    actions.push({ type: "draft_created", id: created.draftId, summary: created.readback });
+    actions.push({ type: "draft_created", id: created.draftId, summary: created.readback, draftKind: "email" });
     return {
       draftId: created.draftId,
       status: "pending_approval",
       readback: created.readback,
       note: "Draft saved in Gmail. It will only be sent if the owner approves it on a device. The device reads the readback to the owner before asking.",
+    };
+  },
+});
+
+/**
+ * "Set up a Meet with Dana Tuesday at 2": PREPARES a calendar invite as a pending Draft
+ * (lib/connectors/prepare.ts). Nothing is written to the calendar and nobody is notified until the
+ * owner approves it on a device. Attendees pass the same provenance guard as email recipients.
+ */
+const createCalendarInvite = tool({
+  name: "create_calendar_invite",
+  description:
+    "Prepare a calendar INVITE for the owner to approve. This NEVER sends or creates anything: the invite goes out (Google Calendar emails each attendee) only after the owner approves it on a device. Set conference \"meet\" to add a Google Meet link. Times are in the owner's time zone unless they carry an offset. Attendees must be addresses the owner said or a lookup returned in this request.",
+  input: z.object({
+    title: z.string().trim().min(1).max(200).describe('Short event title, e.g. "Kickoff with Dana"'),
+    start: isoish.describe("Start date and time, e.g. 2026-10-27T14:00"),
+    end: isoish.optional().describe("End date and time. Omit to use durationMin."),
+    durationMin: z.number().int().min(5).max(INVITE_MAX_MINUTES).optional().describe("Length in minutes when end is omitted (default 30)"),
+    attendees: z.array(z.string().trim().min(3).max(256)).min(1).max(INVITE_ATTENDEES_MAX).describe("Plain addresses only (name@example.com), one per item, not the owner"),
+    location: optStr(200),
+    description: optStr(5_000).describe("Event description the attendees will see"),
+    conference: z.enum(["meet"]).optional().describe('"meet" adds a Google Meet link'),
+    client: optStr(200),
+  }),
+  async run(input, ctx) {
+    assertKnownRecipients(ctx, input.attendees, "No invite prepared.");
+    const start = ownerDateTime("start", input.start);
+    if (input.end && input.durationMin) throw new ToolInputError("Give end or durationMin, not both.");
+    const end = input.end ? ownerDateTime("end", input.end) : new Date(Date.parse(start) + (input.durationMin ?? 30) * 60_000).toISOString();
+    const created = await prepareCalendarInvite(
+      ctx.deps,
+      {
+        title: input.title,
+        start,
+        end,
+        attendees: input.attendees,
+        ...(input.location ? { location: input.location } : {}),
+        ...(input.description ? { body: input.description } : {}),
+        ...(input.conference ? { conference: input.conference } : {}),
+        ...(input.client ? { client: input.client } : {}),
+      },
+      conn(ctx),
+    );
+    // Devices show/speak the code-built readback (attendees, time, Meet, title), never model text.
+    ctx.actions.push({ type: "draft_created", id: created.draftId, summary: created.readback, draftKind: "calendar_invite" });
+    return {
+      draftId: created.draftId,
+      status: "pending_approval",
+      readback: created.readback,
+      note: "Invite prepared, NOT sent: nothing is on the calendar yet and nobody was notified. It goes out only if the owner approves it on a device, which reads the readback first.",
     };
   },
 });
@@ -630,6 +692,7 @@ export const ALL_TOOLS = [
   updateCommitment,
   listFollowups,
   createEmailDraft,
+  createCalendarInvite,
   recordDecision,
   upsertClientProfile,
   requestConnector,
