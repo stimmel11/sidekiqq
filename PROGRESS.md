@@ -44,6 +44,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-11-03: Outlook slice 1 (`crew/outlook-mail-read`): read-only Microsoft Graph mail module with Gmail-shaped output, Graph send endpoints added to the no-send scan. 606 brain tests.
 - 2026-11-06: Voice read-back (`crew/voice-readback`, Android unverified): phone/glasses/medallion speak the brain `readback` + "Message begins:" body sentence from `GET /api/drafts`, arm only after the read-back fully played, decline speech that began earlier, re-check the draft before approve. 19 JVM tests via kotlinc. Closes QA M6.
 - 2026-11-11: Kroger slice 2a (`crew/kroger-signin`): `KrogerAuth` (PKCE sign-in, rotation-safe refresh, client-credentials search token) + KV-backed `SearchedProducts`. Not wired yet. 671 brain tests.
+- 2026-11-12: Deploy guide (`crew/deploy-guide`): `docs/DEPLOY.md`, secrets → Upstash → Vercel (Hobby cron note) → Google OAuth → dashboard connect → pairing, with troubleshooting.
 - 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 - 2026-11-05: Task layer slice 4b (`crew/open-on-phone`): `handoffCapability` user_finishes path + `open_on_phone` tool (only a join link created in the same request, tap to open), FCM token de-dup across device records. 667 brain tests.
 - 2026-11-07: Zoom slice 2 (`crew/zoom-connect`): Zoom OAuth flow behind the generic `/api/connections/zoom/*` routes (PKCE connect, encrypted callback store, revoke on disconnect, reconnect/refresh race guards). 664 brain tests.
@@ -142,7 +143,7 @@ Same brain and API contract; Apple devices are thin clients like the Android one
 - [ ] Brain: `next build` runs out of memory during type-checking at the default Node heap in a 7 GB sandbox (pre-existing, also on `build-crew-round-1`; likely the `googleapis` types). `NODE_OPTIONS=--max-old-space-size=6144` works. Check Vercel, consider `typescript.ignoreBuildErrors` with tsc in CI.
 - [ ] CI: run `node design/build.mjs --check` so generated design outputs never drift.
 - [ ] Medallion + phone: BLE bonding/encryption, so the phone pairs only to the owner's medallion.
-- [ ] Brain: a `docs/DEPLOY.md` step-by-step for Vercel (Pro plan for 30-min cron), Upstash, Google Cloud OAuth consent, FCM, env vars.
+- [x] Brain: a `docs/DEPLOY.md` step-by-step for Vercel (Pro plan for 30-min cron), Upstash, Google Cloud OAuth consent, FCM, env vars. Done 2026-11-12 (`crew/deploy-guide`).
 - [ ] Phase 2 design: texts (Android SMS via the phone companion), Facebook groups (API limits; investigate options), Outlook. Write `docs/CHANNELS.md` with a recommendation before building.
 - [ ] Reachy: settings page (port 8042) has no auth. Add an optional local PIN, or bind to localhost behind the dashboard.
 - [ ] Reachy: train a custom "hey SideKiqq" openWakeWord model (the default is `hey_jarvis`) and test false-accept rates.
