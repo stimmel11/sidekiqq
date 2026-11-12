@@ -266,6 +266,11 @@ private fun App(vm: MainViewModel, requestedTab: Tab) {
                             starting = state.reachyStarting,
                             onStart = vm::startReachy,
                             onSaveHost = vm::setReachyHost,
+                            searching = state.reachySearching,
+                            found = state.reachyFound,
+                            onFind = vm::findReachy,
+                            onChooseFound = vm::chooseFoundReachy,
+                            onDismissFound = vm::dismissFoundReachy,
                         )
                     }
                 }, modifier = m)
