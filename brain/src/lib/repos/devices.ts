@@ -65,6 +65,15 @@ export class DevicesRepo {
   async setFcmToken(id: string, fcmToken: string, fcmDevice: string): Promise<DeviceRecord | null> {
     const d = await this.col.get(id);
     if (!d) return null;
+    // An FCM token belongs to one app install. If another record still holds it (a re-paired phone
+    // left a stale record behind), clear it there, so that record can't receive this device's
+    // command nudges or be counted twice for alerts.
+    for (const other of await this.col.all()) {
+      if (other.id !== id && other.fcmToken === fcmToken) {
+        const { fcmToken: _t, fcmDevice: _d, ...rest } = other;
+        await this.col.put(rest);
+      }
+    }
     return this.col.put({ ...d, fcmToken, fcmDevice });
   }
 
