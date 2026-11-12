@@ -18,6 +18,7 @@ import {
   ConnectorPurposeSchema,
   ConnectorServiceNameSchema,
   RELATIONSHIP_HEALTH,
+  REACHY_START_ACTIVITIES,
   type Action,
   type DeviceKind,
 } from "../models";
@@ -58,6 +59,8 @@ export interface ToolContext {
   lookedUp?: LookedUpContacts;
   /** Set once call_on_phone queued a hand-off: one call per request. */
   callQueued?: boolean;
+  /** Set once start_reachy queued a hand-off: one Reachy start per request. */
+  reachyStartQueued?: boolean;
   /**
    * Links the brain itself created in this request (start_video_room's join link). open_on_phone
    * may only hand off one of these, never a link the model read in email, files or calendar.
@@ -303,6 +306,62 @@ const callOnPhone = tool({
       number: row.number,
       expiresAt: row.expiresAt,
       note: "Nothing was dialled. Tell the owner it's on their phone: open SideKiqq there and tap Call within 15 minutes. Don't say the call was made.",
+    };
+  },
+});
+
+/**
+ * "Start up Reachy and let's dance" said to any device: queues a `reachy_start` hand-off for the
+ * owner's phone. The brain can't reach the robot (it is on the home LAN), so the phone, after the
+ * owner taps Start, starts the SideKiqq app through the Reachy daemon and then queues the
+ * `reachy_wake` itself (the Reachy card flow). Nothing starts here and nothing is sent.
+ * Owner requests only: the request context exists only inside /api/ask.
+ */
+const startReachy = tool({
+  name: "start_reachy",
+  description:
+    "Ask the owner's phone to start their Reachy Mini robot: the phone shows a Start button and, only when the owner taps it, starts the SideKiqq app on the robot over the home network and wakes it for the activity. Use only when the owner asks in this request to start up, turn on or wake Reachy. activity: chat (default), brief (read the brief aloud) or dance.",
+  input: z.object({
+    activity: z.enum(REACHY_START_ACTIVITIES).default("chat"),
+  }),
+  async run(input, ctx) {
+    const { deps } = ctx;
+    const origin = ctx.request;
+    if (!origin) throw new ToolInputError("Reachy can only be started from an owner request.");
+    if (ctx.reachyStartQueued) throw new ToolInputError("A Reachy start is already waiting on the phone for this request.");
+    // Reachy can only hear the owner when its app is already running.
+    if (origin.deviceKind === "reachy") throw new ToolInputError("Reachy is already on: you are talking to it. Just go ahead.");
+    const audit = (ok: boolean, error?: string) =>
+      deps.repos.audit
+        .add({
+          connector: "device",
+          capability: "device.reachy_start",
+          tier: "user_finishes",
+          caller: "ask",
+          device: origin.deviceKind,
+          summary: `hand-off to phone: start Reachy (${input.activity})`,
+          ok,
+          ...(error ? { error: truncate(error, 300) } : {}),
+        })
+        .catch((err: unknown) => console.warn("[audit] write failed", err));
+    let row;
+    let target;
+    try {
+      const fields = buildCommand({ kind: "reachy_start", activity: input.activity });
+      target = resolveTarget("reachy_start", undefined, await deps.repos.devices.list());
+      row = await deps.repos.commands.enqueue(fields, { id: origin.deviceId, kind: origin.deviceKind }, target.id);
+    } catch (err) {
+      await audit(false, err instanceof CommandError ? `${err.code ?? "refused"}: ${err.message}` : (err as Error).message);
+      throw err;
+    }
+    await audit(true);
+    ctx.reachyStartQueued = true;
+    await nudgeCommandTarget(deps, target, row.id);
+    return {
+      queued: true,
+      label: row.label,
+      expiresAt: row.expiresAt,
+      note: "Nothing has started yet. Tell the owner to open SideKiqq on their phone and tap Start within 15 minutes (the phone must be on the same home network as Reachy). Don't say Reachy is on.",
     };
   },
 });
@@ -685,6 +744,7 @@ export const ALL_TOOLS = [
   lookupContact,
   startVideoRoom,
   callOnPhone,
+  startReachy,
   openOnPhone,
   getClientTimeline,
   listCommitments,

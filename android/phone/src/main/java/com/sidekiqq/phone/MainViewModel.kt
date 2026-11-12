@@ -12,6 +12,7 @@ import com.sidekiqq.phone.reachy.ReachyDaemonHttp
 import com.sidekiqq.phone.reachy.ReachyFinder
 import com.sidekiqq.phone.reachy.ReachySettings
 import com.sidekiqq.phone.reachy.ReachyStarter
+import com.sidekiqq.phone.reachy.StartOutcome
 import com.sidekiqq.phone.reachy.message
 import com.sidekiqq.phone.push.SideKiqqMessagingService
 import com.sidekiqq.shared.SideKiqqApiException
@@ -227,8 +228,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Claims a hand-off the owner just tapped (open or dismiss) and hides it at once. Returns false
      * if it was already handled, so a double tap can't open it twice. Call before acting on it.
      */
-    fun claimHandoff(cmd: DeviceCommand, intended: CommandResult): Boolean {
-        val first = inbox.markHandled(cmd.id, intended)
+    fun claimHandoff(cmd: DeviceCommand, intended: CommandResult, inFlight: Boolean = false): Boolean {
+        val first = inbox.markHandled(cmd.id, intended, inFlight)
         _ui.update { it.copy(handoffs = inbox.visible(lastPolledCommands)) }
         return first
     }
@@ -316,17 +317,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * The owner tapped Chat / Brief / Dance on the Reachy card. Starts the SideKiqq app on the
      * robot through its LAN daemon if it isn't running, then queues a `reachy_wake` for it on the
-     * brain. Only from that tap; it never stops another app and never sends a message.
+     * brain. Only from that tap (or the Start button of a `reachy_start` hand-off); it never stops
+     * another app and never sends a message. [onDone] gets the result to ack: OPENED only when the
+     * wake was queued, DISMISSED when a start was already running (that one wakes Reachy), FAILED
+     * otherwise. It is called once on every path, except when the ViewModel is cleared mid-start
+     * (the ack is then lost and the brain still lists the hand-off until it expires).
      */
-    fun startReachy(activity: String) {
-        val c = client() ?: return
-        if (reachyJob?.isActive == true || findReachyJob?.isActive == true) return
+    fun startReachy(activity: String, onDone: (CommandResult) -> Unit = {}) {
+        val c = client() ?: return onDone(CommandResult.FAILED)
+        if (reachyJob?.isActive == true) {
+            _ui.update { it.copy(snackbar = "Reachy is already starting.") }
+            return onDone(CommandResult.DISMISSED)
+        }
+        // The owner tapped Start (or a hand-off's Start): that wins over a Find Reachy search.
+        findReachyJob?.cancel()
         _ui.update { it.copy(reachyStarting = true, reachyFound = null, error = null) }
         reachyJob = viewModelScope.launch {
-            val daemon = ReachyDaemonHttp(reachySettings.host)
+            var daemon: ReachyDaemonHttp? = null
+            var woken = false
             try {
+                val d = ReachyDaemonHttp(reachySettings.host).also { daemon = it }
                 val outcome = ReachyStarter(
-                    daemon = daemon,
+                    daemon = d,
                     queueWake = { a ->
                         try {
                             c.createCommand(
@@ -352,14 +364,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ).start(activity)
                 Log.i(TAG, "Start Reachy ($activity): $outcome")
                 _ui.update { it.copy(snackbar = outcome.message()) }
+                woken = outcome is StartOutcome.Woken
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Start Reachy", e)
                 _ui.update { it.copy(snackbar = "Couldn't start Reachy. Try again.") }
             } finally {
-                daemon.close()
+                onDone(if (woken) CommandResult.OPENED else CommandResult.FAILED)
                 _ui.update { it.copy(reachyStarting = false) }
+                try { daemon?.close() } catch (e: Exception) { Log.w(TAG, "Close Reachy daemon client", e) }
             }
         }
     }

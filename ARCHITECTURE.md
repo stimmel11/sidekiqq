@@ -118,11 +118,11 @@ interface Alert { id: string /* sequence no. = cursor */; at: string; title: str
   kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
   importance?: Importance; priority: "high"|"normal";
   client?: string; messageId?: string; threadId?: string; commitmentId?: string; }
-type CommandKind = "open_url"|"call_contact"|"reachy_wake";   // clients must ignore kinds they don't know
+type CommandKind = "open_url"|"call_contact"|"reachy_wake"|"reachy_start";   // clients must ignore kinds they don't know
 interface DeviceCommand { id: string; at: string; expiresAt: string /* at + 15 min */; kind: CommandKind;
   label: string /* built by the brain; shown before the owner taps */; from: DeviceKind;
   url?: string /* open_url */; number?: string; name?: string; app?: "phone"|"whatsapp" /* call_contact */;
-  activity?: "chat"|"brief"|"dance"|"game" /* reachy_wake */; }
+  activity?: "chat"|"brief"|"dance"|"game" /* reachy_wake; reachy_start: chat|brief|dance */; }
 interface CreateCommandRequest { kind: CommandKind; target?: { deviceId?: string; device?: DeviceKind } /* one, not both (400) */;
   url?: string; number?: string; name?: string; app?: "phone"|"whatsapp"; activity?: "chat"|"brief"|"dance"|"game"; }
 ```
@@ -132,7 +132,7 @@ A command is started on one device and runs on another ("call Dana" said to the 
 Every command is a **hand-off** (`user_finishes` in `docs/CONNECTORS.md`): the target shows `label` and acts only after
 the owner taps. Devices never auto-launch a command, dial with `ACTION_DIAL` (never `ACTION_CALL`), and nothing is ever
 sent because of a command; messages still go only through `/api/drafts/:id/approve`.
-- Targets: `open_url` and `call_contact` → `phone`; `reachy_wake` → `reachy`. Default is the most recently seen
+- Targets: `open_url`, `call_contact` and `reachy_start` → `phone`; `reachy_wake` → `reachy`. Default is the most recently seen
   non-revoked device of that kind; `target.deviceId` picks one.
 - `open_url`: `https` only, no credentials or port, host on a code allowlist (`meet.google.com`, `zoom.us` and its
   subdomains, `www.kroger.com`, `www.kingsoopers.com`).
@@ -140,6 +140,12 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   MMI/USSD codes or post-dial digits). WhatsApp needs a leading `+`. Short codes such as 911 are accepted: the owner
   still taps Call in the dialer. `name` loses digits, `+` and brackets so it can't carry a fake number; devices show
   `number` on its own line, not only inside `label`.
+- `reachy_start`: activity `chat` (default), `brief` or `dance` (no `game` until Reachy has one), no other fields.
+  The brain can't reach the robot's LAN, so the phone runs it: on the owner's tap of Start it does the Reachy card
+  flow (daemon `current-app-status`, `start-app/sidekiqq_reachy/no-evict` if needed, then its own `reachy_wake`
+  via `POST /api/commands`) and acks `opened` only once the wake is queued, `failed` otherwise. From `/api/ask` the
+  tool `start_reachy` queues it ("start up Reachy and let's dance"), one per request, audited as
+  `device.reachy_start` / `user_finishes`, with the same silent nudge.
 - Liveness: a device treats a command as live only while `GET /api/commands` returns it. An `opened` ack is accepted up
   to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
 - `POST /api/commands` is the owner-device path. "Call Dana on my phone" said to any device goes through `/api/ask`:
@@ -151,7 +157,7 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
   phone. Other `user_finishes` hand-offs go through `handoffCapability` (`lib/connectors/handoff.ts`) with the caller rules in `docs/CONNECTORS.md` §4.4; the `/api/ask` tool `open_on_phone` uses it to queue an `open_url` for a meeting join link created in the same request (one per request, same command shape, no new `Action.type`).
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
-  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands`, `call_on_phone` or `handoffCapability`) (high priority,
+  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands`, `call_on_phone`, `start_reachy` or `handoffCapability`) (high priority,
   data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
   Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
   The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no
