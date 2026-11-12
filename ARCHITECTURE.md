@@ -155,6 +155,9 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
 - Nothing is ever sent automatically. The brain creates drafts; sending requires `/api/drafts/:id/approve`,
   which every device surfaces as an explicit confirm (watch: tap Approve; glasses, medallion and Reachy Mini: the
   exact phrase "send it" within 30 s of hearing the draft read back; anything else, silence or a timeout cancels).
+  Voice read-backs come from `GET /api/drafts`: `readback`, then "Message begins:" and the body's first sentence. The
+  30 s window opens only after the read-back has played to the end, speech that started before it can't confirm,
+  and the device re-fetches the draft right before approve and refuses if it is gone or changed.
 - Inferred dates and facts carry `dueInferred` / `confidence` and are spoken as "inferred".
 - Client data is never mixed across clients in replies.
 
