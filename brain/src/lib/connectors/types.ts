@@ -74,3 +74,14 @@ export class ReauthRequiredError extends Error {
     this.name = "ReauthRequiredError";
   }
 }
+
+/**
+ * The provider definitely refused the send (a 4xx such as a missing scope or a rejected attendee):
+ * nothing went out, the draft stays pending, approve answers 422 `provider_refused`.
+ */
+export class ProviderRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderRefusedError";
+  }
+}

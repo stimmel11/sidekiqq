@@ -224,9 +224,11 @@ public struct Action: Codable, Hashable, Sendable, Identifiable {
     public var type: ActionType
     public var id: String
     public var summary: String
+    /** `draft_created` only: "email", "calendar_invite", ...; nil from older brains (= "email"). */
+    public var draftKind: String?
 
-    public init(type: ActionType, id: String, summary: String) {
-        self.type = type; self.id = id; self.summary = summary
+    public init(type: ActionType, id: String, summary: String, draftKind: String? = nil) {
+        self.type = type; self.id = id; self.summary = summary; self.draftKind = draftKind
     }
 }
 
@@ -326,13 +328,24 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     public var readback: String
     /** Calendar kinds only. */
     public var when: When?
+    /** Calendar kinds only: the event location. */
+    public var location: String?
+    /** calendar_invite only: "meet" = a Google Meet link is added when it's sent. */
+    public var conference: String?
     public var client: String?
     public var createdAt: String
 
+    /** Kinds this app can word a confirm step for. Anything else is never approved here. */
+    public static let approvableKinds: Set<String> = ["email", "calendar_invite"]
+    public var isInvite: Bool { kind == "calendar_invite" }
+    public var isApprovable: Bool { Draft.approvableKinds.contains(kind) }
+
     public init(id: String, kind: String = "email", to: [String], cc: [String] = [], subject: String, body: String,
-                readback: String = "", when: When? = nil, client: String? = nil, createdAt: String) {
+                readback: String = "", when: When? = nil, location: String? = nil, conference: String? = nil,
+                client: String? = nil, createdAt: String) {
         self.id = id; self.kind = kind; self.to = to; self.cc = cc; self.subject = subject; self.body = body
-        self.readback = readback; self.when = when; self.client = client; self.createdAt = createdAt
+        self.readback = readback; self.when = when; self.location = location; self.conference = conference
+        self.client = client; self.createdAt = createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -345,6 +358,8 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         body = try c.decode(String.self, forKey: .body)
         readback = try c.decodeIfPresent(String.self, forKey: .readback) ?? ""
         when = try c.decodeIfPresent(When.self, forKey: .when)
+        location = try c.decodeIfPresent(String.self, forKey: .location)
+        conference = try c.decodeIfPresent(String.self, forKey: .conference)
         client = try c.decodeIfPresent(String.self, forKey: .client)
         createdAt = try c.decode(String.self, forKey: .createdAt)
     }

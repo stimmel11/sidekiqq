@@ -8,7 +8,7 @@ import type { Deps } from "@/lib/deps";
 import { GoogleTokenStore } from "@/lib/google/auth";
 import { ConnectionStore } from "@/lib/connectors/store";
 import type { CalendarEvent, DraftInput, EmailMessage, Workspace } from "@/lib/google/workspace";
-import type { MailSender } from "@/lib/connectors/google/send";
+import type { CalendarInviter, InviteEvent, MailSender } from "@/lib/connectors/google/send";
 import { GoogleConnector, type ContactsLookup } from "@/lib/connectors/google";
 import { ZoomConnector } from "@/lib/connectors/zoom";
 import type { ZoomRooms } from "@/lib/connectors/zoom/meetings";
@@ -134,6 +134,18 @@ export class SpyMailSender implements MailSender {
   sendDraft = vi.fn(async (gmailDraftId: string) => ({ messageId: `msg_for_${gmailDraftId}` }));
 }
 
+/** Records approved invites instead of writing to Google Calendar. Ids already "in the calendar" give alreadyExisted. */
+export class SpyCalendarInviter implements CalendarInviter {
+  events = new Map<string, InviteEvent>();
+  error: Error | null = null;
+  insertInvite = vi.fn(async (e: InviteEvent): Promise<{ eventId: string; alreadyExisted: boolean; meetLink?: boolean }> => {
+    if (this.error) throw this.error;
+    if (this.events.has(e.eventId)) return { eventId: e.eventId, alreadyExisted: true };
+    this.events.set(e.eventId, e);
+    return { eventId: e.eventId, alreadyExisted: false };
+  });
+}
+
 export class FakePush implements PushSender {
   readonly enabled = true;
   sent: { tokens: string[]; msg: PushMessage }[] = [];
@@ -192,6 +204,7 @@ export interface TestDeps extends Deps {
   ws: FakeWorkspace;
   contacts: FakeContacts;
   sender: SpyMailSender;
+  inviter: SpyCalendarInviter;
   pushFake: FakePush;
   zoom: FakeZoomRooms;
   setNow(d: Date): void;
@@ -221,6 +234,7 @@ export function makeDeps(
   const ws = new FakeWorkspace();
   const contacts = new FakeContacts();
   const sender = new SpyMailSender();
+  const inviter = new SpyCalendarInviter();
   const pushFake = new FakePush();
   const zoom = new FakeZoomRooms();
   let zoomAuth: ZoomAuth | null | undefined; // one shared instance, like buildDeps
@@ -251,7 +265,7 @@ export function makeDeps(
     googleTokens: new GoogleTokenStore(connections),
     connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : [])],
     zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
-    senders: () => buildSenders({ google: { workspace, mailer: async () => sender } }),
+    senders: () => buildSenders({ google: { workspace, mailer: async () => sender, calendar: async () => inviter }, clock }),
     push: () => pushFake,
     transcriber: () =>
       opts.transcriber ?? {
@@ -266,6 +280,7 @@ export function makeDeps(
     ws,
     contacts,
     sender,
+    inviter,
     pushFake,
     zoom,
     setNow: (d: Date) => {
