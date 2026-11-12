@@ -42,6 +42,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-11-01: Start-up-Reachy slice 1 (`crew/reachy-start`): phone Reachy card starts `sidekiqq_reachy` through the LAN daemon (no-evict, `.local` only) and queues `reachy_wake`. Android unverified; 16 JVM tests pass via kotlinc.
 - 2026-11-02: Kroger slice 1 (`crew/kroger-grocery`): `lib/kroger` product search + add-only cart module with caps, search-provenance check and uncertain-add errors; no checkout/order/payment calls. 617 brain tests.
 - 2026-11-03: Outlook slice 1 (`crew/outlook-mail-read`): read-only Microsoft Graph mail module with Gmail-shaped output, Graph send endpoints added to the no-send scan. 606 brain tests.
+- 2026-11-12: Deploy guide (`crew/deploy-guide`): `docs/DEPLOY.md`, secrets → Upstash → Vercel (Hobby cron note) → Google OAuth → dashboard connect → pairing, with troubleshooting.
 - 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 
 ## Backlog (top = next)
@@ -131,7 +132,7 @@ Same brain and API contract; Apple devices are thin clients like the Android one
 - [ ] Brain: `next build` runs out of memory during type-checking at the default Node heap in a 7 GB sandbox (pre-existing, also on `build-crew-round-1`; likely the `googleapis` types). `NODE_OPTIONS=--max-old-space-size=6144` works. Check Vercel, consider `typescript.ignoreBuildErrors` with tsc in CI.
 - [ ] CI: run `node design/build.mjs --check` so generated design outputs never drift.
 - [ ] Medallion + phone: BLE bonding/encryption, so the phone pairs only to the owner's medallion.
-- [ ] Brain: a `docs/DEPLOY.md` step-by-step for Vercel (Pro plan for 30-min cron), Upstash, Google Cloud OAuth consent, FCM, env vars.
+- [x] Brain: a `docs/DEPLOY.md` step-by-step for Vercel (Pro plan for 30-min cron), Upstash, Google Cloud OAuth consent, FCM, env vars. Done 2026-11-12 (`crew/deploy-guide`).
 - [ ] Phase 2 design: texts (Android SMS via the phone companion), Facebook groups (API limits; investigate options), Outlook. Write `docs/CHANNELS.md` with a recommendation before building.
 - [ ] Reachy: settings page (port 8042) has no auth. Add an optional local PIN, or bind to localhost behind the dashboard.
 - [ ] Reachy: train a custom "hey SideKiqq" openWakeWord model (the default is `hey_jarvis`) and test false-accept rates.
