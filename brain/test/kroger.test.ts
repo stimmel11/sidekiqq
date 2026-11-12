@@ -383,16 +383,18 @@ describe("Kroger safety", () => {
   });
 
   const ALLOWED_PATHS = ["/v1", "/products", "/cart/add", "/cart"];
+  /** The sign-in module (lib/connectors/kroger/auth.ts) may also name the OAuth endpoints and its own callback. */
+  const AUTH_PATHS = ["/v1/connect/oauth2", "/authorize", "/token", "/api/connections/kroger/callback"];
   /** URL paths in code that aren't on the allowlist: at the start of a string (after an optional https://host) or after a `${...}`. */
-  function disallowedPaths(code: string): string[] {
+  function disallowedPaths(code: string, allowed: readonly string[] = ALLOWED_PATHS): string[] {
     const bad: string[] = [];
     for (const m of code.matchAll(/["'`](?:https:\/\/[^"'`]*?)?(\/[a-z][^"'`?]*)/gi)) {
       const p = m[1]!.replace(/\$\{[^}]*\}/g, "");
-      if (!ALLOWED_PATHS.includes(p)) bad.push(m[0]);
+      if (!allowed.includes(p)) bad.push(m[0]);
     }
     for (const m of code.matchAll(/\$\{[^}]*\}(\/[^"'`?\s]*)/g)) {
       const p = m[1]!.replace(/\$\{[^}]*\}.*$/, "");
-      if (!ALLOWED_PATHS.includes(p)) bad.push(m[0]);
+      if (!allowed.includes(p)) bad.push(m[0]);
     }
     return bad;
   }
@@ -406,12 +408,13 @@ describe("Kroger safety", () => {
 
   it("no Kroger module names a checkout, order, payment or pickup-slot API path", () => {
     const dirs = ["../src/lib/kroger", "../src/lib/connectors/kroger"].map((d) => join(__dirname, d)).filter((d) => existsSync(d));
-    const files = dirs.flatMap((d) => readdirSync(d).filter((n) => n.endsWith(".ts")).map((n) => join(d, n)));
+    const files = dirs.flatMap((d) => readdirSync(d, { recursive: true, encoding: "utf8" }).filter((n) => n.endsWith(".ts")).map((n) => join(d, n)));
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       const code = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
       // The only URL paths allowed in code: the API base, the two endpoints, and the cart pages for hand-off.
-      expect(disallowedPaths(code), file).toEqual([]);
+      const allowed = file.endsWith(join("connectors", "kroger", "auth.ts")) ? [...ALLOWED_PATHS, ...AUTH_PATHS] : ALLOWED_PATHS;
+      expect(disallowedPaths(code, allowed), file).toEqual([]);
       expect(code, file).not.toMatch(/\/(?:checkout|orders?|payments?|slots?|fulfillment)\b/i);
     }
   });

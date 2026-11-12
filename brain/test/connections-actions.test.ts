@@ -82,7 +82,7 @@ describe("Connections server actions", () => {
     setDeps(deps);
     await connect(deps);
     expect(await redirectOf(setCapabilityAction(form({ connectorId: "google", capability: "files.read", on: "0" })))).toBe("/dashboard/connections?done=saved");
-    expect((await deps.connections.load("google"))?.enabled).toEqual(["email.read", "email.draft", "calendar.read", "contacts.lookup"]);
+    expect((await deps.connections.load("google"))?.enabled).toEqual(["email.read", "email.draft", "calendar.read", "calendar.invite.prepare", "contacts.lookup"]);
     expect(await redirectOf(setCapabilityAction(form({ connectorId: "google", capability: "files.read", on: "1" })))).toBe("/dashboard/connections?done=saved");
     expect((await deps.connections.load("google"))?.enabled).toContain("files.read");
     expect(await redirectOf(setCapabilityAction(form({ connectorId: "google", capability: "email.send", on: "1" })))).toBe("/dashboard/connections?error=unknown");

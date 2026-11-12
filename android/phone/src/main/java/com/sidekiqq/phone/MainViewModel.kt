@@ -6,9 +6,13 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sidekiqq.phone.handoff.CommandInbox
+import com.sidekiqq.phone.reachy.FoundReachy
+import com.sidekiqq.phone.reachy.MdnsUdp
 import com.sidekiqq.phone.reachy.ReachyDaemonHttp
+import com.sidekiqq.phone.reachy.ReachyFinder
 import com.sidekiqq.phone.reachy.ReachySettings
 import com.sidekiqq.phone.reachy.ReachyStarter
+import com.sidekiqq.phone.reachy.StartOutcome
 import com.sidekiqq.phone.reachy.message
 import com.sidekiqq.phone.push.SideKiqqMessagingService
 import com.sidekiqq.shared.SideKiqqApiException
@@ -29,6 +33,7 @@ import com.sidekiqq.shared.model.FollowUp
 import com.sidekiqq.shared.model.Top5Response
 import com.sidekiqq.shared.wear.WearReply
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -38,6 +43,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class UiState(
     val paired: Boolean = false,
@@ -60,6 +66,10 @@ data class UiState(
     val reachyHost: String = "",
     /** A "start Reachy" run is in progress (buttons disabled). */
     val reachyStarting: Boolean = false,
+    /** "Find Reachy" is searching the Wi-Fi. */
+    val reachySearching: Boolean = false,
+    /** Robots the last search found, shown as choices; null = no list. Saved only when the owner taps one. */
+    val reachyFound: List<FoundReachy>? = null,
 )
 
 enum class TalkState { Idle, Listening, Thinking, Speaking }
@@ -82,6 +92,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var repollRequested = false // main thread only (viewModelScope / UI callers)
     private var lastOkPollAt = 0L // SystemClock.elapsedRealtime(), not the wall clock
     private var reachyJob: Job? = null
+    private var findReachyJob: Job? = null
 
     init {
         if (store.isPaired) refreshAll()
@@ -217,8 +228,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Claims a hand-off the owner just tapped (open or dismiss) and hides it at once. Returns false
      * if it was already handled, so a double tap can't open it twice. Call before acting on it.
      */
-    fun claimHandoff(cmd: DeviceCommand, intended: CommandResult): Boolean {
-        val first = inbox.markHandled(cmd.id, intended)
+    fun claimHandoff(cmd: DeviceCommand, intended: CommandResult, inFlight: Boolean = false): Boolean {
+        val first = inbox.markHandled(cmd.id, intended, inFlight)
         _ui.update { it.copy(handoffs = inbox.visible(lastPolledCommands)) }
         return first
     }
@@ -261,19 +272,73 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * The owner tapped "Find Reachy": looks for `_reachy-mini._tcp` daemons on the Wi-Fi (mDNS,
+     * about 3 s) and lists them. Nothing is saved until the owner taps one ([chooseFoundReachy]),
+     * and a found address still has to be a `.local` name. Sends nothing but mDNS questions (≤ 7).
+     */
+    fun findReachy() {
+        if (findReachyJob?.isActive == true || reachyJob?.isActive == true) return
+        _ui.update { it.copy(reachySearching = true, reachyFound = null, error = null) }
+        findReachyJob = viewModelScope.launch {
+            try {
+                val found = withContext(Dispatchers.IO) {
+                    val rnd = java.security.SecureRandom()
+                    MdnsUdp().use { t ->
+                        ReachyFinder(t, now = { SystemClock.elapsedRealtime() }, nextId = { rnd.nextInt(65536) }).find()
+                    }
+                }
+                Log.i(TAG, "Find Reachy: ${found.size} found")
+                _ui.update {
+                    it.copy(
+                        reachyFound = found.ifEmpty { null },
+                        snackbar = if (found.isEmpty()) "No Reachy found. Is the phone on the same Wi-Fi?" else it.snackbar,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // For example no Wi-Fi (multicast unreachable on mobile data).
+                Log.w(TAG, "Find Reachy", e)
+                _ui.update { it.copy(snackbar = "Couldn't search for Reachy. Connect to your home Wi-Fi and try again.") }
+            } finally {
+                _ui.update { it.copy(reachySearching = false) }
+            }
+        }
+    }
+
+    /** The owner tapped one of the robots "Find Reachy" listed: save it like a typed address. */
+    fun chooseFoundReachy(found: FoundReachy) {
+        if (setReachyHost(found.host.display)) _ui.update { it.copy(reachyFound = null) }
+    }
+
+    /** The owner closed the "Find Reachy" list without choosing. */
+    fun dismissFoundReachy() = _ui.update { it.copy(reachyFound = null) }
+
+    /**
      * The owner tapped Chat / Brief / Dance on the Reachy card. Starts the SideKiqq app on the
      * robot through its LAN daemon if it isn't running, then queues a `reachy_wake` for it on the
-     * brain. Only from that tap; it never stops another app and never sends a message.
+     * brain. Only from that tap (or the Start button of a `reachy_start` hand-off); it never stops
+     * another app and never sends a message. [onDone] gets the result to ack: OPENED only when the
+     * wake was queued, DISMISSED when a start was already running (that one wakes Reachy), FAILED
+     * otherwise. It is called once on every path, except when the ViewModel is cleared mid-start
+     * (the ack is then lost and the brain still lists the hand-off until it expires).
      */
-    fun startReachy(activity: String) {
-        val c = client() ?: return
-        if (reachyJob?.isActive == true) return
-        _ui.update { it.copy(reachyStarting = true, error = null) }
+    fun startReachy(activity: String, onDone: (CommandResult) -> Unit = {}) {
+        val c = client() ?: return onDone(CommandResult.FAILED)
+        if (reachyJob?.isActive == true) {
+            _ui.update { it.copy(snackbar = "Reachy is already starting.") }
+            return onDone(CommandResult.DISMISSED)
+        }
+        // The owner tapped Start (or a hand-off's Start): that wins over a Find Reachy search.
+        findReachyJob?.cancel()
+        _ui.update { it.copy(reachyStarting = true, reachyFound = null, error = null) }
         reachyJob = viewModelScope.launch {
-            val daemon = ReachyDaemonHttp(reachySettings.host)
+            var daemon: ReachyDaemonHttp? = null
+            var woken = false
             try {
+                val d = ReachyDaemonHttp(reachySettings.host).also { daemon = it }
                 val outcome = ReachyStarter(
-                    daemon = daemon,
+                    daemon = d,
                     queueWake = { a ->
                         try {
                             c.createCommand(
@@ -299,14 +364,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ).start(activity)
                 Log.i(TAG, "Start Reachy ($activity): $outcome")
                 _ui.update { it.copy(snackbar = outcome.message()) }
+                woken = outcome is StartOutcome.Woken
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Start Reachy", e)
                 _ui.update { it.copy(snackbar = "Couldn't start Reachy. Try again.") }
             } finally {
-                daemon.close()
+                onDone(if (woken) CommandResult.OPENED else CommandResult.FAILED)
                 _ui.update { it.copy(reachyStarting = false) }
+                try { daemon?.close() } catch (e: Exception) { Log.w(TAG, "Close Reachy daemon client", e) }
             }
         }
     }

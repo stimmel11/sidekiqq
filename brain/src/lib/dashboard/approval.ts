@@ -18,8 +18,11 @@ import { callAsDashboardDevice, type RouteResult } from "./device-bridge";
 
 export const CONFIRM_VALUE = "send";
 
-export function draftFingerprint(d: Pick<Draft, "id" | "to" | "cc" | "subject" | "body">): string {
-  return sha256(JSON.stringify(["v1", d.id, d.to, d.cc ?? [], d.subject, d.body]));
+export function draftFingerprint(d: Pick<Draft, "id" | "to" | "cc" | "subject" | "body"> & Partial<Pick<Draft, "kind" | "when" | "location" | "conference">>): string {
+  const kind = d.kind ?? "email";
+  if (kind === "email") return sha256(JSON.stringify(["v1", d.id, d.to, d.cc ?? [], d.subject, d.body]));
+  // Calendar kinds: what the dialog shows also includes the time, the place and the video link.
+  return sha256(JSON.stringify(["v2", kind, d.id, d.to, d.cc ?? [], d.subject, d.body, d.when ?? null, d.location ?? null, d.conference ?? null]));
 }
 
 export type ApprovalCheck = { ok: true } | { ok: false; status: number; error: string };
@@ -44,6 +47,9 @@ const CODE_MESSAGES: Record<string, string> = {
   changed_in_provider: "The draft was changed in Gmail after it was drafted, so nothing was sent. It has been marked discarded; review it in Gmail.",
   no_provider_draft: "This draft has no Gmail draft attached, so it can't be sent from here.",
   unsupported_kind: "This kind of draft can't be approved yet. Nothing was sent.",
+  invalid_draft: "This draft can't be sent as stored, so nothing was sent. Ask SideKiqq to prepare it again.",
+  provider_refused: "The provider refused it, so nothing was sent. It is still pending; reconnecting the account from Connections may help.",
+  expired: "The invite's start time has passed, so nothing was sent. It has been marked discarded; ask SideKiqq for a new invite.",
 };
 
 function outcome(r: RouteResult, messages: Record<number, string> = {}): ActionOutcome {

@@ -35,7 +35,12 @@ export class DraftsRepo {
       kind,
       connectorId: input.connectorId ?? "google",
       cc,
-      readback: assertReadbackFits(buildReadback({ kind, to: input.to, cc, subject: input.subject, ...(input.when ? { when: input.when } : {}) }, this.timeZone())),
+      readback: assertReadbackFits(
+        buildReadback(
+          { kind, to: input.to, cc, subject: input.subject, ...(input.when ? { when: input.when } : {}), ...(input.conference ? { conference: input.conference } : {}), ...(input.location ? { location: input.location } : {}) },
+          this.timeZone(),
+        ),
+      ),
       id: newId("drf"),
       status: "pending",
       createdAt: this.clock().toISOString(),
@@ -73,9 +78,11 @@ export class DraftsRepo {
     });
   }
 
+  /** Never overwrites a sent draft (a lazy-expiry discard may race an approve that just sent). */
   async markDiscarded(id: string): Promise<Draft | null> {
     const cur = await this.col.get(id);
     if (!cur) return null;
+    if (cur.status === "sent") return cur;
     return this.col.put({ ...cur, status: "discarded" });
   }
 }

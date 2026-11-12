@@ -98,6 +98,11 @@ data class Action(
     val type: ActionType,
     val id: String,
     val summary: String,
+    /**
+     * `draft_created` only: the draft's kind (see [DraftKind]), a plain string so new kinds can't
+     * break parsing. Absent from older brains = "email". Don't offer to approve a kind you don't know.
+     */
+    val draftKind: String? = null,
 )
 
 // ---- Drafts (GET /api/drafts) ----
@@ -132,6 +137,10 @@ data class Draft(
     val readback: String = "",
     /** Calendar kinds only. */
     val `when`: DraftWhen? = null,
+    /** Calendar kinds only: the event location. */
+    val location: String? = null,
+    /** calendar_invite only: "meet" = a Google Meet link is added when it's sent. */
+    val conference: String? = null,
     val client: String? = null,
     val createdAt: String,
 )
@@ -140,6 +149,12 @@ object DraftKind {
     const val EMAIL = "email"
     const val CALENDAR_INVITE = "calendar_invite"
     const val CALENDAR_HOLD = "calendar_hold"
+
+    /** Kinds this app knows how to word a confirm step for. Anything else is never approved here. */
+    val APPROVABLE: Set<String> = setOf(EMAIL, CALENDAR_INVITE)
+
+    /** [Action.draftKind] / [Draft.kind] with the back-compatible default (absent = email). */
+    fun of(kind: String?): String = kind ?: EMAIL
 }
 
 @Serializable
@@ -230,7 +245,7 @@ data class DeviceCommand(
     val name: String? = null,
     /** call_contact: "phone" or "whatsapp". */
     val app: String? = null,
-    /** reachy_wake: "chat", "brief", "dance" or "game". */
+    /** reachy_wake: "chat", "brief", "dance" or "game". reachy_start: "chat", "brief" or "dance". */
     val activity: String? = null,
 )
 
@@ -238,6 +253,8 @@ object CommandKind {
     const val OPEN_URL = "open_url"
     const val CALL_CONTACT = "call_contact"
     const val REACHY_WAKE = "reachy_wake"
+    /** Phone: start the SideKiqq app on Reachy over the home LAN after a tap, then queue a reachy_wake. */
+    const val REACHY_START = "reachy_start"
 }
 
 /**

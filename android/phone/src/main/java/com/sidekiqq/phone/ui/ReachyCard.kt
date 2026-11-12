@@ -1,6 +1,7 @@
 package com.sidekiqq.phone.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
@@ -18,7 +19,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.sidekiqq.phone.reachy.FoundReachy
 import com.sidekiqq.shared.model.ReachyActivity
 
 /**
@@ -31,18 +34,42 @@ fun ReachyCard(
     starting: Boolean,
     onStart: (activity: String) -> Unit,
     onSaveHost: (String) -> Boolean,
+    searching: Boolean = false,
+    found: List<FoundReachy>? = null,
+    onFind: () -> Unit = {},
+    onChooseFound: (FoundReachy) -> Unit = {},
+    onDismissFound: () -> Unit = {},
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf(host) }
 
     SectionCard(
         title = "Reachy",
-        subtitle = if (starting) "Starting SideKiqq on Reachy…" else "On the same Wi-Fi as $host",
+        subtitle = when {
+            starting -> "Starting SideKiqq on Reachy…"
+            searching -> "Looking for Reachy on this Wi-Fi…"
+            else -> "On the same Wi-Fi as $host"
+        },
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !starting, onClick = { onStart(ReachyActivity.CHAT) }, modifier = Modifier.weight(1f)) { Text("Chat", maxLines = 1) }
-            OutlinedButton(enabled = !starting, onClick = { onStart(ReachyActivity.BRIEF) }, modifier = Modifier.weight(1f)) { Text("Brief", maxLines = 1) }
-            OutlinedButton(enabled = !starting, onClick = { onStart(ReachyActivity.DANCE) }, modifier = Modifier.weight(1f)) { Text("Dance", maxLines = 1) }
+            Button(enabled = !starting && !searching, onClick = { onStart(ReachyActivity.CHAT) }, modifier = Modifier.weight(1f)) { Text("Chat", maxLines = 1) }
+            OutlinedButton(enabled = !starting && !searching, onClick = { onStart(ReachyActivity.BRIEF) }, modifier = Modifier.weight(1f)) { Text("Brief", maxLines = 1) }
+            OutlinedButton(enabled = !starting && !searching, onClick = { onStart(ReachyActivity.DANCE) }, modifier = Modifier.weight(1f)) { Text("Dance", maxLines = 1) }
+        }
+        if (!found.isNullOrEmpty()) {
+            // Anyone on the Wi-Fi can answer a search, so each entry shows the exact address it
+            // would save; nothing is saved until the owner taps one.
+            Text("Found on this Wi-Fi. Tap the one to use:", style = MaterialTheme.typography.bodyMedium)
+            for (f in found) {
+                OutlinedButton(enabled = !starting, onClick = { onChooseFound(f) }, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth()) {
+                        if (f.name != f.host.host) Text(f.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // The address it would save, in full (never ellipsized).
+                        Text(f.host.display, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            TextButton(onClick = onDismissFound) { Text("Not now") }
         }
         if (editing) {
             OutlinedTextField(
@@ -59,8 +86,13 @@ fun ReachyCard(
                 TextButton(onClick = { draft = host; editing = false }) { Text("Cancel") }
             }
         } else {
-            TextButton(enabled = !starting, onClick = { draft = host; editing = true }) {
-                Text("Change address", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(enabled = !starting && !searching, onClick = onFind) {
+                    Text(if (searching) "Searching…" else "Find Reachy", style = MaterialTheme.typography.labelLarge)
+                }
+                TextButton(enabled = !starting, onClick = { draft = host; editing = true }) {
+                    Text("Change address", style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     }

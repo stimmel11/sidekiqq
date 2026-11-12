@@ -39,6 +39,7 @@ export const POLICY = {
   "grocery.checkout": "user_finishes",
   "device.call": "user_finishes",
   "device.open_url": "user_finishes",
+  "device.reachy_start": "user_finishes",
 } as const satisfies Record<string, Tier>;
 
 export type CapabilityId = keyof typeof POLICY;
@@ -136,6 +137,43 @@ export const VideoCreateRoomInput = z.object({
   durationMin: z.number().int().min(5).max(VIDEO_ROOM_MAX_MINUTES).optional(),
 });
 
+/**
+ * `calendar.invite.prepare` (confirm): PREPARES an invite as a pending Draft. Nothing is written to
+ * any calendar and nobody is notified until the owner approves it (POST /api/drafts/:id/approve,
+ * executor `google:calendar_invite` in the sender registry). Attendees are strict bare addresses,
+ * like email recipients. `conference: "meet"` adds a Google Meet link at execute time; Zoom in
+ * invites is a later slice. Time rules (future start, max length) are checked by the prepare path
+ * against the clock, and again at approve time.
+ */
+export const INVITE_ATTENDEES_MAX = 10;
+export const INVITE_MAX_MINUTES = 12 * 60;
+export const INVITE_CONFERENCES = ["meet"] as const;
+export const CalendarInvitePrepareInput = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    start: z.iso.datetime({ offset: true }),
+    end: z.iso.datetime({ offset: true }),
+    attendees: z.array(address).min(1).max(INVITE_ATTENDEES_MAX),
+    location: z.string().trim().min(1).max(200).optional(),
+    body: z.string().trim().min(1).max(5_000).optional(),
+    conference: z.enum(INVITE_CONFERENCES).optional(),
+    client: z.string().trim().min(1).max(200).optional(),
+  })
+  .superRefine((i, ctx) => {
+    const s = Date.parse(i.start);
+    const e = Date.parse(i.end);
+    if (!(e > s)) ctx.addIssue({ code: "custom", message: "end must be after start", path: ["end"] });
+    else if (e - s > INVITE_MAX_MINUTES * 60_000) ctx.addIssue({ code: "custom", message: `an invite can be at most ${INVITE_MAX_MINUTES / 60} hours long`, path: ["end"] });
+    if (new Set(i.attendees).size !== i.attendees.length) ctx.addIssue({ code: "custom", message: "each attendee once", path: ["attendees"] });
+  });
+export type CalendarInvitePrepareIn = z.infer<typeof CalendarInvitePrepareInput>;
+
+/** What a prepare-tier capability returns: the pending Draft and its code-built read-back. Nothing was sent. */
+export interface PrepareOutput {
+  draftId: string;
+  readback: string;
+}
+
 /** Never the host `start_url` (it carries a host token). */
 export interface VideoRoom {
   meetingId: string;
@@ -216,7 +254,7 @@ export const CAPABILITY_LABEL: Record<CapabilityId, string> = {
   "contacts.lookup": "Look up people in your contacts",
   "calendar.read": "Read your calendar",
   "calendar.hold.prepare": "Prepare holds on your own calendar",
-  "calendar.invite.prepare": "Prepare calendar invites",
+  "calendar.invite.prepare": "Prepare calendar invites (sending always waits for your approval)",
   "files.read": "Search and read your files",
   "video.create_room": "Create video meeting rooms",
   "grocery.search": "Search groceries",
@@ -224,4 +262,5 @@ export const CAPABILITY_LABEL: Record<CapabilityId, string> = {
   "grocery.checkout": "Check out a grocery order",
   "device.call": "Start a phone call",
   "device.open_url": "Open a link on your phone",
+  "device.reachy_start": "Start Reachy from your phone",
 };

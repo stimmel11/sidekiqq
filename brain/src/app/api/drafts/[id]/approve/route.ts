@@ -1,12 +1,13 @@
 import { withDevice } from "@/lib/auth";
 import { HttpError, json } from "@/lib/http";
+import { ProviderRefusedError } from "@/lib/connectors/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 /**
- * THE ONLY ROUTE THAT SENDS EMAIL (see ARCHITECTURE.md safety rules and test/no-send.test.ts).
+ * THE ONLY ROUTE THAT SENDS EMAIL OR CALENDAR INVITES (see ARCHITECTURE.md safety rules and test/no-send.test.ts).
  * Devices call this only after an explicit owner confirmation.
  *
  * Guards, in order:
@@ -16,7 +17,8 @@ export const maxDuration = 30;
  *  4. A sender is registered for the draft's (connectorId, kind) (else 422 unsupported_kind).
  *  5. The sender's check passes. For Gmail: the draft still exists (else 410 gone) and its To, Cc,
  *     Bcc and Subject still match what the read-back described (else 409 changed_in_provider);
- *     a record with no Gmail draft id is 422 no_provider_draft.
+ *     a record with no Gmail draft id is 422 no_provider_draft. For a calendar invite: the start
+ *     time is still in the future (else 410 expired, marked discarded).
  */
 export const POST = withDevice<{ id: string }>(async (_req, { deps, params, device }) => {
   const { drafts, followups, timeline, state } = deps.repos;
@@ -33,36 +35,47 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
 
     // The sender registry is the only place that can execute a draft (docs/CONNECTORS.md §6).
     const registry = deps.senders();
-    // No executor for this (connectorId, kind), e.g. a calendar draft before the calendar item
-    // ships. Nothing is sent and the draft stays pending.
+    // No executor for this (connectorId, kind), e.g. a calendar hold. Nothing is sent and the
+    // draft stays pending.
     if (!registry.has(fresh)) throw new HttpError(422, `This ${fresh.kind.replace("_", " ")} draft can't be approved yet`, "unsupported_kind");
     const executor = registry.for(fresh);
     const check = await executor.check(fresh);
     if (!check.ok) {
-      if (check.reason === "invalid") throw new HttpError(422, check.message, "no_provider_draft");
+      if (check.reason === "invalid") throw new HttpError(422, check.message, fresh.kind === "email" ? "no_provider_draft" : "invalid_draft");
       // Gone or changed in the provider: the stored read-back no longer describes what would be
       // sent, so the record is retired and nothing is sent.
       await drafts.markDiscarded(fresh.id);
       if (check.reason === "changed") throw new HttpError(409, check.message, "changed_in_provider");
+      if (check.reason === "expired") throw new HttpError(410, check.message, "expired");
       throw new HttpError(410, check.message, "gone");
     }
 
-    const sent = await executor.execute(fresh);
+    let sent;
+    try {
+      sent = await executor.execute(fresh);
+    } catch (err) {
+      // A definite refusal: nothing was sent and the draft stays pending.
+      if (err instanceof ProviderRefusedError) throw new HttpError(422, err.message, "provider_refused");
+      throw err;
+    }
     await drafts.markSent(fresh.id, sent.messageId);
 
     if (fresh.followupId) await followups.resolve(fresh.followupId).catch(() => undefined);
     await timeline
       .add({
         ...(fresh.client ? { client: fresh.client } : {}),
-        event: `Email sent to ${fresh.to.join(", ")}: "${fresh.subject}" (approved on ${device.kind})`,
+        event:
+          fresh.kind === "calendar_invite"
+            ? `Calendar invite sent to ${fresh.to.join(", ")}: "${fresh.subject}" (approved on ${device.kind})${sent.warning ? `. ${sent.warning}` : ""}`
+            : `Email sent to ${fresh.to.join(", ")}: "${fresh.subject}" (approved on ${device.kind})`,
         people: fresh.to,
-        categories: ["Follow-Up"],
+        categories: fresh.kind === "calendar_invite" ? ["Scheduling"] : ["Follow-Up"],
         importance: "LOW",
-        source: { kind: "email", ...(sent.messageId ? { ref: sent.messageId } : {}) },
+        source: { kind: fresh.kind === "calendar_invite" ? "meeting" : "email", ...(sent.messageId ? { ref: sent.messageId } : {}) },
       })
       .catch(() => undefined);
     await state.invalidateTop5().catch(() => undefined);
-    return json({ ok: true as const });
+    return json({ ok: true as const, ...(sent.warning ? { warning: sent.warning } : {}) });
   } finally {
     await drafts.releaseSendLock(draft.id);
   }

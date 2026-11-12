@@ -15,11 +15,20 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 function Envelope({ draft }: { draft: Draft }) {
-  const rows: [string, string][] = [
-    ["To", draft.to.join(", ")],
-    ...(draft.cc.length ? ([["Cc", draft.cc.join(", ")]] as [string, string][]) : []),
-    ["Subject", draft.subject || "(no subject)"],
-  ];
+  const invite = draft.kind === "calendar_invite";
+  const rows: [string, string][] = invite
+    ? [
+        ["Invite", draft.to.join(", ")],
+        ["When", draft.when ? `${formatDateTime(draft.when.start)} – ${formatDateTime(draft.when.end)}` : "(no time)"],
+        ...(draft.location ? ([["Where", draft.location]] as [string, string][]) : []),
+        ...(draft.conference === "meet" ? ([["Video", "Google Meet link added when sent"]] as [string, string][]) : []),
+        ["Title", draft.subject || "(no title)"],
+      ]
+    : [
+        ["To", draft.to.join(", ")],
+        ...(draft.cc.length ? ([["Cc", draft.cc.join(", ")]] as [string, string][]) : []),
+        ["Subject", draft.subject || "(no subject)"],
+      ];
   return (
     <dl className="grid grid-cols-[3.75rem_minmax(0,1fr)] sm:grid-cols-[4.5rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-body">
       {rows.map(([k, v]) => (
@@ -42,6 +51,8 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
   const draft = await getDeps().repos.drafts.get(id);
   if (!draft) notFound();
   const pending = draft.status === "pending";
+  const invite = draft.kind === "calendar_invite";
+  const approvable = draft.kind === "email" || invite;
 
   return (
     <article>
@@ -83,17 +94,19 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
             pendingLabel="Discarding…"
           >
             <p className="text-body text-text-muted">
-              It stops appearing on your devices. Nothing is sent, and the copy in Gmail Drafts stays where it is.
+              {invite
+                ? "It stops appearing on your devices. Nothing is sent and nothing is added to your calendar."
+                : "It stops appearing on your devices. Nothing is sent, and the copy in Gmail Drafts stays where it is."}
             </p>
           </ConfirmDialog>
-          <ConfirmDialog
-            triggerLabel="Approve and send"
-            title="Send this email?"
+          {approvable && <ConfirmDialog
+            triggerLabel={invite ? "Approve and send invite" : "Approve and send"}
+            title={invite ? "Send this invite?" : "Send this email?"}
             action={approveDraftAction}
             fields={{ id: draft.id, confirmation: draftFingerprint(draft) }}
             confirmName="confirm"
             confirmValue={CONFIRM_VALUE}
-            confirmLabel="Send email"
+            confirmLabel={invite ? "Send invite" : "Send email"}
             pendingLabel="Sending…"
           >
             <div className="flex flex-col gap-4">
@@ -101,13 +114,17 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
               <div className="max-h-[40dvh] overflow-y-auto rounded-md border border-line bg-surface-sunken px-4 py-3">
                 <Body text={draft.body} />
               </div>
-              <p className="text-small text-text-muted">This sends from your Gmail right away. It can't be unsent.</p>
+              <p className="text-small text-text-muted">
+                {invite
+                  ? "This adds the event to your Google Calendar and emails an invitation to every attendee right away. It can't be unsent."
+                  : "This sends from your Gmail right away. It can't be unsent."}
+              </p>
             </div>
-          </ConfirmDialog>
+          </ConfirmDialog>}
         </div>
       ) : (
         <p className="mt-6 text-body text-text-muted">
-          {draft.status === "sent" ? `Sent ${formatDateTime(draft.sentAt)}.` : "This draft was discarded. Nothing was sent."}
+          {draft.status === "sent" ? `${invite ? "Invite sent" : "Sent"} ${formatDateTime(draft.sentAt)}.` : "This draft was discarded. Nothing was sent."}
         </p>
       )}
     </article>

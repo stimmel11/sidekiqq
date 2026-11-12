@@ -27,6 +27,21 @@ Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/c
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
 row reflects its output shape (`id`, `match`, `ambiguous`).
+Meet invites slice 1 (2026-11-08): `calendar.invite.prepare` on the `google` connector, through the new
+prepare path `lib/connectors/prepare.ts` (owner callers only; makes ONE pending `calendar_invite` Draft, no
+provider call). Input as in §2 but `body?` ≤ 5,000 chars, ≤ 10 attendees, ≤ 12 h, start ≥ 1 min and ≤ 1 year
+ahead, `conference` is `"meet"` only (Zoom later). The executor `google:calendar_invite` (`google/send.ts`)
+runs only from approve: re-checks strict attendees and a future start (else 410 `expired`), then
+`events.insert` on `primary` with `sendUpdates: "all"`, `guestsCanInviteOthers: false`, a Meet
+`conferenceData.createRequest` when asked, and an event id derived from the draft id (a retried approve
+can't make a second event). Scope `calendar.events`, so existing owners reconnect Google to turn it on.
+`GET /api/drafts` discards calendar drafts whose start has passed (under the send lock; a sent draft is never
+overwritten). Claude tool: `create_calendar_invite`. The readback adds "with a Google Meet link" and, last,
+the cleaned location. A 4xx from Google at approve is 422 `provider_refused` (still pending); a Meet link
+Google didn't create is reported as an approve `warning`. Deviations to resolve later: `calendar.events` is
+requested for every owner at connect (no incremental scopes yet, §7), and an already-pending invite stays
+approvable if the owner switches invites off afterwards (approve doesn't re-check the switch).
+Attendees see each other (Google's default `guestsCanSeeOtherGuests`).
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 
@@ -77,6 +92,7 @@ prompts do not change per provider.
 | `grocery.checkout` | **user_finishes** | `{}` → `Handoff {url, label}` | The brain never places an order, picks a pickup slot or touches payment. It sends the phone a link to the provider's cart (section 4.3). |
 | `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. Implemented 2026-10-28 as the `/api/ask` tool `call_on_phone` (`lib/commands/call.ts`): `contactId` must be the clear match of a lookup in the same request and a saved contact (not Google "Other contacts"); `spokenNumber` must be a whole number span in the owner's request text. |
 | `device.open_url` | **user_finishes** | `{url}` → `Handoff` | `https` only, host on a per-capability allowlist: meeting join links only (`meet.google.com`, `zoom.us` and its subdomains); cart pages belong to `grocery.checkout`. `sms:`, `mailto:`, `tel:`, `intent:`, `wa.me`, payment and app-link schemes are rejected. Implemented 2026-11-05 as `handoffCapability` (`lib/connectors/handoff.ts`) and the `/api/ask` tool `open_on_phone`: the URL must be exactly a link the brain created in the same request (today: the `start_video_room` join link). |
+| `device.reachy_start` | **user_finishes** | `{activity?: "chat"\|"brief"\|"dance"}` → `Handoff` | "Start up Reachy" said to any device. The phone shows a Start button; on the tap it starts the SideKiqq app on the robot through the home-LAN daemon and queues the `reachy_wake`. Implemented 2026-11-09 as the `/api/ask` tool `start_reachy` (`reachy_start` command, one per request, refused when asked from Reachy itself). |
 
 Capabilities that are **forbidden** and have no interface at all: payments and checkout,
 deleting mail or files, changing account settings, forwarding rules, sharing files with new
@@ -140,8 +156,8 @@ can be either; prefer MCP when a maintained server exists and its tools map clea
 ## 4. Safety policy (enforced by the brain)
 
 All capability calls go through one function, `invokeCapability(cap, input, ctx)` in
-`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. The one exception is
-`device.call`, which has no connector: the `/api/ask` tool `call_on_phone` queues the hand-off
+`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. The exceptions are
+`device.call` and `device.reachy_start`, which have no connector. For `device.call`, the `/api/ask` tool `call_on_phone` queues the hand-off
 directly on the device command queue. Its caller is fixed to `ask`, it refuses without the owner
 request's context, its number is bound in `lib/commands/call.ts` (section 2 row), and every attempt,
 refusals included, writes a `device.call` audit row. `invokeCapability("device.call")` itself
@@ -151,7 +167,9 @@ still fails closed. `user_finishes` hand-offs have their own entry point, `hando
 must pass the command allowlist, the capability's host rule and be exactly one of the links the brain
 created in this request; every attempt, refusals included, writes an audit row whose summary holds
 the host only (Zoom links carry the passcode). It queues a tap-to-act command and nudges the phone;
-it never calls a connector. `invokeCapability`:
+it never calls a connector. `device.reachy_start` is not a `handoffCapability` capability: like
+`device.call`, the `/api/ask` tool `start_reachy` queues it directly (owner request only, one per
+request, `device.reachy_start` audit row); `invokeCapability` refuses it too. `invokeCapability`:
 
 1. Looks up the tier from the fixed `POLICY` table (code constant, section 2). Executor-only
    entries (`email.send`, the invite/hold executors) are not callable here at all.
@@ -198,8 +216,10 @@ instructions. The assistant prompt already says so; the policy makes it structur
   (the `device.call` exception above) is `ask`-only: it exists only in the `/api/ask` tool loop and
   needs that request's context. Known gap, bounded by the tap: injected text can still steer which
   name the model looks up, so the phone may show a saved contact the owner didn't mean. The phone
-  shows the name and number, and nothing happens unless the owner taps. `open_on_phone`
-  (`device.open_url`) is also `ask`-only and may hand off only a link created in the same request
+  shows the name and number, and nothing happens unless the owner taps. `start_reachy` has the same
+  bound: injected text could get the model to queue a Reachy start, and nothing starts unless the
+  owner taps Start on the phone (a `chat` wake then opens Reachy's mic for one listen).
+  `open_on_phone` (`device.open_url`) is also `ask`-only and may hand off only a link created in the same request
   (never one read in email, files or calendar). Known gap, bounded by the tap: injected text can
   steer the model into creating a fresh, unannounced room and handing that off; the owner still has
   to tap Open.
@@ -264,8 +284,10 @@ covers a subject and body containing injected instructions.
   - `GET /api/drafts` adds `kind`, `readback` and `when`; Reachy is updated to prefer `readback`.
   - `Draft` and `GET /api/drafts` are added to `ARCHITECTURE.md`, and a `Draft` model with
     defaults for the new fields to `Models.kt`, in the framework item.
-  - Calendar kinds ship only after the phone's `ApproveDraftDialog` text depends on `kind` (today
-    it says "This message will be sent from your account. Review it in Gmail first").
+  - Calendar kinds ship only after the phone's `ApproveDraftDialog` text depends on `kind`. Done for
+    `calendar_invite` (2026-11-08, `crew/meet-invites`): `Action.draftKind` carries the kind; the
+    phone dialog, the dashboard and the iPhone sheet word invites as invites and offer no Send for
+    a kind they don't know.
   - `Action.type` `event_proposed` stays as is: it is a suggestion in the reply. A real invite is
     a `draft_created` with `kind: "calendar_invite"`.
 - The approve route stays the only executor. It looks up the sender for `(connectorId, kind)` in
@@ -343,7 +365,7 @@ Initial scope plan (verify each against the provider's current docs when impleme
 |---|---|---|
 | Google | email.read / email.draft / email.send | `gmail.readonly`, `gmail.compose` (today's scopes; compose also permits `messages.send`, which is why the scan bans it outside `send.ts`) |
 | Google | calendar.read | `calendar.readonly` (today) |
-| Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (new, only when enabled) |
+| Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (requested at connect since 2026-11-08; per-capability scopes later) |
 | Google | files.read | `drive.readonly` (today) |
 | Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (requested since 2026-10-25; People API search needs an empty warm-up query first) |
 | Microsoft 365 | email.read | `Mail.Read`, `offline_access`, `User.Read` (slice 1, `lib/microsoft/mail.ts`) |

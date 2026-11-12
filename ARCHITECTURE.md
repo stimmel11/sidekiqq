@@ -38,8 +38,8 @@ the thinking.
 | GET | /api/followups | – | `{ "items": FollowUp[] }` |
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
-| GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true }` — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 422 `unsupported_kind` (no executor for this kind yet) or `no_provider_draft`; nothing is sent on any error |
+| GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation. Calendar drafts whose start has passed are marked discarded and not listed |
+| POST | /api/drafts/:id/approve | – | `{ "ok": true, "warning"?: string }` (`warning`: sent, but not exactly as read back, e.g. "no Meet link"; show/speak it) — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 410 `expired` (a calendar invite whose start time has passed; marked discarded), 422 `unsupported_kind` (no executor for this kind yet), `no_provider_draft` (email) or `invalid_draft` (other kinds), 422 `provider_refused` (the provider definitely refused it, e.g. missing calendar permission; still pending); nothing is sent on any error |
 | POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |
@@ -51,9 +51,11 @@ the thinking.
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
 
-Drafts: every action the owner must confirm is a stored Draft (`docs/CONNECTORS.md` §5). Today only `kind: "email"`
-is created; calendar kinds are in the model but are not created or approvable until the phone's confirm dialog
-depends on `kind`. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
+Drafts: every action the owner must confirm is a stored Draft (`docs/CONNECTORS.md` §5). `kind: "email"` and
+`kind: "calendar_invite"` (from the `/api/ask` tool `create_calendar_invite`, optionally with a Google Meet link) are
+created and approvable; approving an invite inserts the event on the owner's Google Calendar and Google emails every
+attendee. `calendar_hold` is modelled only (422 `unsupported_kind`). Devices word their confirm step by kind
+(`Action.draftKind` / `DraftItem.kind`) and never offer to approve a kind they don't know. The stored record also has `status`, `connectorId` (absent = `"google"`), `providerDraftId`
 (replaces `gmailDraftId`), `providerMessageId` (replaces `gmailMessageId`), `threadId`, `followupId` and `sentAt`;
 records written before these fields existed are upgraded on read, so old pending drafts still list and approve.
 Recipients are strict bare ASCII addresses (`name@example.com`, IDN only as `xn--` punycode; no display names,
@@ -96,26 +98,31 @@ interface FollowUp { id; person: string; client?: string; reason: string; daysQu
   importance: Importance; suggestedMessage?: string; draftId?: string; }
 interface TopItem { id; title: string; why: string; importance: Importance; dueAt?: string; }
 interface Action { type: "draft_created"|"commitment_added"|"event_proposed"; id: string;
-  summary: string /* for draft_created: the draft's `readback` */; }
+  summary: string /* for draft_created: the draft's `readback` */;
+  draftKind?: DraftKind /* draft_created only; absent from older brains = "email" */; }
 type DraftKind = "email"|"calendar_invite"|"calendar_hold";  // clients must not offer to approve kinds they don't know
 interface DraftItem { id: string; kind: DraftKind /* absent from older brains = "email" */;
   to: string[] /* recipients, or attendees for calendar_invite; empty for calendar_hold */; cc: string[];
   subject: string /* or event title */; body: string /* or event description */;
   readback: string /* ONE sentence (<= 1000 chars), built by the brain in code, never by the model: kind, every
-                      address in full, the time for calendar kinds, then "with the subject: <subject>." Absent from
+                      address in full, the time for calendar kinds, "with a Google Meet link" for invites that add
+                      one, then "with the subject: <subject>." (invites: "with the title: <title>", then ", and the
+                      location: <location>." when set; both cleaned of addresses/format characters). Absent from
                       older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
-  when?: { start: string; end: string } /* calendar kinds only */; client?: string; createdAt: string; }
+  when?: { start: string; end: string } /* calendar kinds only */;
+  location?: string /* calendar kinds only */; conference?: "meet" /* calendar_invite only: Meet link added when sent */;
+  client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
   kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
   importance?: Importance; priority: "high"|"normal";
   client?: string; messageId?: string; threadId?: string; commitmentId?: string; }
-type CommandKind = "open_url"|"call_contact"|"reachy_wake";   // clients must ignore kinds they don't know
+type CommandKind = "open_url"|"call_contact"|"reachy_wake"|"reachy_start";   // clients must ignore kinds they don't know
 interface DeviceCommand { id: string; at: string; expiresAt: string /* at + 15 min */; kind: CommandKind;
   label: string /* built by the brain; shown before the owner taps */; from: DeviceKind;
   url?: string /* open_url */; number?: string; name?: string; app?: "phone"|"whatsapp" /* call_contact */;
-  activity?: "chat"|"brief"|"dance"|"game" /* reachy_wake */; }
+  activity?: "chat"|"brief"|"dance"|"game" /* reachy_wake; reachy_start: chat|brief|dance */; }
 interface CreateCommandRequest { kind: CommandKind; target?: { deviceId?: string; device?: DeviceKind } /* one, not both (400) */;
   url?: string; number?: string; name?: string; app?: "phone"|"whatsapp"; activity?: "chat"|"brief"|"dance"|"game"; }
 ```
@@ -125,7 +132,7 @@ A command is started on one device and runs on another ("call Dana" said to the 
 Every command is a **hand-off** (`user_finishes` in `docs/CONNECTORS.md`): the target shows `label` and acts only after
 the owner taps. Devices never auto-launch a command, dial with `ACTION_DIAL` (never `ACTION_CALL`), and nothing is ever
 sent because of a command; messages still go only through `/api/drafts/:id/approve`.
-- Targets: `open_url` and `call_contact` → `phone`; `reachy_wake` → `reachy`. Default is the most recently seen
+- Targets: `open_url`, `call_contact` and `reachy_start` → `phone`; `reachy_wake` → `reachy`. Default is the most recently seen
   non-revoked device of that kind; `target.deviceId` picks one.
 - `open_url`: `https` only, no credentials or port, host on a code allowlist (`meet.google.com`, `zoom.us` and its
   subdomains, `www.kroger.com`, `www.kingsoopers.com`).
@@ -133,6 +140,12 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   MMI/USSD codes or post-dial digits). WhatsApp needs a leading `+`. Short codes such as 911 are accepted: the owner
   still taps Call in the dialer. `name` loses digits, `+` and brackets so it can't carry a fake number; devices show
   `number` on its own line, not only inside `label`.
+- `reachy_start`: activity `chat` (default), `brief` or `dance` (no `game` until Reachy has one), no other fields.
+  The brain can't reach the robot's LAN, so the phone runs it: on the owner's tap of Start it does the Reachy card
+  flow (daemon `current-app-status`, `start-app/sidekiqq_reachy/no-evict` if needed, then its own `reachy_wake`
+  via `POST /api/commands`) and acks `opened` only once the wake is queued, `failed` otherwise. From `/api/ask` the
+  tool `start_reachy` queues it ("start up Reachy and let's dance"), one per request, audited as
+  `device.reachy_start` / `user_finishes`, with the same silent nudge.
 - Liveness: a device treats a command as live only while `GET /api/commands` returns it. An `opened` ack is accepted up
   to 60 s after `expiresAt` (a tap made in time, acked late); after that it is 410 and purely informational.
 - `POST /api/commands` is the owner-device path. "Call Dana on my phone" said to any device goes through `/api/ask`:
@@ -144,7 +157,7 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
   phone. Other `user_finishes` hand-offs go through `handoffCapability` (`lib/connectors/handoff.ts`) with the caller rules in `docs/CONNECTORS.md` §4.4; the `/api/ask` tool `open_on_phone` uses it to queue an `open_url` for a meeting join link created in the same request (one per request, same command shape, no new `Action.type`).
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
-  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands`, `call_on_phone` or `handoffCapability`) (high priority,
+  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands`, `call_on_phone`, `start_reachy` or `handoffCapability`) (high priority,
   data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
   Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
   The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no
@@ -182,6 +195,9 @@ Dance) it calls the robot's daemon over plain HTTP at a `.local` mDNS name (defa
 if that route is 404). It never stops or evicts another app or remote session, sends the daemon no token or owner
 data, and doesn't follow redirects. Once the app reports `running`, the phone queues `reachy_wake` with
 `POST /api/commands` (`target.device: "reachy"`); that tap is the hand-off's "user finishes" step.
+**Find Reachy** (phone only, no brain call): legacy-unicast mDNS questions for `_reachy-mini._tcp.local` (PTR, then SRV
+if missing) from an ephemeral UDP port, about 3 s. Results are SRV target `.local` names + ports that pass the same
+host rule as a typed address (never an IP) and are saved only when the owner taps one.
 
 `reachy_wake` on Reachy: the robot has no screen, so the owner's tap is the one on the device that created the command
 (only paired owner devices can). Reachy polls `GET /api/commands` every 30 s (or the alert interval if shorter, same
