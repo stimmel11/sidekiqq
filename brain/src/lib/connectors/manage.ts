@@ -149,15 +149,11 @@ export async function disconnect(deps: Deps, connectorId: string): Promise<{ ok:
   const flow = oauthFlow(connector.id);
   if (stored && stored.secretKind === "refresh_token" && flow?.revoke) {
     try {
-      await flow.revoke(stored.secret);
+      await flow.revoke(stored.secret, deps);
       revoked = true;
     } catch (err) {
-      // Google answers invalid_token / invalid_grant for a token that is already revoked or expired.
-      if (/invalid_(token|grant)/.test(String((err as { response?: { data?: { error?: unknown } } })?.response?.data?.error ?? (err as Error)?.message))) {
-        revoked = true;
-      } else {
-        console.warn(`[connections] ${connector.id}: provider revoke failed; the local credential was deleted`, (err as Error)?.message);
-      }
+      // Each flow's revoke returns normally for "already revoked" (Google: invalid_token/invalid_grant).
+      console.warn(`[connections] ${connector.id}: provider revoke failed; the local credential was deleted`, (err as Error)?.message);
     }
   }
   return { ok: true, revoked };

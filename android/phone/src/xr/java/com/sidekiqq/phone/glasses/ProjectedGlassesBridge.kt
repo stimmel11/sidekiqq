@@ -138,9 +138,7 @@ class ProjectedGlassesBridge(
         }
     }
 
-    override suspend fun speak(text: String) {
-        (glassesSpeaker ?: fallbackSpeaker).speak(text)
-    }
+    override suspend fun speak(text: String): Boolean = (glassesSpeaker ?: fallbackSpeaker).speak(text)
 
     override suspend fun cueListening() = Earcons.listen()
 

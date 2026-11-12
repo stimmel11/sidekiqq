@@ -76,7 +76,7 @@ prompts do not change per provider.
 | `grocery.cart.add` | auto (capped) | `{items: {productId, quantity}[]}` → `{ok, count}` | No money moves. Kroger's cart API is add-only (`PUT /v1/cart/add`, 204, no read or remove), so the brain cannot undo an add and cannot report per-line results; "reversible" means the owner can remove items in the Kroger app. Caps: ≤ 50 lines per call, quantity 1–10 per line, product ids only from `grocery.search`. The assistant reads back what it asked to add. |
 | `grocery.checkout` | **user_finishes** | `{}` → `Handoff {url, label}` | The brain never places an order, picks a pickup slot or touches payment. It sends the phone a link to the provider's cart (section 4.3). |
 | `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. Implemented 2026-10-28 as the `/api/ask` tool `call_on_phone` (`lib/commands/call.ts`): `contactId` must be the clear match of a lookup in the same request and a saved contact (not Google "Other contacts"); `spokenNumber` must be a whole number span in the owner's request text. |
-| `device.open_url` | **user_finishes** | `{url}` → `Handoff` | `https` only, host on a per-capability allowlist (provider cart pages, meeting join links the brain created). `sms:`, `mailto:`, `tel:`, `intent:`, `wa.me`, payment and app-link schemes are rejected. |
+| `device.open_url` | **user_finishes** | `{url}` → `Handoff` | `https` only, host on a per-capability allowlist: meeting join links only (`meet.google.com`, `zoom.us` and its subdomains); cart pages belong to `grocery.checkout`. `sms:`, `mailto:`, `tel:`, `intent:`, `wa.me`, payment and app-link schemes are rejected. Implemented 2026-11-05 as `handoffCapability` (`lib/connectors/handoff.ts`) and the `/api/ask` tool `open_on_phone`: the URL must be exactly a link the brain created in the same request (today: the `start_video_room` join link). |
 
 Capabilities that are **forbidden** and have no interface at all: payments and checkout,
 deleting mail or files, changing account settings, forwarding rules, sharing files with new
@@ -145,7 +145,13 @@ All capability calls go through one function, `invokeCapability(cap, input, ctx)
 directly on the device command queue. Its caller is fixed to `ask`, it refuses without the owner
 request's context, its number is bound in `lib/commands/call.ts` (section 2 row), and every attempt,
 refusals included, writes a `device.call` audit row. `invokeCapability("device.call")` itself
-still fails closed. `invokeCapability`:
+still fails closed. `user_finishes` hand-offs have their own entry point, `handoffCapability` in
+`lib/connectors/handoff.ts` (`device.open_url` today; `grocery.checkout` later): only capabilities in
+`HANDOFF_CAPABILITIES`, owner-initiated callers only, the asking device (`origin`) required, the URL
+must pass the command allowlist, the capability's host rule and be exactly one of the links the brain
+created in this request; every attempt, refusals included, writes an audit row whose summary holds
+the host only (Zoom links carry the passcode). It queues a tap-to-act command and nudges the phone;
+it never calls a connector. `invokeCapability`:
 
 1. Looks up the tier from the fixed `POLICY` table (code constant, section 2). Executor-only
    entries (`email.send`, the invite/hold executors) are not callable here at all.
@@ -192,7 +198,11 @@ instructions. The assistant prompt already says so; the policy makes it structur
   (the `device.call` exception above) is `ask`-only: it exists only in the `/api/ask` tool loop and
   needs that request's context. Known gap, bounded by the tap: injected text can still steer which
   name the model looks up, so the phone may show a saved contact the owner didn't mean. The phone
-  shows the name and number, and nothing happens unless the owner taps.
+  shows the name and number, and nothing happens unless the owner taps. `open_on_phone`
+  (`device.open_url`) is also `ask`-only and may hand off only a link created in the same request
+  (never one read in email, files or calendar). Known gap, bounded by the tap: injected text can
+  steer the model into creating a fresh, unannounced room and handing that off; the owner still has
+  to tap Open.
 - Reads that send arguments to a third party (`grocery.search {query}`, any MCP tool) are also a
   leak channel. Each capability caps argument length and allowed characters (for example
   `grocery.search.query`: ≤ 80 chars, letters, digits, spaces and basic punctuation).

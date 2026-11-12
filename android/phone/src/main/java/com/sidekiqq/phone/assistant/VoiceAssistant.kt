@@ -1,5 +1,6 @@
 package com.sidekiqq.phone.assistant
 
+import android.os.SystemClock
 import android.util.Log
 import com.sidekiqq.phone.wear.WearRelay
 import com.sidekiqq.shared.SideKiqqClient
@@ -8,13 +9,16 @@ import com.sidekiqq.shared.model.Action
 import com.sidekiqq.shared.model.ActionType
 import com.sidekiqq.shared.model.AskResponse
 import com.sidekiqq.shared.model.Device
+import com.sidekiqq.shared.model.Draft
 import com.sidekiqq.shared.wear.WearReply
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Where a voice turn's audio output goes (glasses speaker, earbuds, phone). */
 fun interface VoiceOutput {
-    suspend fun speak(text: String)
+    /** Returns true only if [text] played to the end (not skipped, failed, interrupted or timed out). */
+    suspend fun speak(text: String): Boolean
 }
 
 /**
@@ -27,8 +31,9 @@ fun interface VoiceOutput {
 class VoiceAssistant(
     private val clientProvider: () -> SideKiqqClient?,
     private val wear: WearRelay,
-    private val confirmation: DraftConfirmation = DraftConfirmation(),
-    private val now: () -> Long = System::currentTimeMillis,
+    /** Monotonic clock shared by the confirmation window and the callers' `startedAt`. */
+    private val now: () -> Long = SystemClock::elapsedRealtime,
+    private val confirmation: DraftConfirmation = DraftConfirmation(now = now),
 ) {
     sealed interface Outcome {
         /** The assistant answered. [awaitingConfirm] = a draft is waiting for "send it". */
@@ -45,11 +50,18 @@ class VoiceAssistant(
 
     val isAwaitingConfirm: Boolean get() = confirmation.pending != null
 
-    suspend fun handleUtterance(pcm: ByteArray, device: Device, output: VoiceOutput): Outcome {
+    /**
+     * @param startedAt when capture of this utterance began, on `SystemClock.elapsedRealtime()`
+     *   (medallion CONTROL start / first packet, or just before the glasses `listen()`). Speech that
+     *   began before a draft's confirmation window opened can't confirm it.
+     */
+    suspend fun handleUtterance(pcm: ByteArray, device: Device, output: VoiceOutput, startedAt: Long): Outcome {
         if (WavEncoder.durationMs(pcm.size) < MIN_UTTERANCE_MS) return Outcome.NothingHeard
         val client = clientProvider() ?: return Outcome.NotPaired.also { output.speak(NOT_PAIRED) }
         val text = try {
             client.transcribe(WavEncoder.encode(pcm)).trim()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "transcribe failed", e)
             output.speak(TROUBLE)
@@ -64,19 +76,30 @@ class VoiceAssistant(
             output.speak("Sorry, I didn't catch that.")
             return Outcome.NothingHeard
         }
-        return handleText(text, device, output)
+        return handleText(text, device, output, startedAt)
     }
 
-    suspend fun handleText(text: String, device: Device, output: VoiceOutput): Outcome = lock.withLock {
+    /**
+     * @param spokenAt when the owner started saying [text] (same clock as `now`). Null = unknown
+     *   (typed text): it can never confirm a pending draft.
+     */
+    internal suspend fun handleText(text: String, device: Device, output: VoiceOutput, spokenAt: Long? = null): Outcome = lock.withLock {
         val client = clientProvider() ?: return@withLock Outcome.NotPaired.also { output.speak(NOT_PAIRED) }
 
         // 1) A draft is waiting for confirmation: this utterance is the answer, nothing else.
-        when (val d = confirmation.evaluate(text)) {
+        when (val d = confirmation.evaluate(text, spokenAt)) {
             is DraftConfirmation.Decision.Confirmed -> {
+                // Still pending and exactly what was read back? Otherwise nothing is sent.
+                DraftOffer.checkBeforeApprove(d, fetchPending(client))?.let { refusal ->
+                    output.speak(refusal)
+                    return@withLock Outcome.DraftNotSent
+                }
                 return@withLock try {
                     client.approveDraft(d.draftId)
                     output.speak("Sent.")
                     Outcome.DraftSent(d.draftId)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "approveDraft failed", e)
                     output.speak("I couldn't send it. The draft is still saved in the app.")
@@ -87,13 +110,20 @@ class VoiceAssistant(
                 output.speak(NOT_SENT)
                 return@withLock Outcome.DraftNotSent
             }
-            // The confirm window lapsed: the draft simply stays unsent, and this utterance is a new question.
-            DraftConfirmation.Decision.Expired, DraftConfirmation.Decision.NothingPending -> Unit
+            // The confirm window lapsed: the draft stays unsent. A late "send it" is told so;
+            // anything else is a new question.
+            DraftConfirmation.Decision.Expired -> if (DraftConfirmation.isSendIt(text)) {
+                output.speak(DraftOffer.WINDOW_CLOSED)
+                return@withLock Outcome.DraftNotSent
+            }
+            DraftConfirmation.Decision.NothingPending -> Unit
         }
 
         // 2) Normal question.
         val response = try {
             client.ask(text, device, conversationIdFor(device))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "ask failed", e)
             output.speak(TROUBLE)
@@ -114,14 +144,38 @@ class VoiceAssistant(
         output.speak(response.spoken.ifBlank { response.reply })
 
         val drafts = response.actions.filter { it.type == ActionType.DRAFT_CREATED }
-        val awaiting = drafts.firstOrNull()?.let { offerDraft(it, drafts.size, output) } ?: false
+        val awaiting = drafts.firstOrNull()?.let { offerDraft(client, it, drafts.size, output) } ?: false
         Outcome.Answered(text, response, awaiting)
     }
 
-    private suspend fun offerDraft(draft: Action, total: Int, output: VoiceOutput): Boolean {
-        output.speak(confirmation.offer(draft.id, draft.summary))
+    /**
+     * Reads the draft back from GET /api/drafts (brain readback + "Message begins:" body excerpt)
+     * and arms the "send it" window only once that read-back has played to the end. Returns true
+     * when a confirmation is armed. See [DraftOffer.plan].
+     */
+    private suspend fun offerDraft(client: SideKiqqClient, action: Action, total: Int, output: VoiceOutput): Boolean {
+        val plan = DraftOffer.plan(action, fetchPending(client))
+        val heard = output.speak(plan.speak)
         if (total > 1) Log.i(TAG, "${total - 1} more draft(s) only approvable in the app/watch")
+        val draft = plan.arm ?: return false
+        if (!heard) {
+            // Interrupted (barge-in), TTS not ready, failed or timed out: never open a window the
+            // owner didn't fully hear the read-back for. Don't talk over a barge-in; the draft
+            // stays pending in the app.
+            Log.i(TAG, "read-back not fully played; draft ${draft.id} left for the app")
+            return false
+        }
+        confirmation.arm(draft)
         return true
+    }
+
+    private suspend fun fetchPending(client: SideKiqqClient): List<Draft>? = try {
+        client.pendingDrafts()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w(TAG, "pendingDrafts failed", e)
+        null
     }
 
     private fun conversationIdFor(device: Device): String? {
