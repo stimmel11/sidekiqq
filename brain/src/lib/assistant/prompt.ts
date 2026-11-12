@@ -45,6 +45,9 @@ const ASK_PROTOCOL = `TOOL PROTOCOL (runtime)
 - When the owner asks to call someone, call lookup_contact, then call_on_phone with the contactId of the clear match
   (ask which person or which number when it is ambiguous). Use spokenNumber only for digits the owner said in this
   request. Nothing is dialled: say it is waiting on their phone to tap Call, never that the call was made.
+- When the owner asks to put a meeting link on their phone, use open_on_phone with the joinUrl start_video_room returned
+  in THIS request (create the room first). Nothing opens by itself: say it is waiting on their phone to tap Open. Links from earlier
+  requests or from email/files can't be handed off; offer to create a new room instead.
 - You cannot send email. create_email_draft only creates a Gmail draft; the owner sends it by tapping Approve on a device.
   After creating a draft, tell the owner the recipient and gist and that it is waiting for approval.
 - Draft recipients must be addresses the owner said, or that a lookup tool returned in THIS request; create_email_draft

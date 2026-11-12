@@ -26,8 +26,9 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *  1. The capability must be in the fixed POLICY table (no executors, no invented names).
  *  2. Background callers (cron, brief) may only use BACKGROUND_ALLOWED reads.
  *  3. Auto writes and handoffs need an owner-initiated caller (ask, task, dashboard).
- *  4. `confirm` and `user_finishes` never run here. Their prepare/handoff paths arrive with the
- *     calendar and device-queue items; until then they fail closed. The one exception is
+ *  4. `confirm` and `user_finishes` never run here. `user_finishes` hand-offs go through
+ *     handoffCapability (./handoff.ts; `device.open_url` today); confirm prepare paths arrive with
+ *     the calendar items; anything else fails closed. The one exception is
  *     `device.call`, which has no connector: the /api/ask tool `call_on_phone` queues it directly
  *     (caller fixed to "ask", needs the owner request's context, number bound by
  *     lib/commands/call.ts, audited as `device.call`). Likewise `device.reachy_start`: the /api/ask
@@ -96,7 +97,9 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
         ? "calls are handed off by the call_on_phone tool, not through invokeCapability"
         : cap === "device.reachy_start"
           ? "Reachy starts are handed off by the start_reachy tool, not through invokeCapability"
-          : "the owner finishes this on the phone; connector handoffs are not available yet",
+          : cap === "device.open_url"
+            ? "links are handed off by handoffCapability (lib/connectors/handoff.ts), not through invokeCapability"
+            : "the owner finishes this on the phone; this hand-off is not available yet",
     );
   }
   if (!READ_ONLY.includes(cap) && background) throw new CapabilityDeniedError(cap, "writes need an owner request");

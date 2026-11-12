@@ -34,8 +34,9 @@ export const COMMAND_TARGETS: Record<CommandKind, readonly DeviceKind[]> = {
  *
  * POST /api/commands serves the owner-device path. From `/api/ask`, the `call_on_phone` tool queues
  * call_contact hand-offs with the number bound by ./call.ts (contacts.lookup in the same request or
- * digits the owner spoke). Connector hand-offs (grocery.checkout, join links) will go through
- * invokeCapability with the §4.4 caller rules and a per-capability allowlist.
+ * digits the owner spoke). Connector hand-offs go through lib/connectors/handoff.ts
+ * (`handoffCapability`): §4.4 caller rules, a narrower per-capability host rule (HANDOFF_HOST_RULES;
+ * join links today, grocery.checkout later) and links created in the same request only.
  */
 export const OPEN_URL_HOSTS: readonly string[] = ["meet.google.com", "www.kroger.com", "www.kingsoopers.com"];
 export const OPEN_URL_DOMAINS: readonly string[] = ["zoom.us"];
