@@ -149,9 +149,9 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
   or from a whole number span in the owner's request text; never a number the model typed from email, files or
   calendar (`lib/commands/call.ts`). One call per request; every attempt, refusals included, is audited as
   `device.call` / `user_finishes`. No new `Action.type`: the reply says it is waiting on the
-  phone. Other connector hand-offs will go through `invokeCapability` with the caller rules in `docs/CONNECTORS.md` §4.4.
+  phone. Other `user_finishes` hand-offs go through `handoffCapability` (`lib/connectors/handoff.ts`) with the caller rules in `docs/CONNECTORS.md` §4.4; the `/api/ask` tool `open_on_phone` uses it to queue an `open_url` for a meeting join link created in the same request (one per request, same command shape, no new `Action.type`).
 - Commands expire after 15 minutes; at most 20 pending per device. Delivery is polling (`GET /api/commands`), plus a
-  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands` or `call_on_phone`) (high priority,
+  best-effort FCM nudge to the target device's own push token right after a command is queued (`POST /api/commands`, `call_on_phone` or `handoffCapability`) (high priority,
   data-only `{ kind: "command", commandId }`, 3 s timeout, never fails the request; devices without a token, e.g.
   Reachy, just poll). The nudge carries no label, number or URL: the command is read only from `GET /api/commands`.
   The phone polls at once if visible, otherwise posts one generic "Hand-off waiting" notification (no content, no
@@ -162,6 +162,9 @@ sent because of a command; messages still go only through `/api/drafts/:id/appro
 - Nothing is ever sent automatically. The brain creates drafts; sending requires `/api/drafts/:id/approve`,
   which every device surfaces as an explicit confirm (watch: tap Approve; glasses, medallion and Reachy Mini: the
   exact phrase "send it" within 30 s of hearing the draft read back; anything else, silence or a timeout cancels).
+  Voice read-backs come from `GET /api/drafts`: `readback`, then "Message begins:" and the body's first sentence. The
+  30 s window opens only after the read-back has played to the end, speech that started before it can't confirm,
+  and the device re-fetches the draft right before approve and refuses if it is gone or changed.
 - Inferred dates and facts carry `dueInferred` / `confidence` and are spoken as "inferred".
 - Client data is never mixed across clients in replies.
 

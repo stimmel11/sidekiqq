@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.sidekiqq.phone.MainActivity
@@ -131,9 +132,10 @@ class GlassesSessionService : Service() {
         try {
             setPhase(GlassesState.Phase.LISTENING)
             bridge.cueListening()
+            val startedAt = SystemClock.elapsedRealtime()
             val pcm = bridge.listen()
             setPhase(GlassesState.Phase.THINKING)
-            var outcome = assistant.handleUtterance(pcm, Device.GLASSES, output)
+            var outcome = assistant.handleUtterance(pcm, Device.GLASSES, output, startedAt)
             record(outcome)
 
             // Strict voice confirmation: exactly one more listen, then the draft is resolved either way.
@@ -141,9 +143,10 @@ class GlassesSessionService : Service() {
                 setPhase(GlassesState.Phase.CONFIRMING)
                 _state.update { it.copy(awaitingConfirm = true) }
                 bridge.cueListening()
+                val answerStartedAt = SystemClock.elapsedRealtime()
                 val answer = bridge.listen()
                 setPhase(GlassesState.Phase.THINKING)
-                outcome = assistant.handleUtterance(answer, Device.GLASSES, output)
+                outcome = assistant.handleUtterance(answer, Device.GLASSES, output, answerStartedAt)
                 if (outcome is VoiceAssistant.Outcome.NothingHeard) {
                     // Silence is never consent.
                     assistant.cancelPendingDraft()

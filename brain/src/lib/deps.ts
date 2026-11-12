@@ -37,6 +37,8 @@ export interface Deps {
    * `Connector.invoke`; everything else goes through `invokeCapability`.
    */
   connectors(): readonly Connector[];
+  /** Zoom sign-in and token minting for the Zoom OAuth flow; null when Zoom isn't configured. */
+  zoomAuth(): ZoomAuth | null;
   /** SENDER REGISTRY. Must only be used by /api/drafts/[id]/approve (see test/no-send.test.ts). */
   senders(): SenderRegistry;
   push(): PushSender;
@@ -81,6 +83,7 @@ export function buildDeps(kv: KV): Deps {
         new GoogleConnector(googleWorkspace, googleContacts),
         ...(zoomMeetings ? [new ZoomConnector(async () => zoomMeetings)] : []),
       ]),
+    zoomAuth: () => zoomAuth,
     senders: () =>
       (senders ??= buildSenders({
         google: {
