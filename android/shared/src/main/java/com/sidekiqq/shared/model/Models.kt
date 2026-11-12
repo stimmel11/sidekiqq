@@ -245,7 +245,7 @@ data class DeviceCommand(
     val name: String? = null,
     /** call_contact: "phone" or "whatsapp". */
     val app: String? = null,
-    /** reachy_wake: "chat", "brief", "dance" or "game". */
+    /** reachy_wake: "chat", "brief", "dance" or "game". reachy_start: "chat", "brief" or "dance". */
     val activity: String? = null,
 )
 
@@ -253,6 +253,8 @@ object CommandKind {
     const val OPEN_URL = "open_url"
     const val CALL_CONTACT = "call_contact"
     const val REACHY_WAKE = "reachy_wake"
+    /** Phone: start the SideKiqq app on Reachy over the home LAN after a tap, then queue a reachy_wake. */
+    const val REACHY_START = "reachy_start"
 }
 
 /**

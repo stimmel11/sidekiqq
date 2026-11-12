@@ -43,6 +43,10 @@ fun HandoffDialog(
                         Text(plan.host, style = MaterialTheme.typography.titleMedium)
                         Text(plan.url, style = MaterialTheme.typography.bodySmall)
                     }
+                    is HandoffPlan.StartReachy -> Text(
+                        "Starts SideKiqq on your Reachy. This phone must be on the same home network.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     is HandoffPlan.CantOpen -> Text(
                         plan.reason,
                         style = MaterialTheme.typography.bodyMedium,

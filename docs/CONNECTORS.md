@@ -92,6 +92,7 @@ prompts do not change per provider.
 | `grocery.checkout` | **user_finishes** | `{}` → `Handoff {url, label}` | The brain never places an order, picks a pickup slot or touches payment. It sends the phone a link to the provider's cart (section 4.3). |
 | `device.call` | **user_finishes** | `{contactId \| spokenNumber, app?: "phone"\|"whatsapp"}` → `Handoff` | Opens the dialer (`ACTION_DIAL`, never `ACTION_CALL`) with the number filled in. The number comes only from `contacts.lookup` or digits the owner spoke in this request, never from email or file text. FaceTime is for the iPhone app later. Implemented 2026-10-28 as the `/api/ask` tool `call_on_phone` (`lib/commands/call.ts`): `contactId` must be the clear match of a lookup in the same request and a saved contact (not Google "Other contacts"); `spokenNumber` must be a whole number span in the owner's request text. |
 | `device.open_url` | **user_finishes** | `{url}` → `Handoff` | `https` only, host on a per-capability allowlist: meeting join links only (`meet.google.com`, `zoom.us` and its subdomains); cart pages belong to `grocery.checkout`. `sms:`, `mailto:`, `tel:`, `intent:`, `wa.me`, payment and app-link schemes are rejected. Implemented 2026-11-05 as `handoffCapability` (`lib/connectors/handoff.ts`) and the `/api/ask` tool `open_on_phone`: the URL must be exactly a link the brain created in the same request (today: the `start_video_room` join link). |
+| `device.reachy_start` | **user_finishes** | `{activity?: "chat"\|"brief"\|"dance"}` → `Handoff` | "Start up Reachy" said to any device. The phone shows a Start button; on the tap it starts the SideKiqq app on the robot through the home-LAN daemon and queues the `reachy_wake`. Implemented 2026-11-09 as the `/api/ask` tool `start_reachy` (`reachy_start` command, one per request, refused when asked from Reachy itself). |
 
 Capabilities that are **forbidden** and have no interface at all: payments and checkout,
 deleting mail or files, changing account settings, forwarding rules, sharing files with new
@@ -155,8 +156,8 @@ can be either; prefer MCP when a maintained server exists and its tools map clea
 ## 4. Safety policy (enforced by the brain)
 
 All capability calls go through one function, `invokeCapability(cap, input, ctx)` in
-`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. The one exception is
-`device.call`, which has no connector: the `/api/ask` tool `call_on_phone` queues the hand-off
+`lib/connectors/invoke.ts`. Nothing else may call `Connector.invoke`. The exceptions are
+`device.call` and `device.reachy_start`, which have no connector. For `device.call`, the `/api/ask` tool `call_on_phone` queues the hand-off
 directly on the device command queue. Its caller is fixed to `ask`, it refuses without the owner
 request's context, its number is bound in `lib/commands/call.ts` (section 2 row), and every attempt,
 refusals included, writes a `device.call` audit row. `invokeCapability("device.call")` itself
@@ -166,7 +167,9 @@ still fails closed. `user_finishes` hand-offs have their own entry point, `hando
 must pass the command allowlist, the capability's host rule and be exactly one of the links the brain
 created in this request; every attempt, refusals included, writes an audit row whose summary holds
 the host only (Zoom links carry the passcode). It queues a tap-to-act command and nudges the phone;
-it never calls a connector. `invokeCapability`:
+it never calls a connector. `device.reachy_start` is not a `handoffCapability` capability: like
+`device.call`, the `/api/ask` tool `start_reachy` queues it directly (owner request only, one per
+request, `device.reachy_start` audit row); `invokeCapability` refuses it too. `invokeCapability`:
 
 1. Looks up the tier from the fixed `POLICY` table (code constant, section 2). Executor-only
    entries (`email.send`, the invite/hold executors) are not callable here at all.
@@ -213,8 +216,10 @@ instructions. The assistant prompt already says so; the policy makes it structur
   (the `device.call` exception above) is `ask`-only: it exists only in the `/api/ask` tool loop and
   needs that request's context. Known gap, bounded by the tap: injected text can still steer which
   name the model looks up, so the phone may show a saved contact the owner didn't mean. The phone
-  shows the name and number, and nothing happens unless the owner taps. `open_on_phone`
-  (`device.open_url`) is also `ask`-only and may hand off only a link created in the same request
+  shows the name and number, and nothing happens unless the owner taps. `start_reachy` has the same
+  bound: injected text could get the model to queue a Reachy start, and nothing starts unless the
+  owner taps Start on the phone (a `chat` wake then opens Reachy's mic for one listen).
+  `open_on_phone` (`device.open_url`) is also `ask`-only and may hand off only a link created in the same request
   (never one read in email, files or calendar). Known gap, bounded by the tap: injected text can
   steer the model into creating a fresh, unannounced room and handing that off; the owner still has
   to tap Open.
