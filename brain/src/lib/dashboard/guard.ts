@@ -33,13 +33,14 @@ export async function dashboardGuard(req: NextRequest, env: Record<string, strin
   if (ok) return nextWithShellHeaders(req, env);
   // Server actions and other non-GET requests get a plain 401 instead of a redirect.
   if (req.method !== "GET" && req.method !== "HEAD") {
-    return NextResponse.json({ error: "Owner session required", code: "unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Owner session required", code: "unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   const url = req.nextUrl.clone();
   url.pathname = LOGIN_PATH;
   url.search = "";
   url.searchParams.set("next", `${req.nextUrl.pathname}${req.nextUrl.search}`);
   const res = NextResponse.redirect(url, 303);
+  res.headers.set("Cache-Control", "no-store");
   if (req.cookies.has(SESSION_COOKIE)) res.cookies.delete(SESSION_COOKIE);
   return res;
 }

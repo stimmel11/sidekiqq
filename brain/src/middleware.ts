@@ -25,7 +25,10 @@ export function middleware(req: NextRequest) {
   return apiNext();
 }
 
-/** API replies carry personal data: keep them out of the browser's HTTP cache (WEBAPP.md §1.1). */
+/**
+ * API replies carry personal data: keep them out of the browser's HTTP cache (WEBAPP.md §1.1).
+ * A future route that should be cacheable must be exempted here, not just set its own header.
+ */
 function apiNext(): NextResponse {
   const res = NextResponse.next();
   res.headers.set("Cache-Control", "no-store");

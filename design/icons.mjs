@@ -16,7 +16,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = join(ROOT, "site/public/favicon.svg");
@@ -170,6 +170,37 @@ export function encodePng(rgba, size) {
   ]);
 }
 
+/**
+ * Decodes one of our own PNGs (8-bit RGBA, filter 0, as written by encodePng) to IHDR + raw pixels.
+ * --check compares pixels, not file bytes: zlib's compressed output can differ across Node builds/CPUs.
+ */
+export function decodePixels(png) {
+  const buf = Buffer.from(png);
+  let off = 8;
+  let ihdr = null;
+  const idat = [];
+  while (off < buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString("ascii", off + 4, off + 8);
+    const data = buf.subarray(off + 8, off + 8 + len);
+    if (type === "IHDR") ihdr = Buffer.from(data);
+    if (type === "IDAT") idat.push(data);
+    off += 12 + len;
+  }
+  if (!ihdr) throw new Error("no IHDR");
+  return { ihdr, pixels: inflateSync(Buffer.concat(idat)) };
+}
+
+export function samePixels(a, b) {
+  try {
+    const x = decodePixels(a);
+    const y = decodePixels(b);
+    return x.ihdr.equals(y.ihdr) && x.pixels.equals(y.pixels);
+  } catch {
+    return false;
+  }
+}
+
 export function buildIcons(svg = readFileSync(SOURCE, "utf8")) {
   const mark = parseMark(svg);
   return VARIANTS.map((v) => ({ ...v, png: encodePng(render(mark, v.size, v.mode), v.size) }));
@@ -182,7 +213,7 @@ function main() {
     for (const dir of OUT_DIRS) {
       const p = join(dir, icon.file);
       if (check) {
-        if (!existsSync(p) || !readFileSync(p).equals(icon.png)) {
+        if (!existsSync(p) || !samePixels(readFileSync(p), icon.png)) {
           console.error(`stale: ${p}`);
           stale++;
         }

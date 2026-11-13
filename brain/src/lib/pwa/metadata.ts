@@ -8,8 +8,9 @@ export const DASHBOARD_METADATA: Metadata = {
   robots: { index: false, follow: false },
   manifest: "/manifest.webmanifest",
   applicationName: "SideKiqq",
-  // iOS "Add to Home Screen": standalone, status bar over the Ink header (AppShell pads the safe area).
-  appleWebApp: { capable: true, title: "SideKiqq", statusBarStyle: "black-translucent" },
+  // iOS "Add to Home Screen": standalone. "default" keeps content below the status bar, so its text stays
+  // readable on the Paper login page and on iPad widths (black-translucent would draw white text over the page).
+  appleWebApp: { capable: true, title: "SideKiqq", statusBarStyle: "default" },
   icons: {
     icon: MANIFEST_ICONS.filter((i) => i.purpose === "any").map((i) => ({ url: i.src, sizes: i.sizes, type: i.type })),
     apple: [{ url: APPLE_TOUCH_ICON, sizes: "180x180", type: "image/png" }],

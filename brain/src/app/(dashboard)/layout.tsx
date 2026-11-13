@@ -5,6 +5,10 @@ import "./dashboard.css";
 
 export const metadata: Metadata = DASHBOARD_METADATA;
 
+// The CSP nonce (middleware) is stamped on scripts only at request time: a prerendered shell page would
+// ship un-nonced scripts that 'strict-dynamic' blocks. Keep every page under this layout dynamic.
+export const dynamic = "force-dynamic";
+
 export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#F6F4EF" },

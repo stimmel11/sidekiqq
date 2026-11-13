@@ -10,7 +10,8 @@ import { GET as offlineGET } from "@/app/offline/route";
 import manifest from "@/app/manifest";
 import { MANIFEST_ICONS, APPLE_TOUCH_ICON } from "@/lib/pwa/icons";
 import { DASHBOARD_METADATA as dashboardMetadata } from "@/lib/pwa/metadata";
-import { PWA_HEADERS } from "../next.config";
+import { GET as swGET } from "@/app/service-worker/route";
+import { renderServiceWorker, swBuildId, swTemplate } from "@/lib/pwa/sw";
 
 const BRAIN = path.resolve(__dirname, "..");
 const REPO = path.resolve(BRAIN, "..");
@@ -107,13 +108,13 @@ function loadServiceWorker(network: (url: string) => FakeResponse | Error) {
     }
   }
   const self = {
-    location: new URL(ORIGIN + "/sw.js"),
+    location: new URL(ORIGIN + "/service-worker"),
     addEventListener: (type: string, fn: Listener) => (listeners[type] ??= []).push(fn),
     skipWaiting: async () => undefined,
     clients: { claim: async () => undefined },
   };
   const ctx = vm.createContext({ self, caches, fetch: fetchImpl, Request, Response, URL, Headers, Promise, console });
-  vm.runInContext(readFileSync(path.join(BRAIN, "public/sw.js"), "utf8"), ctx, { filename: "sw.js" });
+  vm.runInContext(renderServiceWorker("test"), ctx, { filename: "service-worker.js" });
 
   async function dispatchLifecycle(type: "install" | "activate") {
     let p: Promise<unknown> = Promise.resolve();
@@ -143,12 +144,25 @@ const okNetwork = (url: string): FakeResponse | Error => {
   return res(`body of ${p}`);
 };
 
+describe("service worker build id", () => {
+  it("puts the deploy id in the cache name so each deploy reinstalls the worker and drops the old cache", () => {
+    expect(renderServiceWorker("abc123")).toContain('const CACHE = "sk-shell-abc123";');
+    expect(renderServiceWorker("abc123")).not.toEqual(renderServiceWorker("def456"));
+    expect(renderServiceWorker("x")).not.toContain("__SK_BUILD__");
+    expect(swBuildId({ VERCEL_DEPLOYMENT_ID: "dpl_9Xy", VERCEL_GIT_COMMIT_SHA: "aaa" })).toBe("dpl_9Xy");
+    expect(swBuildId({ VERCEL_GIT_COMMIT_SHA: "0f1e2d" })).toBe("0f1e2d");
+    expect(swBuildId({})).toBe("local");
+    expect(swBuildId({ SK_BUILD_ID: '"; alert(1); "' })).toBe("alert1");
+    expect(() => renderServiceWorker('x";')).toThrow();
+  });
+});
+
 describe("service worker: offline shell only", () => {
   it("precaches exactly the allowlist: /offline, the manifest and the icons", async () => {
     const sw = loadServiceWorker(okNetwork);
     await sw.dispatchLifecycle("install");
-    expect([...sw.stores.keys()]).toEqual(["sk-shell-v1"]);
-    const cached = [...sw.stores.get("sk-shell-v1")!.keys()].map((k) => new URL(k).pathname).sort();
+    expect([...sw.stores.keys()]).toEqual(["sk-shell-test"]);
+    const cached = [...sw.stores.get("sk-shell-test")!.keys()].map((k) => new URL(k).pathname).sort();
     expect(cached).toEqual(
       ["/offline", "/manifest.webmanifest", ...MANIFEST_ICONS.map((i) => i.src), APPLE_TOUCH_ICON].sort(),
     );
@@ -238,7 +252,6 @@ describe("service worker: offline shell only", () => {
       "/_next/static/chunks/app.js": res("js"),
       "/_next/static/css/a.css": res("css", { headers: { "cache-control": "no-store" } }),
       "/_next/static/chunks/err.js": res("nope", { status: 404 }),
-      "/_next/static/chunks/cookie.js": res("c", { headers: { "set-cookie": "a=b" } }),
       "/_next/static/chunks/opaque.js": res("o", { type: "opaque" }),
     };
     const sw = loadServiceWorker((url) => responses[new URL(url).pathname] ?? res("x"));
@@ -257,11 +270,11 @@ describe("service worker: offline shell only", () => {
     sw.stores.set("other-cache", new Map());
     await sw.dispatchLifecycle("install");
     await sw.dispatchLifecycle("activate");
-    expect([...sw.stores.keys()].sort()).toEqual(["other-cache", "sk-shell-v1"]);
+    expect([...sw.stores.keys()].sort()).toEqual(["other-cache", "sk-shell-test"]);
   });
 
   it("the worker source has no background sync, push or message handlers", () => {
-    const src = readFileSync(path.join(BRAIN, "public/sw.js"), "utf8");
+    const src = swTemplate();
     expect(src).not.toMatch(/addEventListener\(\s*["'](sync|periodicsync|push|message|notificationclick)["']/);
     expect(src).not.toMatch(/approve/);
   });
@@ -348,11 +361,12 @@ describe("app shell security headers", () => {
     expect(authed.headers.get("content-security-policy")).toBeNull();
   });
 
-  it("/sw.js is always revalidated and may control the whole origin", () => {
-    const sw = PWA_HEADERS.find((h) => h.source === "/sw.js")!;
-    const map = Object.fromEntries(sw.headers.map((h) => [h.key, h.value]));
-    expect(map["Cache-Control"]).toBe("no-cache");
-    expect(map["Service-Worker-Allowed"]).toBe("/");
+  it("/service-worker is always revalidated and may control the whole origin", async () => {
+    const r = swGET();
+    expect(r.headers.get("cache-control")).toBe("no-cache");
+    expect(r.headers.get("service-worker-allowed")).toBe("/");
+    expect(r.headers.get("content-type")).toMatch(/javascript/);
+    expect(await r.text()).toMatch(/const CACHE = "sk-shell-[A-Za-z0-9_-]+";/);
   });
 });
 
@@ -408,12 +422,12 @@ describe("manifest and icons", () => {
     expect(dashboardMetadata.appleWebApp).toMatchObject({ capable: true, title: "SideKiqq" });
   });
 
-  it("committed icons match design/icons.mjs output (run `node design/icons.mjs`)", async () => {
+  it("committed icons match design/icons.mjs output pixel for pixel (run `node design/icons.mjs`)", async () => {
     // @ts-expect-error plain .mjs script without types
-    const { buildIcons } = await import("../../design/icons.mjs");
+    const { buildIcons, samePixels } = await import("../../design/icons.mjs");
     for (const icon of buildIcons() as { file: string; png: Buffer }[]) {
       for (const dir of [path.join(BRAIN, "public/icons"), path.join(REPO, "design/dist/icons")]) {
-        expect(readFileSync(path.join(dir, icon.file)).equals(icon.png), `${dir}/${icon.file}`).toBe(true);
+        expect(samePixels(readFileSync(path.join(dir, icon.file)), icon.png), `${dir}/${icon.file}`).toBe(true);
       }
     }
   });

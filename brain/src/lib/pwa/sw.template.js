@@ -1,5 +1,8 @@
 /*
  * SideKiqq service worker: offline shell ONLY (docs/WEBAPP.md §1.1).
+ * Template: GET /service-worker (src/app/service-worker/route.ts) serves this file with __SK_BUILD__ replaced by the
+ * deploy id, so every deploy changes the worker's bytes, the browser reinstalls it, and activate
+ * drops the previous deploy's cache (old /_next/static chunks included).
  *
  * Dashboard pages are server-rendered with the owner's data in the HTML, so pages are never cached.
  * This worker:
@@ -8,11 +11,14 @@
  *   - serves navigations to /dashboard* and /login network-only, with /offline as the fallback;
  *   - leaves every other request alone: /api/*, /auth/*, OAuth callbacks, RSC fetches (?_rsc=),
  *     server-action POSTs. No background sync, no queued approvals.
- * Nothing with Set-Cookie, a non-200 status or Cache-Control: no-store is ever stored.
+ * Nothing with a non-200 status or Cache-Control: no-store is ever stored. (A worker never sees
+ * Set-Cookie, a forbidden response header; what keeps cookie-bearing responses out is that only the
+ * precache list and /_next/static/* are ever stored.)
+ * The precached manifest and icons follow the spec's allowlist; the fetch handler doesn't serve them.
  */
 "use strict";
 
-const CACHE = "sk-shell-v1";
+const CACHE = "sk-shell-__SK_BUILD__";
 const CACHE_PREFIX = "sk-shell-";
 const OFFLINE_URL = "/offline";
 const STATIC_PREFIX = "/_next/static/";
@@ -27,7 +33,6 @@ const PRECACHE = [
 
 function isCacheable(res) {
   if (!res || res.status !== 200 || res.type !== "basic") return false;
-  if (res.headers.has("set-cookie")) return false;
   return !/no-store/i.test(res.headers.get("cache-control") || "");
 }
 
@@ -42,7 +47,7 @@ async function precache() {
   const cache = await caches.open(CACHE);
   await Promise.all(
     PRECACHE.map(async (path) => {
-      const res = await fetch(new Request(path, { cache: "reload", credentials: "omit" }));
+      const res = await fetch(new Request(path, { cache: "reload", credentials: "same-origin" }));
       if (!isCacheable(res)) throw new Error(`precache refused ${path} (${res.status})`);
       await cache.put(path, res);
     }),
