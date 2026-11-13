@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { nextWithShellHeaders } from "../pwa/shell";
 import { SESSION_COOKIE, sessionSecretFromEnv, verifySession } from "./session";
 
 /**
@@ -28,13 +29,8 @@ export function safeNextPath(raw: string | null | undefined): string {
 
 export async function dashboardGuard(req: NextRequest, env: Record<string, string | undefined> = process.env): Promise<NextResponse> {
   const ok = await verifySession(req.cookies.get(SESSION_COOKIE)?.value, sessionSecretFromEnv(env));
-  if (ok) {
-    const res = NextResponse.next();
-    res.headers.set("Cache-Control", "private, no-store");
-    res.headers.set("X-Frame-Options", "DENY");
-    res.headers.set("Referrer-Policy", "same-origin");
-    return res;
-  }
+  // no-store, DENY framing, same-origin referrer, plus the CSP nonce and the rest of WEBAPP.md §8.
+  if (ok) return nextWithShellHeaders(req, env);
   // Server actions and other non-GET requests get a plain 401 instead of a redirect.
   if (req.method !== "GET" && req.method !== "HEAD") {
     return NextResponse.json({ error: "Owner session required", code: "unauthorized" }, { status: 401 });

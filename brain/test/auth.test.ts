@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { authenticateDevice, isOwnerSecret, requireCron } from "@/lib/auth";
 import { HttpError } from "@/lib/http";
-import { makeDeps, pairDevice, req, params } from "./fakes";
+import { makeDeps, NO_PARAMS, pairDevice, req, params } from "./fakes";
 import { GET as getCommitments } from "@/app/api/commitments/route";
 import { POST as pairCode } from "@/app/api/devices/pair-code/route";
 import { POST as pair } from "@/app/api/devices/pair/route";
@@ -67,10 +67,10 @@ describe("owner secret + pairing flow", () => {
     const deps = makeDeps();
     setDeps(deps);
 
-    expect((await pairCode(req("POST", "/api/devices/pair-code"))).status).toBe(401);
-    expect((await pairCode(req("POST", "/api/devices/pair-code", { token: "wrong-secret-wrong-secret" }))).status).toBe(401);
+    expect((await pairCode(req("POST", "/api/devices/pair-code"), NO_PARAMS)).status).toBe(401);
+    expect((await pairCode(req("POST", "/api/devices/pair-code", { token: "wrong-secret-wrong-secret" }), NO_PARAMS)).status).toBe(401);
 
-    const codeRes = await pairCode(req("POST", "/api/devices/pair-code", { headers: { "x-owner-secret": "test-owner-secret-0123456789" }, body: { label: "Galaxy Watch" } }));
+    const codeRes = await pairCode(req("POST", "/api/devices/pair-code", { headers: { "x-owner-secret": "test-owner-secret-0123456789" }, body: { label: "Galaxy Watch" } }), NO_PARAMS);
     expect(codeRes.status).toBe(200);
     const { code } = (await codeRes.json()) as { code: string };
     expect(code).toMatch(/^\d{6}$/);

@@ -18,6 +18,7 @@ node design/build.mjs --check  # exit 1 if a committed output is stale (use in C
 | `design/dist/tailwind-preset.cjs` | Tailwind v3 projects: `presets: [require(".../tailwind-preset.cjs")]` |
 | `design/dist/kotlin/SideKiqqTheme.kt` | Phone and watch apps (Jetpack Compose). See "Compose theme". |
 | `brain/design/tokens.css`, `brain/design/tailwind-preset.cjs` | Identical copies for the brain. Vercel builds with Root Directory = `brain`, so the brain can't import from `../design`. |
+| `design/dist/icons/*.png`, `brain/public/icons/*.png` | Web app icons (PWA manifest, iOS Home Screen), rendered by `design/icons.mjs` from `site/public/favicon.svg`. See "App icons". |
 
 Commit the generated files together with any `tokens.json` change. Never edit them by hand.
 
@@ -104,3 +105,20 @@ To adopt it:
    `CompositionLocalProvider(LocalSkColors provides SkDarkColors)` (watch is always dark) and map `accent`,
    `bg`, `surface`, `text` into the Wear `Colors`.
 6. Re-run `node design/build.mjs` after any token change and copy the file again (or point a Gradle task at it).
+
+## App icons
+
+`site/public/favicon.svg` is the source of the app icons. `design/icons.mjs` renders it with zero
+dependencies (it only understands the mark's background `<rect>` and `<circle>`s, and fails on anything
+else) into `design/dist/icons/` and `brain/public/icons/`:
+
+| File | Size | Use |
+|---|---|---|
+| `icon-192.png`, `icon-512.png` | 192, 512 | Manifest `purpose: "any"`: the favicon as drawn, rounded corners |
+| `icon-maskable-512.png` | 512 | Manifest `purpose: "maskable"`: full-bleed Ink, mark inside the 80% safe zone |
+| `apple-touch-icon.png` | 180 | iOS Home Screen: full-bleed square (iOS rounds it) |
+
+```bash
+node design/icons.mjs          # regenerate after changing favicon.svg
+node design/icons.mjs --check  # exit 1 if a committed icon is stale (brain/test/pwa.test.ts checks this too)
+```

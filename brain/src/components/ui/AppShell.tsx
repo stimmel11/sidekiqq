@@ -35,7 +35,7 @@ export function AppShell({ nav, signOut, children }: { nav: NavItem[]; signOut: 
         <div className="mt-auto px-3">{signOut}</div>
       </aside>
 
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between bg-nav px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center justify-between bg-nav px-4 pt-[env(safe-area-inset-top)] md:hidden">
         <Wordmark />
         <div className="flex items-center gap-1">
           <TopBarLinks items={nav} />
