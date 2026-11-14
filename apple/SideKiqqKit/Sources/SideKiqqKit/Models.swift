@@ -100,6 +100,9 @@ public struct DeviceKind: RawRepresentable, Codable, Hashable, Sendable, Express
     public static let medallion: DeviceKind = "medallion"
     public static let phone: DeviceKind = "phone"
     public static let reachy: DeviceKind = "reachy"
+    /// A signed-in browser (owner dashboard / customer web app). Never pairable; the iPhone app
+    /// only sees it in `from` fields and timelines.
+    public static let web: DeviceKind = "web"
 
     /**
      * The kind this iPhone app uses for pairing and `/api/ask`. Today's brain has no `iphone` kind,

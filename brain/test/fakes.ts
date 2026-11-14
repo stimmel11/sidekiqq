@@ -3,6 +3,7 @@ import { vi } from "vitest";
 import { NextRequest } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { KV } from "@/lib/kv";
+import type { DeviceKind } from "@/lib/models";
 import { createRepos } from "@/lib/repos";
 import type { Deps } from "@/lib/deps";
 import { GoogleTokenStore } from "@/lib/google/auth";
@@ -308,7 +309,7 @@ export function params<P>(p: P) {
   return { params: Promise.resolve(p) };
 }
 
-export async function pairDevice(deps: TestDeps, kind: "watch" | "phone" | "glasses" | "medallion" | "reachy" = "watch") {
+export async function pairDevice(deps: TestDeps, kind: DeviceKind = "watch") {
   const { token, device } = await deps.repos.devices.create(kind);
   return { token, device };
 }

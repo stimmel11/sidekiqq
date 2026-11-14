@@ -15,9 +15,32 @@ export const CONFIDENCE = ["CONFIRMED", "LIKELY", "INFERRED", "UNKNOWN"] as cons
 export const ConfidenceSchema = z.enum(CONFIDENCE);
 export type Confidence = z.infer<typeof ConfidenceSchema>;
 
-export const DEVICE_KINDS = ["watch", "glasses", "medallion", "phone", "reachy"] as const;
+/**
+ * `web` is a signed-in browser (the owner dashboard / customer web app, docs/WEBAPP.md §6.3). It
+ * never pairs with a code: web devices are created server-side for a web session.
+ */
+export const DEVICE_KINDS = ["watch", "glasses", "medallion", "phone", "reachy", "web"] as const;
 export const DeviceKindSchema = z.enum(DEVICE_KINDS);
 export type DeviceKind = z.infer<typeof DeviceKindSchema>;
+
+/** Kinds that can pair with a one-time code (POST /api/devices/pair). */
+export const PAIRABLE_DEVICE_KINDS = ["watch", "glasses", "medallion", "phone", "reachy"] as const satisfies readonly DeviceKind[];
+export const PairableDeviceKindSchema = z.enum(PAIRABLE_DEVICE_KINDS);
+
+/**
+ * Which `device` values a paired device may put in an /api/ask body. The phone app also asks on
+ * behalf of the medallion and Galaxy Glasses it relays for, and a Galaxy Watch set up from the phone
+ * uses the phone's token (android/README.md); every other device asks as itself.
+ * A `web` body from a non-web device, or a non-web body from a web device, is refused.
+ */
+export const ASK_DEVICE_RELAYS: Record<DeviceKind, readonly DeviceKind[]> = {
+  phone: ["phone", "medallion", "glasses", "watch"],
+  watch: ["watch"],
+  glasses: ["glasses"],
+  medallion: ["medallion"],
+  reachy: ["reachy"],
+  web: ["web"],
+};
 
 export const CATEGORIES = [
   "New Lead", "Existing Client", "Prospect", "Sales Opportunity", "Booking", "Project", "Scheduling",

@@ -24,7 +24,8 @@ function resultsOn(llm: ScriptedLLM, i: number): { content: string; is_error?: b
 
 async function run(deps: TestDeps, text: string, conversationId?: string) {
   setDeps(deps);
-  const { token } = await pairDevice(deps);
+  // Glasses ask through the phone app, which relays as "glasses" with the phone's token.
+  const { token } = await pairDevice(deps, "phone");
   const res = await ask(req("POST", "/api/ask", { token, body: { text, device: "glasses", ...(conversationId ? { conversationId } : {}) } }), params({}));
   expect(res.status).toBe(200);
   return AskResponseSchema.strict().parse(await res.json());
@@ -300,6 +301,6 @@ describe('"email this <dictated paragraph> to <contact>" through /api/ask', () =
     expect(ctx).toMatch(/"send it".*you cannot send/s);
     expect(ctx).toContain("create_email_draft\n  rejects any other address");
     expect(ctx).toContain("call\n  lookup_contact again before drafting");
-    expect(ctx).toMatch(/on phone or watch they tap Approve/);
+    expect(ctx).toMatch(/on phone, watch or web they tap Approve/);
   });
 });
