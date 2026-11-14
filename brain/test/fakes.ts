@@ -313,3 +313,6 @@ export async function pairDevice(deps: TestDeps, kind: DeviceKind = "watch") {
   const { token, device } = await deps.repos.devices.create(kind);
   return { token, device };
 }
+
+/** Route context for routes with no dynamic segment (route exports always take a context). */
+export const NO_PARAMS = params<Record<string, never>>({});

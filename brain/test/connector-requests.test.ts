@@ -6,7 +6,7 @@ import { executeTool, TOOL_NAMES, type ToolContext } from "@/lib/assistant/tools
 import { runtimeContext } from "@/lib/assistant/prompt";
 import { GET, POST } from "@/app/api/connector-requests/route";
 import { PATCH } from "@/app/api/connector-requests/[id]/route";
-import { makeDeps, params, req, type TestDeps } from "./fakes";
+import { makeDeps, NO_PARAMS, params, req, type TestDeps } from "./fakes";
 
 const NOW = new Date("2026-11-04T15:00:00Z");
 const OWNER = { "x-owner-secret": "test-owner-secret-0123456789" };
@@ -193,19 +193,19 @@ describe("/api/connector-requests (owner)", () => {
   it("needs the owner secret, not a device token", async () => {
     const deps = setup();
     const { token } = await deps.repos.devices.create("phone");
-    expect((await GET(req("GET", "/api/connector-requests", { token }))).status).toBe(401);
-    expect((await POST(req("POST", "/api/connector-requests", { token, body: spotify }))).status).toBe(401);
+    expect((await GET(req("GET", "/api/connector-requests", { token }), NO_PARAMS)).status).toBe(401);
+    expect((await POST(req("POST", "/api/connector-requests", { token, body: spotify }), NO_PARAMS)).status).toBe(401);
     expect((await PATCH(req("PATCH", "/api/connector-requests/creq_x", { token, body: { status: "accepted" } }), params({ id: "creq_x" }))).status).toBe(401);
   });
 
   it("creates, repeats, lists by status and updates", async () => {
     setup();
-    const created = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: spotify }));
+    const created = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: spotify }), NO_PARAMS);
     expect(created.status).toBe(201);
     const { request } = await created.json();
     expect(request).toMatchObject({ status: "new", source: { kind: "owner" } });
 
-    const again = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: spotify }));
+    const again = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: spotify }), NO_PARAMS);
     expect(again.status).toBe(200);
     expect((await again.json()).request.requestCount).toBe(2);
 
@@ -213,9 +213,9 @@ describe("/api/connector-requests (owner)", () => {
     expect(patched.status).toBe(200);
     expect((await patched.json()).request.status).toBe("accepted");
 
-    const accepted = await (await GET(req("GET", "/api/connector-requests?status=accepted", { headers: OWNER }))).json();
+    const accepted = await (await GET(req("GET", "/api/connector-requests?status=accepted", { headers: OWNER }), NO_PARAMS)).json();
     expect(accepted.items.map((r: { id: string }) => r.id)).toEqual([request.id]);
-    const fresh = await (await GET(req("GET", "/api/connector-requests?status=new", { headers: OWNER }))).json();
+    const fresh = await (await GET(req("GET", "/api/connector-requests?status=new", { headers: OWNER }), NO_PARAMS)).json();
     expect(fresh.items).toEqual([]);
   });
 
@@ -225,19 +225,19 @@ describe("/api/connector-requests (owner)", () => {
       deps.setNow(new Date(NOW.getTime() + i * 1000));
       await deps.repos.connectorRequests.add({ service: `Service ${i}`, purpose: "x", category: "other" }, { kind: "owner" });
     }
-    const all = await (await GET(req("GET", "/api/connector-requests", { headers: OWNER }))).json();
+    const all = await (await GET(req("GET", "/api/connector-requests", { headers: OWNER }), NO_PARAMS)).json();
     expect(all.items[0].service).toBe(`Service ${MAX_OPEN_CONNECTOR_REQUESTS - 1}`);
     expect(all.items.at(-1).service).toBe("Service 0");
-    const res = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: spotify }));
+    const res = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: spotify }), NO_PARAMS);
     expect(res.status).toBe(429);
     expect((await res.json()).code).toBe("too_many_open");
   });
 
   it("validates input and ids", async () => {
     setup();
-    expect((await GET(req("GET", "/api/connector-requests?status=bogus", { headers: OWNER }))).status).toBe(400);
-    expect((await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: { service: "www.x.com", purpose: "x" } }))).status).toBe(400);
-    const gmail = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: { service: "Gmail", purpose: "x" } }));
+    expect((await GET(req("GET", "/api/connector-requests?status=bogus", { headers: OWNER }), NO_PARAMS)).status).toBe(400);
+    expect((await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: { service: "www.x.com", purpose: "x" } }), NO_PARAMS)).status).toBe(400);
+    const gmail = await POST(req("POST", "/api/connector-requests", { headers: OWNER, body: { service: "Gmail", purpose: "x" } }), NO_PARAMS);
     expect(gmail.status).toBe(409);
     expect((await gmail.json()).code).toBe("already_supported");
     expect((await PATCH(req("PATCH", "/api/connector-requests/creq_missing", { headers: OWNER, body: { status: "accepted" } }), params({ id: "creq_missing" }))).status).toBe(404);

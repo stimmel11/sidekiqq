@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { RegisterServiceWorker } from "@/components/pwa/RegisterServiceWorker";
+import { DASHBOARD_METADATA } from "@/lib/pwa/metadata";
 import "./dashboard.css";
 
-export const metadata: Metadata = {
-  title: { default: "SideKiqq", template: "%s | SideKiqq" },
-  description: "SideKiqq, it goes where you go.",
-  robots: { index: false, follow: false },
-};
+export const metadata: Metadata = DASHBOARD_METADATA;
+
+// The CSP nonce (middleware) is stamped on scripts only at request time: a prerendered shell page would
+// ship un-nonced scripts that 'strict-dynamic' blocks. Keep every page under this layout dynamic.
+export const dynamic = "force-dynamic";
 
 export const viewport: Viewport = {
   themeColor: [
@@ -25,6 +27,7 @@ export default function DashboardRootLayout({ children }: { children: React.Reac
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
       <link rel="stylesheet" href={FONTS} precedence="default" />
+      <RegisterServiceWorker />
       {children}
     </>
   );

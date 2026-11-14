@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { dashboardGuard, isDashboardPath } from "./lib/dashboard/guard";
+import { LOGIN_PATH, dashboardGuard, isDashboardPath } from "./lib/dashboard/guard";
 import { SESSION_COOKIE } from "./lib/dashboard/session";
+import { nextWithShellHeaders } from "./lib/pwa/shell";
 
 /**
  * Edge pre-filter: reject API calls without any bearer/secret header before they reach a
@@ -15,12 +16,23 @@ const isConnectionsApi = (p: string) => p === "/api/connections" || p.startsWith
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isDashboardPath(pathname)) return dashboardGuard(req); // owner web dashboard: signed session cookie
-  if (PUBLIC.includes(pathname)) return NextResponse.next();
-  if (PUBLIC_CONNECTIONS.test(pathname)) return NextResponse.next();
-  if (isConnectionsApi(pathname) && req.cookies.has(SESSION_COOKIE)) return NextResponse.next();
+  if (pathname === LOGIN_PATH) return nextWithShellHeaders(req); // sign-in page: CSP nonce + shell headers, no session needed
+  if (PUBLIC.includes(pathname)) return apiNext();
+  if (PUBLIC_CONNECTIONS.test(pathname)) return apiNext();
+  if (isConnectionsApi(pathname) && req.cookies.has(SESSION_COOKIE)) return apiNext();
   const hasAuth = /^Bearer\s+\S+/i.test(req.headers.get("authorization") ?? "") || req.headers.has("x-owner-secret") || req.headers.has("x-cron-secret");
-  if (!hasAuth) return NextResponse.json({ error: "Missing bearer token", code: "unauthorized" }, { status: 401 });
-  return NextResponse.next();
+  if (!hasAuth) return NextResponse.json({ error: "Missing bearer token", code: "unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  return apiNext();
 }
 
-export const config = { matcher: ["/api/:path*", "/dashboard/:path*"] };
+/**
+ * API replies carry personal data: keep them out of the browser's HTTP cache (WEBAPP.md §1.1).
+ * A future route that should be cacheable must be exempted here, not just set its own header.
+ */
+function apiNext(): NextResponse {
+  const res = NextResponse.next();
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
+export const config = { matcher: ["/api/:path*", "/dashboard/:path*", "/login"] };

@@ -24,7 +24,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           Nothing leaves your outbox until you approve it. Every draft waits here, on your watch, or in your glasses for an explicit yes.
         </p>
       </section>
-      <section className="flex items-center justify-center px-4 py-12">
+      <section className="flex items-center justify-center px-4 pt-[calc(3rem+env(safe-area-inset-top))] pb-[calc(3rem+env(safe-area-inset-bottom))]">
         <div className="w-full max-w-[24rem]">
           <span className="mb-8 flex items-center gap-2 font-heading text-[1.25rem] font-semibold tracking-[-0.02em] md:hidden">
             <span aria-hidden className="h-2.5 w-2.5 rounded-sm bg-accent" />

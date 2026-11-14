@@ -113,9 +113,12 @@ export function withOwnerOrSession<P = Record<string, never>>(handler: (req: Nex
   };
 }
 
-/** Same as withDevice but for owner-secret endpoints. */
+/**
+ * Same as withDevice but for owner-secret endpoints. The context is required (as in withDevice):
+ * `next build` rejects an optional second argument on route exports.
+ */
 export function withOwner<P = Record<string, never>>(handler: (req: NextRequest, ctx: { deps: Deps; params: P }) => Promise<Response>) {
-  return async (req: NextRequest, ctx?: RouteCtx<P>): Promise<Response> => {
+  return async (req: NextRequest, ctx: RouteCtx<P>): Promise<Response> => {
     try {
       requireOwner(req);
       const params = ctx?.params ? await ctx.params : ({} as P);
