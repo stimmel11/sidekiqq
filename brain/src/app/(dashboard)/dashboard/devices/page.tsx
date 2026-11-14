@@ -13,7 +13,7 @@ import { PairCode } from "./PairCode";
 export const metadata: Metadata = { title: "Devices" };
 export const dynamic = "force-dynamic";
 
-const KIND_LABEL: Record<string, string> = { phone: "Phone", watch: "Galaxy Watch", glasses: "Galaxy Glasses", medallion: "Medallion" };
+const KIND_LABEL: Record<string, string> = { phone: "Phone", watch: "Galaxy Watch", glasses: "Galaxy Glasses", medallion: "Medallion", reachy: "Reachy Mini", web: "Web browser" };
 
 export default async function DevicesPage() {
   await requireOwnerSession();

@@ -236,7 +236,7 @@ describe("call_on_phone via /api/ask", () => {
   it("nudges the phone with the same silent, id-only FCM message as POST /api/commands", async () => {
     const { deps, phone } = await setup([() => msg([toolUse("call_on_phone", { spokenNumber: "303 555 0142" })]), respond]);
     await deps.repos.devices.setFcmToken(phone!.device.id, "tok-phone", "phone");
-    await askAs(phone!.token, "call 303 555 0142");
+    await askAs(phone!.token, "call 303 555 0142", "phone");
     const [c] = await onPhone(phone!.token);
     expect(deps.pushFake.dataSent).toEqual([{ tokens: ["tok-phone"], data: { kind: "command", commandId: c!.id }, priority: "high" }]);
     expect(deps.pushFake.sent).toEqual([]);
@@ -244,6 +244,7 @@ describe("call_on_phone via /api/ask", () => {
 
   it("the hand-off's origin is the authenticated device, not the body's device field", async () => {
     const { deps, phone, llm } = await setup([() => msg([toolUse("call_on_phone", { spokenNumber: "303 555 0142" })]), respond]);
+    // A watch set up from the phone shares the phone's token and asks as "watch"; the origin is still the phone.
     await askAs(phone!.token, "call 303 555 0142", "watch");
     expect(results(llm.calls[1]!)[0]).not.toMatchObject({ is_error: true });
     const [c] = await onPhone(phone!.token);

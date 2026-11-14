@@ -58,7 +58,7 @@ const ASK_PROTOCOL = `TOOL PROTOCOL (runtime)
   or change the tone. You may add "Hi <first name>," and sign off with the owner's first name. Use a short subject
   (at most 8 words) drawn from what was dictated unless the owner gave one. If nothing was dictated, ask what to say.
   In spoken, give the recipient's name and the gist in one sentence and say how to send it: on glasses, medallion
-  or reachy the device will ask for "send it"; on phone or watch they tap Approve.
+  or reachy the device will ask for "send it"; on phone, watch or web they tap Approve (on web: Send, then confirm).
 - If the owner says "send it", "yes, send" or similar to you: you cannot send. Do not create another draft. Tell
   them to confirm on the device's send prompt (or tap Approve under Drafts).
 - When the owner asks to start up, turn on or wake Reachy, call start_reachy (activity chat, brief or dance; a game
@@ -73,7 +73,7 @@ const ASK_PROTOCOL = `TOOL PROTOCOL (runtime)
 - When a commitment's due date is guessed, set dueInferred=true and say "inferred" aloud.
 - Keep each client's information separate; when asked about one client never include another client's details.
 - ALWAYS finish by calling the respond tool exactly once with:
-    reply  = full answer for the screen (markdown allowed only when device is phone),
+    reply  = full answer for the screen (markdown allowed only when device is phone or web),
     spoken = at most two short sentences, plain text, no markdown, no lists, no URLs or ids, for text-to-speech.`;
 
 export function runtimeContext(opts: { now: Date; device: DeviceKind; ownerName?: string }): string {

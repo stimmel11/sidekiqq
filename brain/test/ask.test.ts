@@ -61,7 +61,7 @@ describe("/api/ask tool loop", () => {
     const llm = new ScriptedLLM([() => msg([toolUse("respond", { reply: "Hello.", spoken: "Hello." })])]);
     const deps = makeDeps({ llm });
     setDeps(deps);
-    const { token } = await pairDevice(deps);
+    const { token } = await pairDevice(deps, "phone");
     const r1 = (await (await ask(req("POST", "/api/ask", { token, body: { text: "hi", device: "phone" } }), params({}))).json()) as { conversationId: string };
     await ask(req("POST", "/api/ask", { token, body: { text: "again", device: "phone", conversationId: r1.conversationId } }), params({}));
     const msgs = llm.calls[1]!.messages;
@@ -83,7 +83,7 @@ describe("/api/ask tool loop", () => {
       ]);
       const deps = makeDeps({ llm });
       setDeps(deps);
-      const { token } = await pairDevice(deps);
+      const { token } = await pairDevice(deps, "phone");
       const res = await ask(req("POST", "/api/ask", { token, body: { text: "loop forever", device: "medallion" } }), params({}));
       const body = (await res.json()) as { reply: string };
       expect(llm.calls).toHaveLength(3);
