@@ -46,6 +46,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-11-11: Kroger slice 2a (`crew/kroger-signin`): `KrogerAuth` (PKCE sign-in, rotation-safe refresh, client-credentials search token) + KV-backed `SearchedProducts`. Not wired yet. 671 brain tests.
 - 2026-11-12: Deploy guide (`crew/deploy-guide`): `docs/DEPLOY.md`, secrets → Upstash → Vercel (Hobby cron note) → Google OAuth → dashboard connect → pairing, with troubleshooting.
 - 2026-11-12: Owner priority change: customer web app (PWA, no app stores) first, then native apps for the wearables. Backlog sections added (`crew/webapp-backlog`).
+- 2026-11-12: Web app design (`crew/webapp-design`): `docs/WEBAPP.md` (PWA scope + offline-shell-only service worker, tenant prefixes with zero-copy owner tenant, global index keys, per-tenant DEKs, deletion guard, cross-tenant access-log tests, v2 revocable sessions, `withPrincipal` with the confirm fingerprint moved into approve for sessions, Web Push with endpoint allowlist, browser tap-to-talk, tap-to-open hand-offs, native-only limits). Docs only.
 - 2026-11-04: "Request a connector" slice 1 (`crew/connector-requests`): connector request log + owner API + `request_connector` tool, `docs/CONNECTOR_REQUESTS.md`. Logging builds/connects nothing. 411 brain tests.
 - 2026-11-05: Task layer slice 4b (`crew/open-on-phone`): `handoffCapability` user_finishes path + `open_on_phone` tool (only a join link created in the same request, tap to open), FCM token de-dup across device records. 667 brain tests.
 - 2026-11-07: Zoom slice 2 (`crew/zoom-connect`): Zoom OAuth flow behind the generic `/api/connections/zoom/*` routes (PKCE connect, encrypted callback store, revoke on disconnect, reconnect/refresh race guards). 664 brain tests.
@@ -59,7 +60,7 @@ Bots take the first unchecked item that is NOT tagged `[needs-human]`.
 
 ### Customer web app (owner priority, 2026-11-12)
 Customers get SideKiqq as an installable web app (PWA: "Add to Home Screen" on iPhone and Android, plus desktop), with no app stores. It grows out of the owner dashboard in `brain/src/app/(dashboard)`. Native apps come after this, for what a browser can't do: Galaxy Watch, Galaxy Glasses, the medallion over background BLE, always-on voice, Android Auto/CarPlay. Safety rules are unchanged: nothing is sent except through `POST /api/drafts/:id/approve` after an explicit confirm.
-- [ ] Design `docs/WEBAPP.md` before building. It covers:
+- [x] Design `docs/WEBAPP.md` before building (done 2026-11-12; build order in its §10, open owner questions in §11). It covers:
   - the PWA scope (screens; what works in a browser and what stays native)
   - multi-tenant accounts: tenant id on every KV key, sign-up and sign-in with Google, per-user `ConnectionStore`, one customer's data never reachable from another's, and a migration path for the owner's existing data
   - web sessions vs device tokens
@@ -68,7 +69,7 @@ Customers get SideKiqq as an installable web app (PWA: "Add to Home Screen" on i
   - hand-offs as tap-to-open links (`tel:`, meeting links)
   - the limits that keep the native apps (no background mic or BLE; Web Bluetooth is foreground-only Chrome and absent on iOS)
 - [ ] Web app slice 1: installable PWA shell. `manifest.webmanifest`, icons from `/design`, a service worker (offline shell only, never caches API responses or drafts), a mobile-first layout for Today/Top 5, Follow-ups, Commitments, and Drafts with the existing confirm-to-send. Still single-owner sign-in until accounts land.
-- [ ] Web app slice 2: tap-to-talk in the browser. AudioWorklet capture → WAV → `/api/transcribe` → `/api/ask` with a new `web` device kind (contract + TS + Kotlin + Swift) → spoken reply via `/api/speak`. A draft from voice still needs a tap on Send; a spoken "send it" can be added later with the same 30 s rule.
+- [ ] Web app slice 2: tap-to-talk in the browser. First the owner-only `withPrincipal` + one `web` device per browser + session confirm fingerprint on approve (`docs/WEBAPP.md` §2, §4.2). AudioWorklet capture → WAV → `/api/transcribe` → `/api/ask` with a new `web` device kind (contract + TS + Kotlin + Swift) → spoken reply via `/api/speak`. A draft from voice still needs a tap on Send; a spoken "send it" can be added later with the same 30 s rule.
 - [ ] Web app slice 3: Web Push alerts (VAPID keys, subscription per browser, alongside FCM in `lib/push`, clear on 404/410), with the alert log as fallback.
 - [ ] Web app slice 4: hand-offs on the web. `call_contact`/`open_url` commands targeted at the browser show a tap-to-open link (`tel:` or the allowlisted meeting link). Nothing opens automatically.
 - [ ] Brain: multi-tenant accounts per `docs/WEBAPP.md` (large; slice it). Google sign-in for customers, tenant-scoped repos and connections, per-tenant rate limits and caps, account deletion that wipes the tenant's keys, and tests proving no cross-tenant reads.
