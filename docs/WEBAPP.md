@@ -38,8 +38,9 @@ served by the brain (same Next.js app, same origin), so it needs no new CORS rul
 URLs stay where they are for now (`/login`, `/dashboard/*`) so slice 1 moves no routes. The
 manifest uses `start_url: "/dashboard"`, `scope: "/"`, `display: "standalone"`, and the colours
 from `/design/tokens.json`. `/design` has no app icons yet; slice 1 renders them (192, 512,
-512 maskable, 180 apple-touch) from `site/public/favicon.svg` with a generator script whose output
-is checked in, and adds them to `design/README.md`.
+512 maskable, 180 apple-touch) with a generator script whose output is checked in, and adds them
+to `design/README.md`. (Since 2026-11-14 the source is the horse mark in `design/mark/`, which also
+renders `favicon.ico` for the site and the web app.)
 
 ### 1.1 Service worker: offline shell only
 

@@ -24,7 +24,8 @@ const ogImage = new URL(site.ogImage, Astro.site);
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="sitemap" href="/sitemap-index.xml" />
     <meta name="theme-color" content="#F6F4EF" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0F1420" media="(prefers-color-scheme: dark)" />

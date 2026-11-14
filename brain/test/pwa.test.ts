@@ -424,20 +424,40 @@ describe("manifest and icons", () => {
 
   it("committed icons match design/icons.mjs output pixel for pixel (run `node design/icons.mjs`)", async () => {
     // @ts-expect-error plain .mjs script without types
-    const { buildIcons, samePixels } = await import("../../design/icons.mjs");
-    for (const icon of buildIcons() as { file: string; png: Buffer }[]) {
-      for (const dir of [path.join(BRAIN, "public/icons"), path.join(REPO, "design/dist/icons")]) {
-        expect(samePixels(readFileSync(path.join(dir, icon.file)), icon.png), `${dir}/${icon.file}`).toBe(true);
+    const { buildIcons, samePixels, OUTPUTS } = await import("../../design/icons.mjs");
+    const icons = buildIcons() as { file: string; data: Buffer }[];
+    expect(icons.map((i) => i.file).sort()).toEqual(Object.keys(OUTPUTS).sort());
+    for (const icon of icons) {
+      for (const dir of OUTPUTS[icon.file] as string[]) {
+        expect(samePixels(readFileSync(path.join(REPO, dir, icon.file)), icon.data), `${dir}/${icon.file}`).toBe(true);
       }
     }
   });
 
-  it("the icon renderer refuses SVG content it can't draw", async () => {
+  it("favicon.ico has 16/32/48 entries, a rounded tile and the mark drawn in it", async () => {
     // @ts-expect-error plain .mjs script without types
-    const { parseMark } = await import("../../design/icons.mjs");
-    const ok = readFileSync(path.join(REPO, "site/public/favicon.svg"), "utf8");
-    expect(parseMark(ok).shapes).toHaveLength(2);
-    expect(() => parseMark(ok.replace("</svg>", '<path d="M0 0"/></svg>'))).toThrow(/unsupported/);
-    expect(() => parseMark(ok.replace('fill="#E8A33D"', 'fill="orange"'))).toThrow(/colour/);
+    const { decodeIco, decodePng, TILE } = await import("../../design/icons.mjs");
+    const entries = decodeIco(readFileSync(path.join(BRAIN, "src/app/favicon.ico"))) as { size: number; png: Buffer }[];
+    expect(entries.map((e) => e.size)).toEqual([16, 32, 48]);
+    for (const { size, png } of entries) {
+      const { width, channels, data } = decodePng(png) as { width: number; channels: number; data: Buffer };
+      expect([width, channels]).toEqual([size, 4]);
+      expect(data[3]).toBe(0); // transparent corner (rounded tile)
+      const center = ((size >> 1) * size + (size >> 1)) * 4;
+      expect(data[center + 3]).toBe(255);
+      // Some pixels are clearly line-coloured, so the mark survives at this size.
+      let dark = 0;
+      for (let i = 0; i < data.length; i += 4) if (data[i + 3] === 255 && data[i]! < (TILE.bg[0] + TILE.fg[0]) / 2) dark++;
+      expect(dark).toBeGreaterThan(size);
+    }
+  });
+
+  it("the icon generator refuses PNG sources it can't read", async () => {
+    // @ts-expect-error plain .mjs script without types
+    const { decodePng, loadMask, MARK } = await import("../../design/icons.mjs");
+    expect(() => decodePng(Buffer.from("not a png"))).toThrow(/not a PNG/);
+    const mark = decodePng(readFileSync(MARK)) as { width: number; height: number };
+    expect([mark.width, mark.height]).toEqual([1024, 1024]);
+    expect(() => loadMask(readFileSync(path.join(BRAIN, "public/icons/apple-touch-icon.png")).subarray(0, 40))).toThrow();
   });
 });

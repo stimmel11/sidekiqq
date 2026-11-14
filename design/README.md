@@ -18,7 +18,7 @@ node design/build.mjs --check  # exit 1 if a committed output is stale (use in C
 | `design/dist/tailwind-preset.cjs` | Tailwind v3 projects: `presets: [require(".../tailwind-preset.cjs")]` |
 | `design/dist/kotlin/SideKiqqTheme.kt` | Phone and watch apps (Jetpack Compose). See "Compose theme". |
 | `brain/design/tokens.css`, `brain/design/tailwind-preset.cjs` | Identical copies for the brain. Vercel builds with Root Directory = `brain`, so the brain can't import from `../design`. |
-| `design/dist/icons/*.png`, `brain/public/icons/*.png` | Web app icons (PWA manifest, iOS Home Screen), rendered by `design/icons.mjs` from `site/public/favicon.svg`. See "App icons". |
+| `design/dist/icons/*`, `brain/public/icons/*.png`, `brain/src/app/favicon.ico`, `site/public/favicon.ico`, `site/public/apple-touch-icon.png` | Favicons and app icons for the site and the web app, rendered by `design/icons.mjs` from the horse mark in `design/mark/`. See "App icons". |
 
 Commit the generated files together with any `tokens.json` change. Never edit them by hand.
 
@@ -108,17 +108,22 @@ To adopt it:
 
 ## App icons
 
-`site/public/favicon.svg` is the source of the app icons. `design/icons.mjs` renders it with zero
-dependencies (it only understands the mark's background `<rect>` and `<circle>`s, and fails on anything
-else) into `design/dist/icons/` and `brain/public/icons/`:
+The SideKiqq mark is the owner's horse drawing (`design/mark/horse-source.jpg`). `design/mark/prepare.py`
+(Pillow, run once per new drawing) turns it into two 1024 px coverage masks: `horse.png` and
+`horse-bold.png` (lines thickened so they survive at 16–64 px). `design/icons.mjs` renders every icon
+from those masks with zero dependencies: dark-brown lines (`#3B342E`) on a Paper tile (`#F6F4EF`).
 
-| File | Size | Use |
-|---|---|---|
-| `icon-192.png`, `icon-512.png` | 192, 512 | Manifest `purpose: "any"`: the favicon as drawn, rounded corners |
-| `icon-maskable-512.png` | 512 | Manifest `purpose: "maskable"`: full-bleed Ink, mark inside the 80% safe zone |
-| `apple-touch-icon.png` | 180 | iOS Home Screen: full-bleed square (iOS rounds it) |
+| File | Size | Use | Written to |
+|---|---|---|---|
+| `favicon.ico` | 16, 32, 48 (bold mask) | Browser tab icon | `brain/src/app` (Next.js links it on every page), `site/public` |
+| `icon-192.png`, `icon-512.png` | 192, 512 | Manifest `purpose: "any"`: rounded tile | `brain/public/icons` |
+| `icon-maskable-512.png` | 512 | Manifest `purpose: "maskable"`: full-bleed tile, mark inside the 80% safe zone | `brain/public/icons` |
+| `apple-touch-icon.png` | 180 | iOS Home Screen: full-bleed square (iOS rounds it) | `brain/public/icons`, `site/public` |
+
+Every file is also copied to `design/dist/icons/`.
 
 ```bash
-node design/icons.mjs          # regenerate after changing favicon.svg
-node design/icons.mjs --check  # exit 1 if a committed icon is stale (brain/test/pwa.test.ts checks this too)
+python3 design/mark/prepare.py  # only after replacing horse-source.jpg
+node design/icons.mjs           # regenerate all icons
+node design/icons.mjs --check   # exit 1 if a committed icon is stale (brain/test/pwa.test.ts checks this too)
 ```
