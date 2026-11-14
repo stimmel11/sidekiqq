@@ -29,7 +29,7 @@ fun HandoffDialog(
     AlertDialog(
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-        title = { Text("From your ${command.from}") },
+        title = { Text(if (command.from == "web") "From the web app" else "From your ${command.from}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(command.label, style = MaterialTheme.typography.bodyLarge)

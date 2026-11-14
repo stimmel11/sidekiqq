@@ -1,14 +1,15 @@
 import { z } from "zod";
 import { errorResponse, HttpError, json, parseJson, clientIp } from "@/lib/http";
 import { getDeps } from "@/lib/deps";
-import { DeviceKindSchema } from "@/lib/models";
+import { PairableDeviceKindSchema } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const Body = z.object({
   code: z.string().trim().regex(/^\d{6}$/, "code must be 6 digits"),
-  device: DeviceKindSchema,
+  // `web` devices belong to a browser session and are never paired with a code.
+  device: PairableDeviceKindSchema,
   name: z.string().trim().min(1).max(64).optional(),
 });
 

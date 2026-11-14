@@ -141,8 +141,8 @@ final class ModelsTests: XCTestCase {
     }
 
     func testDeviceKindWireValues() throws {
-        let kinds: [DeviceKind] = [.watch, .glasses, .medallion, .phone, .reachy]
-        XCTAssertEqual(kinds.map(\.rawValue), ["watch", "glasses", "medallion", "phone", "reachy"])
+        let kinds: [DeviceKind] = [.watch, .glasses, .medallion, .phone, .reachy, .web]
+        XCTAssertEqual(kinds.map(\.rawValue), ["watch", "glasses", "medallion", "phone", "reachy", "web"])
         XCTAssertEqual(DeviceKind.thisIPhone, .phone, "today's brain has no iphone kind")
         let data = try SideKiqqJSON.encoder().encode([DeviceKind.reachy])
         XCTAssertEqual(String(decoding: data, as: UTF8.self), #"["reachy"]"#)

@@ -31,7 +31,7 @@ the thinking.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | /api/ask | `{ "text": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "conversationId"?: string }` | `{ "reply": string, "spoken": string, "conversationId": string, "actions": Action[] }` |
+| POST | /api/ask | `{ "text": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy"\|"web", "conversationId"?: string }` | `{ "reply": string, "spoken": string, "conversationId": string, "actions": Action[] }`. `device` must be the caller's own kind; a `phone` token may also send `medallion`, `glasses` or `watch` (it relays for them, and a watch set up from the phone shares its token). Anything else is 400 `device_mismatch` |
 | POST | /api/transcribe | raw audio body, `Content-Type: audio/wav` (16 kHz mono 16-bit PCM) | `{ "text": string }` |
 | GET | /api/brief?kind=daily\|eod\|weekly | – | `Brief` |
 | GET | /api/top5 | – | `{ "items": TopItem[], "updatedAt": string }` |
@@ -66,7 +66,7 @@ Pairing / owner endpoints (not device-token auth):
 | Method | Path | Auth | Body → Returns |
 |---|---|---|---|
 | POST | /api/devices/pair-code | owner secret header | `{ "label"?: string }` → `{ "code": "123456", "expiresAt": string, "ttlSeconds": number }` |
-| POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "name"?: string }` → `{ "token": string, "deviceId": string, "device": string }` |
+| POST | /api/devices/pair | none (one-time code, rate-limited per IP) | `{ "code": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy", "name"?: string }` (`web` is refused with 400: browsers never pair) → `{ "token": string, "deviceId": string, "device": string }` |
 | POST | /api/google/connect | owner secret header | → `{ "url": string, "expiresAt": string }` (one-time browser link). Alias of the connections route below for one release |
 | GET | /api/connections | owner secret header or dashboard session | → `{ "items": Connection[] }` |
 | POST | /api/connections/:connectorId/connect | owner secret header or dashboard session | → `{ "url": string, "expiresAt": string }` (single-use 5-min link; `GET` on it starts the provider sign-in) |
@@ -113,7 +113,9 @@ interface DraftItem { id: string; kind: DraftKind /* absent from older brains = 
   location?: string /* calendar kinds only */; conference?: "meet" /* calendar_invite only: Meet link added when sent */;
   client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
-type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy";
+type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy"|"web"
+  /* "web" = a signed-in browser (dashboard / web app, docs/WEBAPP.md §6.3): created server-side, never
+     paired with a code, never a command target today. Clients must tolerate it in `from` and timelines. */;
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
   kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
   importance?: Importance; priority: "high"|"normal";
