@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   // The Claude system prompt is read from disk at runtime; make sure Vercel ships it with every function.
   outputFileTracingIncludes: {
     "/api/**/*": ["./prompts/**/*"],
+    "/service-worker": ["./src/lib/pwa/sw.template.js"],
   },
   poweredByHeader: false,
 };
