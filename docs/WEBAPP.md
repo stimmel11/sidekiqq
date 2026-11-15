@@ -375,6 +375,24 @@ tone survives, an 11 kHz tone is attenuated).
   later must follow the device rule exactly (30 s window that opens only after the read-back has
   fully played, speech that started earlier can't confirm, re-fetch the draft before approve).
 
+### 6.2a What slice 2b shipped (interim, until 2c)
+
+The Talk screen (`/dashboard/talk`) differs from §6.1–6.2 in four ways, all to be revisited when
+`withPrincipal` lands (slice 2c):
+
+- The browser does not call the device routes. Server actions (`talkAction`, `askTextAction`,
+  `speakAction`) run `/api/transcribe` → `/api/ask` → `/api/speak` in-process as the single shared
+  "Owner web dashboard" `web` device (`lib/dashboard/talk.ts`, `device-bridge.ts`), not one device
+  per browser.
+- The client cap is 30 s, not 60 s: a server action body is limited to 1 MB (30 s of 16 kHz PCM16
+  is 960 044 bytes). Posting to `/api/transcribe` directly lifts this.
+- The worklet only forwards Float32 frames; the page resamples (polyphase windowed sinc) and
+  encodes the WAV at stop (`lib/talk/audio.ts`). A `ScriptProcessorNode` is the fallback where
+  AudioWorklet is missing.
+- A `draft_created` action shows its `readback` and a **Review and send** link to the Drafts
+  screen, whose confirm dialog is the only send path; there is no Send button on the Talk screen.
+  A `spoken` text over `SPEAK_MAX_CHARS` is read as the whole sentences that fit.
+
 ### 6.3 Contract: `web` device kind
 
 `DeviceKind` gains `"web"` in `DEVICE_KINDS` (TS), the Kotlin `Device` enum, Swift `DeviceKind`

@@ -102,6 +102,10 @@ export function TalkPanel() {
   const turnId = useRef(0);
   const busyRef = useRef(false);
   const mutedRef = useRef(false);
+  /** Bumped by every stop; a voice reply that arrives after a stop is dropped. */
+  const playGenRef = useRef(0);
+  const unmountedRef = useRef(false);
+  const voiceErrorShownRef = useRef(false);
 
   useEffect(() => {
     const m = readMuted();
@@ -125,6 +129,7 @@ export function TalkPanel() {
   }, []);
 
   const stopPlayback = useCallback(() => {
+    playGenRef.current++;
     const src = playingRef.current;
     playingRef.current = null;
     if (src) {
@@ -139,6 +144,7 @@ export function TalkPanel() {
 
   useEffect(
     () => () => {
+      unmountedRef.current = true;
       releaseMic();
       stopPlayback();
       void ctxRef.current?.close().catch(() => undefined);
@@ -149,7 +155,11 @@ export function TalkPanel() {
   const speak = useCallback(
     async (spoken: string) => {
       const ctx = ctxRef.current;
-      if (!spoken || mutedRef.current || !ctx) return;
+      if (!spoken || mutedRef.current || !ctx) {
+        setPhase("idle");
+        return;
+      }
+      const gen = playGenRef.current;
       setPhase("speaking");
       let out: SpeakOutcome;
       try {
@@ -157,8 +167,11 @@ export function TalkPanel() {
       } catch {
         out = { ok: false, error: "The voice reply isn't available right now." };
       }
+      if (playGenRef.current !== gen || unmountedRef.current) return; // stopped while loading
       if (!out.ok) {
-        setError(out.error);
+        // Show a voice problem once per page, not on every turn (e.g. TTS not configured).
+        if (!voiceErrorShownRef.current) setError(out.error);
+        voiceErrorShownRef.current = true;
         setPhase("idle");
         return;
       }
@@ -166,7 +179,16 @@ export function TalkPanel() {
         const bytes = base64ToBytes(out.wavBase64);
         const buffer = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
         await ctx.resume();
-        stopPlayback();
+        if (playGenRef.current !== gen || unmountedRef.current) return;
+        const old = playingRef.current;
+        if (old) {
+          old.onended = null;
+          try {
+            old.stop();
+          } catch {
+            // not started
+          }
+        }
         const src = ctx.createBufferSource();
         src.buffer = buffer;
         src.connect(ctx.destination);
@@ -177,11 +199,12 @@ export function TalkPanel() {
         playingRef.current = src;
         src.start();
       } catch {
+        if (playGenRef.current !== gen) return;
         setError("The voice reply couldn't be played.");
         setPhase("idle");
       }
     },
-    [stopPlayback],
+    [],
   );
 
   const handleOutcome = useCallback(
@@ -195,6 +218,8 @@ export function TalkPanel() {
       if (out.conversationId) conversationRef.current = out.conversationId;
       setTurns((t) => [...t, { id: ++turnId.current, you: out.text, reply: out.reply, actions: out.actions }]);
       setTyped("");
+      // The turn is done: a new tap or typed question may start while the voice reply loads/plays.
+      busyRef.current = false;
       if (out.spoken && !mutedRef.current) await speak(out.spoken);
       else setPhase("idle");
     },
@@ -202,7 +227,7 @@ export function TalkPanel() {
   );
 
   const finish = useCallback(
-    async (reason: "tap" | "silence" | "no_speech" | "max") => {
+    async (reason: "tap" | "silence" | "no_speech" | "max" | "hidden") => {
       const rec = recRef.current;
       const ctx = ctxRef.current;
       if (!rec || !ctx || rec.stopping) return;
@@ -211,13 +236,14 @@ export function TalkPanel() {
       const frames = rec.frames;
       releaseMic(); // mic indicator off before anything is uploaded
       if (reason === "no_speech" || (!heard && reason !== "tap")) {
-        setError("I didn't hear anything. Tap the mic and try again.");
+        if (reason !== "hidden") setError("I didn't hear anything. Tap the mic and try again.");
         setPhase("idle");
         busyRef.current = false;
         return;
       }
       setPhase("thinking");
       try {
+        await new Promise((r) => setTimeout(r, 0)); // let "Thinking…" paint before encoding
         const wav = framesToWav(frames, ctx.sampleRate);
         const form = new FormData();
         form.append("audio", new Blob([wav as BlobPart], { type: "audio/wav" }), "talk.wav");
@@ -229,6 +255,9 @@ export function TalkPanel() {
           out = { ok: false, error: "Couldn't reach SideKiqq. Check the connection and try again." };
         }
         await handleOutcome(out);
+      } catch {
+        setError("The recording couldn't be prepared. Try again, or type instead.");
+        setPhase("idle");
       } finally {
         busyRef.current = false;
       }
@@ -249,7 +278,7 @@ export function TalkPanel() {
         ctx = new AudioContext();
         ctxRef.current = ctx;
       }
-      void ctx.resume();
+      void ctx.resume().catch(() => undefined);
     } catch {
       setError("Audio isn't available in this browser. Type instead.");
       setPhase("idle");
@@ -273,6 +302,13 @@ export function TalkPanel() {
       busyRef.current = false;
       return;
     }
+    // Unmounted or backgrounded while the permission prompt was up: never record in the background.
+    if (unmountedRef.current || document.visibilityState === "hidden") {
+      for (const t of stream.getTracks()) t.stop();
+      if (!unmountedRef.current) setPhase("idle");
+      busyRef.current = false;
+      return;
+    }
     try {
       const frames: Float32Array[] = [];
       const endpointer = new Endpointer();
@@ -293,14 +329,16 @@ export function TalkPanel() {
       rec = { stream, source, node, sink, frames, endpointer, stopping: false };
       recRef.current = rec;
       await ctx.resume();
+      if (unmountedRef.current) throw new Error("unmounted");
       setPhase("listening");
     } catch {
+      releaseMic();
       for (const t of stream.getTracks()) t.stop();
       setError("The microphone couldn't start. Type instead.");
       setPhase("idle");
       busyRef.current = false;
     }
-  }, [finish, stopPlayback]);
+  }, [finish, releaseMic, stopPlayback]);
 
   // Elapsed-time counter while listening.
   useEffect(() => {
@@ -316,7 +354,8 @@ export function TalkPanel() {
   // Stop the mic if the page is hidden mid-recording (no open mic in the background).
   useEffect(() => {
     const onHide = () => {
-      if (document.visibilityState === "hidden" && recRef.current) void finish("tap");
+      // Upload only if something was said; otherwise just turn the mic off.
+      if (document.visibilityState === "hidden" && recRef.current) void finish("hidden");
     };
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);

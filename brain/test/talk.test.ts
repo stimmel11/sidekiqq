@@ -17,7 +17,7 @@ import {
   rms,
 } from "@/lib/talk/audio";
 import { assertContractWav, parseWav } from "@/lib/transcribe/wav";
-import { askFromDashboard, speakFromDashboard, talkFromDashboard } from "@/lib/dashboard/talk";
+import { askFromDashboard, fitForSpeech, speakFromDashboard, talkFromDashboard } from "@/lib/dashboard/talk";
 import { TranscriptionError } from "@/lib/transcribe";
 import { SpeechError } from "@/lib/tts";
 import { makeDeps, msg, ScriptedLLM, toolUse, type TestDeps } from "./fakes";
@@ -128,6 +128,11 @@ describe("PCM16 + WAV", () => {
     const wav = framesToWav([new Float32Array(48_000 * (MAX_SECONDS + 2))], 48_000);
     expect(wav.byteLength).toBe(MAX_WAV_BYTES);
     expect(MAX_WAV_BYTES).toBeLessThan(1024 * 1024); // fits the default 1 MB server action body
+    // ...including the multipart envelope the browser adds around it.
+    const form = new FormData();
+    form.append("audio", new Blob([wav as BlobPart], { type: "audio/wav" }), "talk.wav");
+    form.append("conversationId", "c".repeat(128));
+    return new Response(form).arrayBuffer().then((b) => expect(b.byteLength).toBeLessThan(1024 * 1024));
   });
 
   it("base64 round-trips bytes larger than one chunk", () => {
@@ -323,11 +328,26 @@ describe("speakFromDashboard", () => {
     expect(spokenTexts).toEqual(["Two meetings today."]);
   });
 
-  it("refuses empty or too-long text without calling TTS", async () => {
+  it("refuses empty text without calling TTS", async () => {
     const { deps, spokenTexts } = setup();
     expect((await speakFromDashboard(deps, "  ", key)).ok).toBe(false);
-    expect((await speakFromDashboard(deps, "x".repeat(5_000), key)).ok).toBe(false);
     expect(spokenTexts).toHaveLength(0);
+  });
+
+  it("a too-long reply is spoken as the whole sentences that fit", async () => {
+    const { deps, spokenTexts } = setup();
+    const long = `First sentence here. Second one! ${"word ".repeat(400)}end.`;
+    const out = await speakFromDashboard(deps, long, key);
+    expect(out.ok).toBe(true);
+    expect(spokenTexts).toEqual(["First sentence here. Second one!"]);
+  });
+
+  it("fitForSpeech keeps short text, sentences, then a word boundary", () => {
+    expect(fitForSpeech("Hi there.", 100)).toBe("Hi there.");
+    expect(fitForSpeech("One. Two. Three is long.", 10)).toBe("One. Two.");
+    expect(fitForSpeech("alpha beta gamma delta", 13)).toBe("alpha beta");
+    expect(fitForSpeech("x".repeat(30), 10)).toBe("x".repeat(10));
+    for (const t of ["a. b. c.", "no punctuation at all here", "Wow!!! Really?! Yes."]) for (let m = 1; m < 30; m++) expect(fitForSpeech(t, m).length).toBeLessThanOrEqual(m);
   });
 
   it("a TTS failure is an error, not audio", async () => {

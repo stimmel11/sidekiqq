@@ -20,6 +20,11 @@ function blackman(x: number): number {
   return 0.42 + 0.5 * Math.cos(Math.PI * x) + 0.08 * Math.cos(2 * Math.PI * x);
 }
 
+function gcd(a: number, b: number): number {
+  while (b) [a, b] = [b, a % b];
+  return a;
+}
+
 function sinc(x: number): number {
   if (x === 0) return 1;
   const px = Math.PI * x;
@@ -43,22 +48,54 @@ export function resample(input: Float32Array, inRate: number, outRate: number = 
   const zeroCrossings = 12;
   const half = Math.ceil(zeroCrossings / (2 * fc)); // kernel half-width in input samples
   const gain = 2 * fc;
-  const step = inRate / outRate;
+  const taps = 2 * half;
+
+  // Polyphase table: output sample n sits at input time n·inRate/outRate, whose fractional part
+  // takes only outRate/gcd values (1 for 48 kHz → 16 kHz, 160 for 44.1 kHz). Weights are built
+  // once per phase, so a 30 s utterance costs ~taps multiply-adds per output sample.
+  const g = gcd(inRate, outRate);
+  const phases = outRate / g;
+  const exact = Number.isInteger(inRate) && Number.isInteger(outRate) && phases <= 4096;
+  const kernelAt = (frac: number): Float64Array => {
+    // w[j] multiplies input[center - half + 1 + j]
+    const w = new Float64Array(taps);
+    let norm = 0;
+    for (let j = 0; j < taps; j++) {
+      const d = frac + half - 1 - j;
+      const h = Math.abs(d) >= half ? 0 : gain * sinc(gain * d) * blackman(d / half);
+      w[j] = h;
+      norm += h;
+    }
+    // Normalise by the kernel's DC gain so a constant signal keeps its level.
+    if (norm !== 0) for (let j = 0; j < taps; j++) w[j]! /= norm;
+    return w;
+  };
+  const table: (Float64Array | undefined)[] = exact ? new Array(phases) : [];
 
   for (let n = 0; n < outLen; n++) {
-    const t = n * step;
-    const center = Math.floor(t);
-    let acc = 0;
-    let norm = 0;
-    for (let k = center - half + 1; k <= center + half; k++) {
-      const d = t - k;
-      if (Math.abs(d) >= half) continue;
-      const h = gain * sinc(gain * d) * blackman(d / half);
-      norm += h;
-      if (k >= 0 && k < input.length) acc += input[k]! * h;
+    let center: number;
+    let w: Float64Array;
+    if (exact) {
+      const num = n * inRate; // < 2^53 for any upload we accept
+      center = Math.floor(num / outRate);
+      const p = (num - center * outRate) / g;
+      w = table[p] ??= kernelAt((p * g) / outRate);
+    } else {
+      const t = (n * inRate) / outRate;
+      center = Math.floor(t);
+      w = kernelAt(t - center);
     }
-    // Normalise by the full kernel's DC gain so a constant signal keeps its level.
-    out[n] = norm !== 0 ? acc / norm : 0;
+    const first = center - half + 1;
+    let acc = 0;
+    if (first >= 0 && first + taps <= input.length) {
+      for (let j = 0; j < taps; j++) acc += input[first + j]! * w[j]!;
+    } else {
+      for (let j = 0; j < taps; j++) {
+        const k = first + j;
+        if (k >= 0 && k < input.length) acc += input[k]! * w[j]!;
+      }
+    }
+    out[n] = acc;
   }
   return out;
 }

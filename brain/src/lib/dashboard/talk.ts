@@ -84,12 +84,30 @@ export async function talkFromDashboard(deps: Deps, wav: Uint8Array, conversatio
   return askFromDashboard(deps, text, conversationId, key);
 }
 
+/**
+ * `spoken` is meant to be two sentences, but /api/speak refuses text over SPEAK_MAX_CHARS. Keep the
+ * whole sentences that fit (the full reply is on screen), else cut at a word boundary.
+ */
+export function fitForSpeech(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [text];
+  let out = "";
+  for (const s of sentences) {
+    if ((out + s).trimEnd().length > max) break;
+    out += s;
+  }
+  out = out.trim();
+  if (out) return out;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > max / 2 ? cut.slice(0, space) : cut).trim();
+}
+
 /** The spoken reply as a base64 WAV (24 kHz from OpenAI). Read-only. */
 export async function speakFromDashboard(deps: Deps, text: string, key?: Buffer): Promise<SpeakOutcome> {
   const trimmed = text.trim();
   if (!trimmed) return { ok: false, error: "Nothing to say." };
-  if (trimmed.length > config.speakMaxChars()) return { ok: false, error: "The reply is too long to read aloud." };
-  const res = await requestAsDashboardDevice(deps, speakRoute, "/api/speak", {}, key, { json: { text: trimmed } });
+  const res = await requestAsDashboardDevice(deps, speakRoute, "/api/speak", {}, key, { json: { text: fitForSpeech(trimmed, config.speakMaxChars()) } });
   if (res.status !== 200 || !(res.headers.get("content-type") ?? "").startsWith("audio/wav")) {
     let body: { error?: string; code?: string } = {};
     try {
