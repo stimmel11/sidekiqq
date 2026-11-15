@@ -54,6 +54,40 @@ export interface RouteResult {
   body: { ok?: boolean; error?: string; code?: string } & Record<string, unknown>;
 }
 
+export interface BridgeBody {
+  /** Raw bytes (e.g. a WAV for /api/transcribe) or a JSON-serialisable value. */
+  bytes?: Uint8Array;
+  json?: unknown;
+  contentType?: string;
+}
+
+/**
+ * Call an existing device-authenticated route handler as the dashboard device and return its raw
+ * Response (used for /api/speak, whose reply is audio/wav).
+ */
+export async function requestAsDashboardDevice<P extends Record<string, string>>(
+  deps: Deps,
+  handler: RouteHandler<P>,
+  path: string,
+  params: P,
+  key?: Buffer,
+  body?: BridgeBody,
+): Promise<Response> {
+  const token = await dashboardDeviceToken(deps, key);
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  let payload: BodyInit | undefined;
+  if (body?.bytes) {
+    payload = body.bytes as BodyInit;
+    headers["content-type"] = body.contentType ?? "application/octet-stream";
+    headers["content-length"] = String(body.bytes.byteLength);
+  } else if (body && "json" in body) {
+    payload = JSON.stringify(body.json);
+    headers["content-type"] = body.contentType ?? "application/json";
+  }
+  const req = new NextRequest(new URL(path, config.appUrl()), { method: "POST", headers, body: payload });
+  return handler(req, { params: Promise.resolve(params) });
+}
+
 /** Call an existing device-authenticated route handler as the dashboard device. */
 export async function callAsDashboardDevice<P extends Record<string, string>>(
   deps: Deps,
@@ -61,18 +95,14 @@ export async function callAsDashboardDevice<P extends Record<string, string>>(
   path: string,
   params: P,
   key?: Buffer,
+  body?: BridgeBody,
 ): Promise<RouteResult> {
-  const token = await dashboardDeviceToken(deps, key);
-  const req = new NextRequest(new URL(path, config.appUrl()), {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}` },
-  });
-  const res = await handler(req, { params: Promise.resolve(params) });
-  let body: RouteResult["body"] = {};
+  const res = await requestAsDashboardDevice(deps, handler, path, params, key, body);
+  let parsed: RouteResult["body"] = {};
   try {
-    body = (await res.json()) as RouteResult["body"];
+    parsed = (await res.json()) as RouteResult["body"];
   } catch {
     // non-JSON body; status is enough
   }
-  return { status: res.status, body };
+  return { status: res.status, body: parsed };
 }

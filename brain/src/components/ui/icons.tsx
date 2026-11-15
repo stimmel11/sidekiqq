@@ -28,6 +28,12 @@ export const icons = {
       <circle cx="5" cy="18" r="1.2" />
     </svg>
   ),
+  talk: (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden {...p}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+    </svg>
+  ),
   devices: (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden {...p}>
       <rect x="7" y="2.5" width="10" height="19" rx="2.5" />

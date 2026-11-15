@@ -9,6 +9,8 @@ import { logout, requireOwnerSession } from "@/lib/dashboard/owner";
 import { disconnect, setCapability, startConnect } from "@/lib/connectors/manage";
 import { HttpError } from "@/lib/http";
 import type { ConfirmState } from "@/components/ui/ConfirmDialog";
+import { askFromDashboard, speakFromDashboard, talkFromDashboard, type SpeakOutcome, type TalkOutcome } from "@/lib/dashboard/talk";
+import { MAX_WAV_BYTES } from "@/lib/talk/audio";
 
 /**
  * Dashboard server actions. Each one re-checks the owner session (middleware already did) and
@@ -133,6 +135,46 @@ export async function disconnectConnectorAction(_prev: ConfirmState, form: FormD
   }
   revalidatePath("/dashboard", "layout");
   redirect(`${CONNECTIONS}?done=${revoked ? "disconnected" : "disconnected_local"}`);
+}
+
+// ------------------------------------------------------------------------- talk (web app slice 2b)
+
+/** One recorded turn: `audio` is the 16 kHz WAV the Talk screen encoded. Transcribe, then ask as the `web` device. */
+export async function talkAction(form: FormData): Promise<TalkOutcome> {
+  await requireOwnerSession();
+  const audio = form.get("audio");
+  if (!(audio instanceof Blob)) return { ok: false, error: "Nothing was recorded." };
+  if (audio.size > MAX_WAV_BYTES) return { ok: false, error: "That was too long. Keep it under 30 seconds." };
+  try {
+    return await talkFromDashboard(getDeps(), new Uint8Array(await audio.arrayBuffer()), str(form, "conversationId"));
+  } catch (err) {
+    console.error("[dashboard] talk failed", err);
+    return { ok: false, error: "Something went wrong. Try again." };
+  }
+}
+
+/** The same turn, typed instead of spoken. */
+export async function askTextAction(text: string, conversationId: string | null): Promise<TalkOutcome> {
+  await requireOwnerSession();
+  if (typeof text !== "string") return { ok: false, error: "Type something first." };
+  try {
+    return await askFromDashboard(getDeps(), text, typeof conversationId === "string" ? conversationId : null);
+  } catch (err) {
+    console.error("[dashboard] ask failed", err);
+    return { ok: false, error: "Something went wrong. Try again." };
+  }
+}
+
+/** The reply's `spoken` text as audio. Read-only. */
+export async function speakAction(text: string): Promise<SpeakOutcome> {
+  await requireOwnerSession();
+  if (typeof text !== "string") return { ok: false, error: "Nothing to say." };
+  try {
+    return await speakFromDashboard(getDeps(), text);
+  } catch (err) {
+    console.error("[dashboard] speak failed", err);
+    return { ok: false, error: "The voice reply isn't available right now." };
+  }
 }
 
 export async function logoutAction(): Promise<void> {

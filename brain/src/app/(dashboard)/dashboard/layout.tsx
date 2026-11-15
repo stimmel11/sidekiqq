@@ -12,10 +12,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const counts = await navCounts(getDeps());
   const nav: NavItem[] = [
     { href: "/dashboard", label: "Today", icon: "today" },
+    { href: "/dashboard/talk", label: "Talk", icon: "talk" },
     { href: "/dashboard/followups", label: "Follow-ups", icon: "followups", count: counts.followups, countLabel: "open" },
     { href: "/dashboard/drafts", label: "Drafts", icon: "drafts", count: counts.drafts, countLabel: "awaiting approval" },
     { href: "/dashboard/commitments", label: "Commitments", icon: "commitments", count: counts.overdue, countLabel: "overdue", urgent: true },
-    { href: "/dashboard/devices", label: "Devices", icon: "devices" },
+    { href: "/dashboard/devices", label: "Devices", icon: "devices", tabBar: false },
     { href: "/dashboard/connections", label: "Connections", icon: "connections", tabBar: false },
   ];
   const signOut = (
