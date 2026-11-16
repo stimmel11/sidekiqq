@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { decrypt, encrypt, encryptionKeyFromEnv } from "../crypto";
 import type { Deps } from "../deps";
 import { config } from "../env";
+import type { DeviceRecord } from "../models";
 
 /**
  * The dashboard performs device actions (approve / discard a draft, complete a commitment) by
@@ -47,7 +48,19 @@ export async function dashboardDeviceToken(deps: Deps, key: Buffer = encryptionK
   return token;
 }
 
-type RouteHandler<P> = (req: NextRequest, ctx: { params: Promise<P> }) => Promise<Response>;
+/**
+ * The owner's `web` device record, for a request authenticated by the dashboard session
+ * (`withPrincipal` in lib/auth.ts). Today every signed-in browser shares this one device; one
+ * `web` device per browser comes with v2 sessions (docs/WEBAPP.md §4.1–4.2).
+ */
+export async function dashboardWebDevice(deps: Deps, key?: Buffer): Promise<DeviceRecord> {
+  const device = await deps.repos.devices.findByToken(await dashboardDeviceToken(deps, key));
+  // Just minted or verified above; a concurrent revoke is the only way to get here.
+  if (!device || device.kind !== "web") throw new Error("Dashboard web device is unavailable");
+  return device;
+}
+
+type RouteHandler<P> =(req: NextRequest, ctx: { params: Promise<P> }) => Promise<Response>;
 
 export interface RouteResult {
   status: number;

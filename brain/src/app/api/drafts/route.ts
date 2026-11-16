@@ -1,4 +1,4 @@
-import { withDevice } from "@/lib/auth";
+import { withPrincipal } from "@/lib/auth";
 import { json } from "@/lib/http";
 import { DraftListItemSchema, type Draft } from "@/lib/models";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * for calendar kinds only. A calendar draft whose start has passed is marked discarded here
  * (lazy expiry, docs/CONNECTORS.md §5) and not listed: it could never be approved.
  */
-export const GET = withDevice(async (_req, { deps }) => {
+export const GET = withPrincipal(async (_req, { deps }) => {
   const now = deps.clock().getTime();
   const listed: Draft[] = [];
   for (const d of await deps.repos.drafts.listPending()) {
