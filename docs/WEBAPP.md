@@ -297,6 +297,16 @@ dashboard", kind `phone`). With a `web` device kind (§6.3):
   device that never polls. Until then it is excluded from targeting;
 - `/api/connections*` and other owner routes keep refusing device tokens.
 
+**Status (2026-11-16, slice 2c-i, `crew/web-principal`):** `withPrincipal` + `authenticatePrincipal` +
+fail-closed `requireSameOrigin` (lib/auth.ts; an explicitly set `APP_URL` origin is accepted too, for
+proxies); `GET /api/drafts`, approve and discard use it and the middleware lets the session cookie reach only
+those three paths; approve requires `{ "confirmation" }` = `draftFingerprint` (moved to `lib/confirmation.ts`)
+of the draft re-read under the send lock (400 `confirmation_required`, 409 `changed`). The session maps to the
+single shared "Owner web dashboard" `web` device (the `phone` → `web` migration already shipped in 2a). Still to
+do (2c-ii): one `web` device per browser (with v2 sessions or a session-nonce map; also fixes the first-use
+race that can mint two shared devices), move `/api/ask`, `/api/transcribe`, `/api/speak` and commitments to
+`withPrincipal`, have the dashboard post to approve as a session, then remove the bridge.
+
 **Feeds:** web app slice 2 (device kind), accounts A3 (sessions).
 
 ---

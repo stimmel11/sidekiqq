@@ -16,7 +16,8 @@ import type { DeviceRecord } from "../models";
  *
  * Before the `web` kind existed this device was kind "phone", so phone hand-offs could be queued
  * for it although it never polls. A stored legacy device is revoked and replaced by a `web` one
- * (docs/WEBAPP.md §4.2). This bridge goes away once `withPrincipal` lands (web app slice 2).
+ * (docs/WEBAPP.md §4.2). The approve, discard and list routes now also accept the session directly (`withPrincipal`);
+ * this bridge goes away in slice 2c-ii, once the dashboard posts to them as a session.
  */
 
 export const DASHBOARD_DEVICE_NAME = "Owner web dashboard";
@@ -60,7 +61,7 @@ export async function dashboardWebDevice(deps: Deps, key?: Buffer): Promise<Devi
   return device;
 }
 
-type RouteHandler<P> =(req: NextRequest, ctx: { params: Promise<P> }) => Promise<Response>;
+type RouteHandler<P> = (req: NextRequest, ctx: { params: Promise<P> }) => Promise<Response>;
 
 export interface RouteResult {
   status: number;

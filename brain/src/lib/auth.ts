@@ -82,7 +82,18 @@ export function requireSameOrigin(req: Request): void {
   const origin = req.headers.get("origin");
   if (site === null && origin === null) throw new HttpError(403, "Same-origin request required", "cross_site");
   if (site !== null && site !== "same-origin") throw new HttpError(403, "Cross-site request refused", "cross_site");
-  if (origin !== null && origin !== new URL(req.url).origin) throw new HttpError(403, "Cross-site request refused", "cross_site");
+  if (origin !== null && origin !== new URL(req.url).origin && origin !== appOrigin()) throw new HttpError(403, "Cross-site request refused", "cross_site");
+}
+
+/** An explicitly set APP_URL's origin, for deployments where `req.url` carries an internal host (behind a proxy). */
+function appOrigin(): string | null {
+  const raw = optional("APP_URL");
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
 }
 
 /** Who is calling a device route: a paired device's token, or the owner's dashboard session. */
@@ -102,7 +113,7 @@ export async function authenticatePrincipal(
 ): Promise<Principal> {
   if (req.headers.has("authorization")) return { via: "device", device: await authenticateDevice(req, deps) };
   if (!(await verifySession(cookieValue(req, SESSION_COOKIE), sessionSecretFromEnv(opts.env ?? process.env)))) {
-    throw new HttpError(401, "Missing bearer token", "unauthorized");
+    throw new HttpError(401, "A device token or a signed-in owner session is required", "unauthorized");
   }
   requireSameOrigin(req);
   const device = await dashboardWebDevice(deps, opts.key);
