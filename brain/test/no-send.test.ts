@@ -134,6 +134,13 @@ describe("no route other than draft-approve can send mail (static)", () => {
     expect(files).toContain(SENDER_REGISTRY);
   });
 
+  it("the approve route checks a session's confirmation against the draft re-read under the lock", () => {
+    const src = readFileSync(APPROVE_ROUTE, "utf8");
+    expect(src).toContain("withPrincipal<");
+    expect(src).toMatch(/principal\.via === "session" && confirmation !== draftFingerprint\(fresh\)/);
+    expect(src.indexOf("draftFingerprint(fresh)")).toBeLessThan(src.indexOf("registry.for(fresh)"));
+  });
+
   for (const file of walk(SRC)) {
     const rel = path.relative(SRC, file);
     it(`${rel} contains no send primitives unless allowed`, () => {

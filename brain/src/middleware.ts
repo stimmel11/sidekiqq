@@ -12,6 +12,12 @@ const PUBLIC = ["/api/devices/pair", "/api/google/callback", "/api/google/connec
 const PUBLIC_CONNECTIONS = /^\/api\/connections\/[a-z][a-z0-9-]{0,39}\/(connect|callback)$/;
 /** Owner connection routes also accept the dashboard session cookie (checked in the route, lib/auth.ts). */
 const isConnectionsApi = (p: string) => p === "/api/connections" || p.startsWith("/api/connections/");
+/**
+ * Device routes on `withPrincipal` (lib/auth.ts): a device token or the dashboard session cookie,
+ * verified in the route (plus the fail-closed same-origin check and, on approve, the confirmation
+ * fingerprint). Add a route here only once it uses withPrincipal (docs/WEBAPP.md §4.2).
+ */
+const PRINCIPAL_ROUTES = /^\/api\/drafts(\/[A-Za-z0-9_-]{1,64}\/(approve|discard))?$/;
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -20,6 +26,7 @@ export function middleware(req: NextRequest) {
   if (PUBLIC.includes(pathname)) return apiNext();
   if (PUBLIC_CONNECTIONS.test(pathname)) return apiNext();
   if (isConnectionsApi(pathname) && req.cookies.has(SESSION_COOKIE)) return apiNext();
+  if (PRINCIPAL_ROUTES.test(pathname) && req.cookies.has(SESSION_COOKIE)) return apiNext();
   const hasAuth = /^Bearer\s+\S+/i.test(req.headers.get("authorization") ?? "") || req.headers.has("x-owner-secret") || req.headers.has("x-cron-secret");
   if (!hasAuth) return NextResponse.json({ error: "Missing bearer token", code: "unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   return apiNext();

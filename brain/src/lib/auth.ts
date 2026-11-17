@@ -5,6 +5,7 @@ import { safeEqual } from "./crypto";
 import { bearerToken, errorResponse, HttpError } from "./http";
 import type { DeviceRecord } from "./models";
 import { SESSION_COOKIE, sessionSecretFromEnv, verifySession } from "./dashboard/session";
+import { dashboardWebDevice } from "./dashboard/device-bridge";
 
 /**
  * Auth middleware for route handlers. Next's edge `middleware.ts` only checks that a
@@ -68,6 +69,58 @@ export async function requireOwnerOrSession(req: Request, env: Record<string, st
   return "session";
 }
 
+/**
+ * Fail-closed CSRF check for session-authenticated device routes (docs/WEBAPP.md §4): on every
+ * non-GET the browser must say the request is same-origin. A cross-site `Sec-Fetch-Site` or
+ * `Origin` is refused, and so is a request that carries neither header (unlike
+ * requireOwnerOrSession, which lets that through). Every browser that can hold the
+ * SameSite=Strict session cookie sends at least one of them on a POST.
+ */
+export function requireSameOrigin(req: Request): void {
+  if (req.method === "GET" || req.method === "HEAD") return;
+  const site = req.headers.get("sec-fetch-site");
+  const origin = req.headers.get("origin");
+  if (site === null && origin === null) throw new HttpError(403, "Same-origin request required", "cross_site");
+  if (site !== null && site !== "same-origin") throw new HttpError(403, "Cross-site request refused", "cross_site");
+  if (origin !== null && origin !== new URL(req.url).origin && origin !== appOrigin()) throw new HttpError(403, "Cross-site request refused", "cross_site");
+}
+
+/** An explicitly set APP_URL's origin, for deployments where `req.url` carries an internal host (behind a proxy). */
+function appOrigin(): string | null {
+  const raw = optional("APP_URL");
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Who is calling a device route: a paired device's token, or the owner's dashboard session. */
+export type Principal = { via: "device" | "session"; device: DeviceRecord };
+
+/**
+ * `withPrincipal` auth (docs/WEBAPP.md §4.2). An `Authorization` header means a device token and
+ * nothing else (a cookie next to it is ignored; the owner secret is not a device token). With no
+ * `Authorization` header, a valid dashboard session cookie plus the fail-closed same-origin check
+ * yields the owner's `web` device. Session callers get extra checks in the routes that need them
+ * (the approve route requires the confirmation fingerprint).
+ */
+export async function authenticatePrincipal(
+  req: Request,
+  deps: Deps = getDeps(),
+  opts: { env?: Record<string, string | undefined>; key?: Buffer } = {},
+): Promise<Principal> {
+  if (req.headers.has("authorization")) return { via: "device", device: await authenticateDevice(req, deps) };
+  if (!(await verifySession(cookieValue(req, SESSION_COOKIE), sessionSecretFromEnv(opts.env ?? process.env)))) {
+    throw new HttpError(401, "A device token or a signed-in owner session is required", "unauthorized");
+  }
+  requireSameOrigin(req);
+  const device = await dashboardWebDevice(deps, opts.key);
+  deps.repos.devices.touch(device.id).catch(() => undefined);
+  return { via: "session", device };
+}
+
 /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET`; `X-Cron-Secret` is accepted for manual runs. */
 export function requireCron(req: Request): void {
   const secret = optional("CRON_SECRET");
@@ -91,6 +144,26 @@ export function withDevice<P = Record<string, never>>(
       const device = await authenticateDevice(req, deps);
       const params = ctx?.params ? await ctx.params : ({} as P);
       return await handler(req, { device, deps, params });
+    } catch (err) {
+      return errorResponse(err);
+    }
+  };
+}
+
+/**
+ * Like withDevice, but also accepts the owner's dashboard session (see authenticatePrincipal).
+ * `principal.via` tells the handler which one; `device` is the device token's record or the
+ * owner's `web` device. Only routes listed in middleware's `PRINCIPAL_ROUTES` receive cookies.
+ */
+export function withPrincipal<P = Record<string, never>>(
+  handler: (req: NextRequest, ctx: { device: DeviceRecord; principal: Principal; deps: Deps; params: P }) => Promise<Response>,
+) {
+  return async (req: NextRequest, ctx: RouteCtx<P>): Promise<Response> => {
+    try {
+      const deps = getDeps();
+      const principal = await authenticatePrincipal(req, deps);
+      const params = ctx?.params ? await ctx.params : ({} as P);
+      return await handler(req, { device: principal.device, principal, deps, params });
     } catch (err) {
       return errorResponse(err);
     }

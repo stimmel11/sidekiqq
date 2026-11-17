@@ -1,7 +1,7 @@
 import { POST as approveRoute } from "@/app/api/drafts/[id]/approve/route";
 import { POST as discardRoute } from "@/app/api/drafts/[id]/discard/route";
 import { POST as completeRoute } from "@/app/api/commitments/[id]/complete/route";
-import { sha256 } from "../crypto";
+import { draftFingerprint } from "../confirmation";
 import type { Deps } from "../deps";
 import type { Draft } from "../models";
 import { callAsDashboardDevice, type RouteResult } from "./device-bridge";
@@ -18,12 +18,7 @@ import { callAsDashboardDevice, type RouteResult } from "./device-bridge";
 
 export const CONFIRM_VALUE = "send";
 
-export function draftFingerprint(d: Pick<Draft, "id" | "to" | "cc" | "subject" | "body"> & Partial<Pick<Draft, "kind" | "when" | "location" | "conference">>): string {
-  const kind = d.kind ?? "email";
-  if (kind === "email") return sha256(JSON.stringify(["v1", d.id, d.to, d.cc ?? [], d.subject, d.body]));
-  // Calendar kinds: what the dialog shows also includes the time, the place and the video link.
-  return sha256(JSON.stringify(["v2", kind, d.id, d.to, d.cc ?? [], d.subject, d.body, d.when ?? null, d.location ?? null, d.conference ?? null]));
-}
+export { draftFingerprint };
 
 export type ApprovalCheck = { ok: true } | { ok: false; status: number; error: string };
 

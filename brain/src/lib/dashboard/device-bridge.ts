@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { decrypt, encrypt, encryptionKeyFromEnv } from "../crypto";
 import type { Deps } from "../deps";
 import { config } from "../env";
+import type { DeviceRecord } from "../models";
 
 /**
  * The dashboard performs device actions (approve / discard a draft, complete a commitment) by
@@ -15,7 +16,8 @@ import { config } from "../env";
  *
  * Before the `web` kind existed this device was kind "phone", so phone hand-offs could be queued
  * for it although it never polls. A stored legacy device is revoked and replaced by a `web` one
- * (docs/WEBAPP.md §4.2). This bridge goes away once `withPrincipal` lands (web app slice 2).
+ * (docs/WEBAPP.md §4.2). The approve, discard and list routes now also accept the session directly (`withPrincipal`);
+ * this bridge goes away in slice 2c-ii, once the dashboard posts to them as a session.
  */
 
 export const DASHBOARD_DEVICE_NAME = "Owner web dashboard";
@@ -45,6 +47,18 @@ export async function dashboardDeviceToken(deps: Deps, key: Buffer = encryptionK
     if (d.id !== device.id && !d.revoked && d.kind === "phone" && d.name === DASHBOARD_DEVICE_NAME) await deps.repos.devices.revoke(d.id);
   }
   return token;
+}
+
+/**
+ * The owner's `web` device record, for a request authenticated by the dashboard session
+ * (`withPrincipal` in lib/auth.ts). Today every signed-in browser shares this one device; one
+ * `web` device per browser comes with v2 sessions (docs/WEBAPP.md §4.1–4.2).
+ */
+export async function dashboardWebDevice(deps: Deps, key?: Buffer): Promise<DeviceRecord> {
+  const device = await deps.repos.devices.findByToken(await dashboardDeviceToken(deps, key));
+  // Just minted or verified above; a concurrent revoke is the only way to get here.
+  if (!device || device.kind !== "web") throw new Error("Dashboard web device is unavailable");
+  return device;
 }
 
 type RouteHandler<P> = (req: NextRequest, ctx: { params: Promise<P> }) => Promise<Response>;

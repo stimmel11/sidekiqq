@@ -29,6 +29,13 @@ the thinking.
 
 ## Brain API contract (all JSON, all require `Authorization: Bearer <device token>`)
 
+Exception (web app slice 2c-i, `withPrincipal`): `GET /api/drafts`, `POST /api/drafts/:id/approve` and
+`POST /api/drafts/:id/discard` also accept the owner's dashboard session cookie when no `Authorization` header
+is sent (any `Authorization` header means a device token only; a bad one is 401, never a cookie fallback). A
+session write must be same-origin: `Sec-Fetch-Site: same-origin` and/or `Origin` equal to the brain's origin;
+both headers missing, or either one cross-site, is 403 `cross_site`. The session acts as the owner's `web`
+device ("approved on web").
+
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | POST | /api/ask | `{ "text": string, "device": "watch"\|"glasses"\|"medallion"\|"phone"\|"reachy"\|"web", "conversationId"?: string }` | `{ "reply": string, "spoken": string, "conversationId": string, "actions": Action[] }`. `device` must be the caller's own kind; a `phone` token may also send `medallion`, `glasses` or `watch` (it relays for them, and a watch set up from the phone shares its token). Anything else is 400 `device_mismatch` |
@@ -39,7 +46,7 @@ the thinking.
 | GET | /api/commitments?status=open\|overdue\|all | – | `{ "items": Commitment[] }` |
 | POST | /api/commitments/:id/complete | – | `{ "ok": true }` |
 | GET | /api/drafts | – | `{ "items": DraftItem[] }` — pending drafts awaiting approval. Speak or show `readback` before asking for confirmation. Calendar drafts whose start has passed are marked discarded and not listed |
-| POST | /api/drafts/:id/approve | – | `{ "ok": true, "warning"?: string }` (`warning`: sent, but not exactly as read back, e.g. "no Meet link"; show/speak it) — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 410 `expired` (a calendar invite whose start time has passed; marked discarded), 422 `unsupported_kind` (no executor for this kind yet), `no_provider_draft` (email) or `invalid_draft` (other kinds), 422 `provider_refused` (the provider definitely refused it, e.g. missing calendar permission; still pending); nothing is sent on any error |
+| POST | /api/drafts/:id/approve | – (device token); `{ "confirmation": string }` (session: `draftFingerprint` of what the confirm dialog showed, `lib/confirmation.ts`) | `{ "ok": true, "warning"?: string }` (`warning`: sent, but not exactly as read back, e.g. "no Meet link"; show/speak it) — the ONLY path that sends a message, and only after user approval. 409 `not_pending` / `in_progress`, 409 `changed_in_provider` (To/Cc/Bcc/Subject edited in Gmail since the read-back; marked discarded, nothing sent), 410 `gone` (the provider draft is gone; marked discarded), 410 `expired` (a calendar invite whose start time has passed; marked discarded), 422 `unsupported_kind` (no executor for this kind yet), `no_provider_draft` (email) or `invalid_draft` (other kinds), 422 `provider_refused` (the provider definitely refused it, e.g. missing calendar permission; still pending); session only: 400 `confirmation_required` (missing/malformed), 409 `changed` (fingerprint doesn't match the draft re-read under the send lock; still pending), 403 `cross_site`; nothing is sent on any error |
 | POST | /api/drafts/:id/discard | – | `{ "ok": true }` — marks a pending draft discarded. Never sends |
 | GET | /api/alerts?since=<cursor>&limit=<1..100> | – | `{ "items": Alert[], "cursor": string, "more": boolean }` — the proactive alerts that FCM pushes carry, for devices without FCM. Oldest first; no `since` = last 24 h; `more` = call again now |
 | POST | /api/speak | `{ "text": string (<= SPEAK_MAX_CHARS, default 1000), "voice"?: "alloy"\|"ash"\|"ballad"\|"coral"\|"echo"\|"fable"\|"nova"\|"onyx"\|"sage"\|"shimmer"\|"verse" }` | `audio/wav` bytes: PCM 16-bit LE, mono, 24 kHz (rate also in `X-Sample-Rate`). 413 if text is too long |

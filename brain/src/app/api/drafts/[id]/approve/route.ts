@@ -1,4 +1,5 @@
-import { withDevice } from "@/lib/auth";
+import { withPrincipal } from "@/lib/auth";
+import { draftFingerprint } from "@/lib/confirmation";
 import { HttpError, json } from "@/lib/http";
 import { ProviderRefusedError } from "@/lib/connectors/types";
 
@@ -11,17 +12,23 @@ export const maxDuration = 30;
  * Devices call this only after an explicit owner confirmation.
  *
  * Guards, in order:
- *  1. Authenticated device (withDevice).
+ *  1. Authenticated principal (withPrincipal): a paired device token, or the owner's dashboard
+ *     session with a same-origin request (fail-closed CSRF check).
  *  2. Draft exists in our store and is still "pending" (not sent/discarded).
  *  3. Per-draft lock so a double-tap cannot send twice.
+ *  3a. Session principals only: the body's `confirmation` must equal `draftFingerprint` of the
+ *     draft as re-read under the lock (else 400 confirmation_required / 409 changed). Devices
+ *     confirm on the device ("send it" / tap), so their body is ignored (docs/WEBAPP.md §4.2).
  *  4. A sender is registered for the draft's (connectorId, kind) (else 422 unsupported_kind).
  *  5. The sender's check passes. For Gmail: the draft still exists (else 410 gone) and its To, Cc,
  *     Bcc and Subject still match what the read-back described (else 409 changed_in_provider);
  *     a record with no Gmail draft id is 422 no_provider_draft. For a calendar invite: the start
  *     time is still in the future (else 410 expired, marked discarded).
  */
-export const POST = withDevice<{ id: string }>(async (_req, { deps, params, device }) => {
+export const POST = withPrincipal<{ id: string }>(async (req, { deps, params, device, principal }) => {
   const { drafts, followups, timeline, state } = deps.repos;
+  // A browser must prove which version of the draft its confirm dialog showed.
+  const confirmation = principal.via === "session" ? await readConfirmation(req) : null;
 
   const draft = await drafts.get(params.id);
   if (!draft) throw new HttpError(404, "Draft not found", "not_found");
@@ -32,6 +39,9 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
     // Re-read under the lock to close the check-then-act window.
     const fresh = await drafts.get(draft.id);
     if (!fresh || fresh.status !== "pending") throw new HttpError(409, "Draft is no longer pending", "not_pending");
+    if (principal.via === "session" && confirmation !== draftFingerprint(fresh)) {
+      throw new HttpError(409, "The draft changed after it was shown. Review it again before sending.", "changed");
+    }
 
     // The sender registry is the only place that can execute a draft (docs/CONNECTORS.md §6).
     const registry = deps.senders();
@@ -80,3 +90,18 @@ export const POST = withDevice<{ id: string }>(async (_req, { deps, params, devi
     await drafts.releaseSendLock(draft.id);
   }
 });
+
+/** `{ "confirmation": <64 hex chars> }`; anything else is 400 confirmation_required (nothing sent). */
+async function readConfirmation(req: Request): Promise<string> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    body = null;
+  }
+  const c = body && typeof body === "object" ? (body as { confirmation?: unknown }).confirmation : undefined;
+  if (typeof c !== "string" || !/^[0-9a-f]{64}$/.test(c)) {
+    throw new HttpError(400, "Confirm the draft in the send dialog first", "confirmation_required");
+  }
+  return c;
+}
