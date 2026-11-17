@@ -281,7 +281,7 @@ describe("session principal: the owner's web device", () => {
 });
 
 describe("middleware: the session cookie reaches only withPrincipal and connections routes", () => {
-  it("lets the cookie through to the drafts routes only", async () => {
+  it("lets the cookie through to the drafts routes (other withPrincipal routes: web-principal-routes.test.ts)", async () => {
     const value = (await signSession(SESSION_SECRET)).value;
     const mk = (path: string, withCookie: boolean, method = "POST") => {
       const headers = new Headers();
@@ -296,7 +296,7 @@ describe("middleware: the session cookie reaches only withPrincipal and connecti
     for (const p of ["/api/drafts/drf_abc123/approve", "/api/drafts"]) expect((await middleware(mk(p, false))).status).toBe(401);
     const basic = new NextRequest(new URL("/api/drafts/drf_abc123/approve", "https://brain.example"), { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${value}`, authorization: "Basic eA==" } });
     expect(await passes(basic)).toBe(true); // the route then refuses it: an Authorization header means a device token only
-    for (const p of ["/api/drafts/drf_abc123", "/api/drafts/drf_abc123/approve/x", "/api/drafts/a.b/approve", "/api/ask", "/api/transcribe", "/api/commands", "/api/commitments/c1/complete"]) {
+    for (const p of ["/api/drafts/drf_abc123", "/api/drafts/drf_abc123/approve/x", "/api/drafts/a.b/approve", "/api/commands"]) {
       expect((await middleware(mk(p, true))).status, p).toBe(401);
     }
   });

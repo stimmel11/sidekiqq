@@ -1,4 +1,4 @@
-import { withDevice } from "@/lib/auth";
+import { withPrincipal } from "@/lib/auth";
 import { HttpError, json } from "@/lib/http";
 import { TranscriptionError } from "@/lib/transcribe";
 import { assertContractWav, parseWav, WavError } from "@/lib/transcribe/wav";
@@ -10,7 +10,7 @@ export const maxDuration = 60;
 /** 16 kHz * 2 bytes * 120 s + header: generous cap for a single utterance. */
 const MAX_BYTES = 16_000 * 2 * 120 + 1024;
 
-export const POST = withDevice(async (req, { deps }) => {
+export const POST = withPrincipal(async (req, { deps }) => {
   const type = (req.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type && !["audio/wav", "audio/x-wav", "audio/wave", "application/octet-stream"].includes(type)) {
     throw new HttpError(415, "Content-Type must be audio/wav");

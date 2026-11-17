@@ -29,12 +29,13 @@ the thinking.
 
 ## Brain API contract (all JSON, all require `Authorization: Bearer <device token>`)
 
-Exception (web app slice 2c-i, `withPrincipal`): `GET /api/drafts`, `POST /api/drafts/:id/approve` and
-`POST /api/drafts/:id/discard` also accept the owner's dashboard session cookie when no `Authorization` header
+Exception (web app slices 2c-i and 2c-ii-a, `withPrincipal`): `GET /api/drafts`, `POST /api/drafts/:id/approve`,
+`POST /api/drafts/:id/discard`, `POST /api/ask`, `POST /api/transcribe`, `POST /api/speak`, `GET /api/commitments`
+and `POST /api/commitments/:id/complete` also accept the owner's dashboard session cookie when no `Authorization` header
 is sent (any `Authorization` header means a device token only; a bad one is 401, never a cookie fallback). A
-session write must be same-origin: `Sec-Fetch-Site: same-origin` and/or `Origin` equal to the brain's origin;
+session write must be same-origin: `Sec-Fetch-Site: same-origin` and/or `Origin` equal to the brain's origin (or the configured `APP_URL` origin);
 both headers missing, or either one cross-site, is 403 `cross_site`. The session acts as the owner's `web`
-device ("approved on web").
+device ("approved on web"), so `/api/ask` with a session accepts only `"device": "web"` (400 `device_mismatch`).
 
 | Method | Path | Body | Returns |
 |---|---|---|---|

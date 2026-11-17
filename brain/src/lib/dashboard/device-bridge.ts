@@ -16,7 +16,7 @@ import type { DeviceRecord } from "../models";
  *
  * Before the `web` kind existed this device was kind "phone", so phone hand-offs could be queued
  * for it although it never polls. A stored legacy device is revoked and replaced by a `web` one
- * (docs/WEBAPP.md §4.2). The approve, discard and list routes now also accept the session directly (`withPrincipal`);
+ * (docs/WEBAPP.md §4.2). The drafts, ask, transcribe, speak and commitments routes now also accept the session directly (`withPrincipal`);
  * this bridge goes away in slice 2c-ii, once the dashboard posts to them as a session.
  */
 
