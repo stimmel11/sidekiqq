@@ -19,6 +19,9 @@ import type { ContactLookup, ContactQuery } from "@/lib/google/contacts";
 import { buildSenders } from "@/lib/connectors/senders";
 import type { CreateParams, LLM } from "@/lib/assistant/llm";
 import type { PushMessage, PushSender } from "@/lib/push";
+import type { WebPushOptions, WebPushOutcome, WebPushSender } from "@/lib/push/webpush";
+import { WebPushStore } from "@/lib/push/webpush-store";
+import type { WebPushSubscription } from "@/lib/models";
 import type { Transcriber } from "@/lib/transcribe";
 import type { SpeechSynthesizer } from "@/lib/tts";
 import { pcm16ToWav } from "@/lib/tts";
@@ -167,6 +170,20 @@ export class FakePush implements PushSender {
   }
 }
 
+/** Records Web Push sends; `outcomes` maps an endpoint to what the push service "returns". */
+export class FakeWebPush implements WebPushSender {
+  enabled = true;
+  readonly publicKey = "BFakeVapidPublicKey";
+  sent: { sub: WebPushSubscription; payload: string; opts: WebPushOptions }[] = [];
+  outcomes = new Map<string, WebPushOutcome>();
+  error: Error | null = null;
+  async send(sub: WebPushSubscription, payload: string, opts: WebPushOptions): Promise<WebPushOutcome> {
+    if (this.error) throw this.error;
+    this.sent.push({ sub, payload, opts });
+    return this.outcomes.get(sub.endpoint) ?? { status: "sent" };
+  }
+}
+
 /** Scripted LLM: each call returns the next response (or computes it from params). */
 export class ScriptedLLM implements LLM {
   calls: CreateParams[] = [];
@@ -207,6 +224,7 @@ export interface TestDeps extends Deps {
   sender: SpyMailSender;
   inviter: SpyCalendarInviter;
   pushFake: FakePush;
+  webPushFake: FakeWebPush;
   zoom: FakeZoomRooms;
   setNow(d: Date): void;
 }
@@ -237,6 +255,7 @@ export function makeDeps(
   const sender = new SpyMailSender();
   const inviter = new SpyCalendarInviter();
   const pushFake = new FakePush();
+  const webPushFake = new FakeWebPush();
   const zoom = new FakeZoomRooms();
   let zoomAuth: ZoomAuth | null | undefined; // one shared instance, like buildDeps
   const connected = opts.googleConnected ?? true;
@@ -268,6 +287,8 @@ export function makeDeps(
     zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
     senders: () => buildSenders({ google: { workspace, mailer: async () => sender, calendar: async () => inviter }, clock }),
     push: () => pushFake,
+    webPush: () => webPushFake,
+    webPushSubs: new WebPushStore(kv, "t", () => ({ current: key })),
     transcriber: () =>
       opts.transcriber ?? {
         name: "fake",
@@ -283,6 +304,7 @@ export function makeDeps(
     sender,
     inviter,
     pushFake,
+    webPushFake,
     zoom,
     setNow: (d: Date) => {
       now = d;

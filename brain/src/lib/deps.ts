@@ -15,6 +15,8 @@ import { buildSenders, type SenderRegistry } from "./connectors/senders";
 import type { Connector } from "./connectors/types";
 import { llmFromEnv, type LLM } from "./assistant/llm";
 import { pushSenderFromEnv, type PushSender } from "./push";
+import { webPushSenderFromEnv, type WebPushSender } from "./push/webpush";
+import { WebPushStore } from "./push/webpush-store";
 import { transcriberFromEnv, type Transcriber } from "./transcribe";
 import { speechSynthesizerFromEnv, type SpeechSynthesizer } from "./tts";
 
@@ -42,6 +44,10 @@ export interface Deps {
   /** SENDER REGISTRY. Must only be used by /api/drafts/[id]/approve (see test/no-send.test.ts). */
   senders(): SenderRegistry;
   push(): PushSender;
+  /** Web Push (VAPID) to browsers; disabled when VAPID_* aren't set. */
+  webPush(): WebPushSender;
+  /** Browsers' Web Push subscriptions, sealed with TOKEN_ENCRYPTION_KEY. */
+  webPushSubs: WebPushStore;
   transcriber(): Transcriber;
   /** Text-to-speech for devices that play audio themselves (Reachy Mini). */
   tts(): SpeechSynthesizer;
@@ -63,6 +69,7 @@ export function buildDeps(kv: KV): Deps {
   const googleTokens = new GoogleTokenStore(connections);
   let llm: LLM | null = null;
   let push: PushSender | null = null;
+  let webPush: WebPushSender | null = null;
   const googleWorkspace = async () => new GoogleWorkspace(await googleTokens.authorizedClient());
   const googleContacts = async () => new GoogleContacts(googlePeopleApi(await googleTokens.authorizedClient()));
   // Zoom is registered only when ZOOM_CLIENT_ID/ZOOM_CLIENT_SECRET are set.
@@ -94,6 +101,8 @@ export function buildDeps(kv: KV): Deps {
         clock,
       })),
     push: () => (push ??= pushSenderFromEnv()),
+    webPush: () => (webPush ??= webPushSenderFromEnv()),
+    webPushSubs: new WebPushStore(kv, prefix, keyRingFromEnv),
     transcriber: () => transcriberFromEnv(),
     tts: () => speechSynthesizerFromEnv(),
   };

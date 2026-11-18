@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { buildReadback } from "./connectors/readback";
+import { MAX_PUSH_ENDPOINT_LENGTH, isAllowedPushEndpoint, isValidP256dh, isValidPushAuth } from "./push/endpoint";
 
 /**
  * Contract models (ARCHITECTURE.md). These are BINDING: Kotlin clients mirror them.
@@ -250,10 +251,34 @@ export const SpeakRequestSchema = z.object({
 });
 export type SpeakRequest = z.infer<typeof SpeakRequestSchema>;
 
-export const RegisterDeviceSchema = z.object({
+/** A browser's PushSubscription (`subscription.toJSON()`), checked against the endpoint allowlist. */
+export const WebPushSubscriptionSchema = z.object({
+  endpoint: z
+    .string()
+    .max(MAX_PUSH_ENDPOINT_LENGTH)
+    .refine(isAllowedPushEndpoint, { message: "endpoint must be https on a known browser push service" }),
+  keys: z.object({
+    p256dh: z.string().max(128).refine(isValidP256dh, { message: "keys.p256dh must be a base64url P-256 public key" }).transform((s) => s.replace(/=+$/, "")),
+    auth: z.string().max(64).refine(isValidPushAuth, { message: "keys.auth must be a base64url 16-byte secret" }).transform((s) => s.replace(/=+$/, "")),
+  }),
+});
+export type WebPushSubscription = z.infer<typeof WebPushSubscriptionSchema>;
+
+export const PUSH_TRANSPORTS = ["fcm", "webpush"] as const;
+
+/** `transport` defaults to "fcm", so the native apps' `{ fcmToken, device }` body is unchanged. */
+export const FcmRegisterSchema = z.object({
+  transport: z.literal("fcm").default("fcm"),
   fcmToken: z.string().trim().min(1).max(4096),
   device: z.string().trim().min(1).max(64),
 });
+/** Browsers (`web` devices) only (docs/WEBAPP.md §5). */
+export const WebPushRegisterSchema = z.object({
+  transport: z.literal("webpush"),
+  subscription: WebPushSubscriptionSchema,
+});
+export const RegisterDeviceSchema = z.union([WebPushRegisterSchema, FcmRegisterSchema]);
+export type RegisterDeviceRequest = z.infer<typeof RegisterDeviceSchema>;
 
 // ---- Internal (server-side) records ----
 

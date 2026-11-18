@@ -273,10 +273,13 @@ describe("service worker: offline shell only", () => {
     expect([...sw.stores.keys()].sort()).toEqual(["other-cache", "sk-shell-test"]);
   });
 
-  it("the worker source has no background sync, push or message handlers", () => {
+  it("the worker source has no background sync or message handlers (push alerts only, web app slice 3)", () => {
     const src = swTemplate();
-    expect(src).not.toMatch(/addEventListener\(\s*["'](sync|periodicsync|push|message|notificationclick)["']/);
+    expect(src).not.toMatch(/addEventListener\(\s*["'](sync|periodicsync|message|notificationclose|pushsubscriptionchange)["']/);
+    const handlers = [...src.matchAll(/addEventListener\(\s*["']([a-z]+)["']/g)].map((m) => m[1]).sort();
+    expect(handlers).toEqual(["activate", "fetch", "install", "notificationclick", "push"]);
     expect(src).not.toMatch(/approve/);
+    expect(src).not.toMatch(/\bactions\s*:/); // no notification actions
   });
 });
 

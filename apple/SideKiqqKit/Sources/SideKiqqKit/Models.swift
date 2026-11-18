@@ -457,7 +457,10 @@ public struct PairResponse: Codable, Hashable, Sendable {
     }
 }
 
-/** `POST /api/devices/register`. The field is named `fcmToken` by the contract; an APNs token goes here later. */
+/**
+ * `POST /api/devices/register`, FCM form. The field is named `fcmToken` by the contract; an APNs token goes here later
+ * (as `transport: "apns"`). The brain's `transport` defaults to `"fcm"`, so it is omitted; `"webpush"` is browser-only.
+ */
 public struct RegisterDeviceRequest: Codable, Hashable, Sendable {
     public var fcmToken: String
     public var device: String
