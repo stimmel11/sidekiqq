@@ -107,7 +107,7 @@ describe("connections routes: owner only (docs/CONNECTORS.md §9)", () => {
     expect((await middleware(mk("/api/connections", true))).headers.get("x-middleware-next")).toBe("1");
     expect((await middleware(mk("/api/connections/google/disconnect", true))).headers.get("x-middleware-next")).toBe("1");
     expect((await middleware(mk("/api/connections", false))).status).toBe(401);
-    expect((await middleware(mk("/api/commitments", true))).status).toBe(401);
+    expect((await middleware(mk("/api/followups", true))).status).toBe(401);
     expect((await middleware(mk("/api/connections/google/callback", false))).headers.get("x-middleware-next")).toBe("1");
     expect((await middleware(mk("/api/connections/google/connect", false))).headers.get("x-middleware-next")).toBe("1");
     expect((await middleware(mk("/api/connections/google/disconnect", false))).status).toBe(401);

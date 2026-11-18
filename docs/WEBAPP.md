@@ -307,6 +307,14 @@ do (2c-ii): one `web` device per browser (with v2 sessions or a session-nonce ma
 race that can mint two shared devices), move `/api/ask`, `/api/transcribe`, `/api/speak` and commitments to
 `withPrincipal`, have the dashboard post to approve as a session, then remove the bridge.
 
+**Status (2026-11-17, slice 2c-ii-a, `crew/web-principal-routes`):** `/api/ask`, `/api/transcribe`, `/api/speak`,
+`GET /api/commitments` and `POST /api/commitments/:id/complete` are on `withPrincipal`, and middleware's
+`PRINCIPAL_ROUTES` lets the session cookie reach exactly those paths (plus the drafts routes). Session writes get the
+same fail-closed same-origin check; a session asks only as `web`. The dashboard still uses the in-process bridge for
+now. Remaining (2c-ii-b and later): the Talk screen posts to these routes from the browser (lifting the 30 s
+server-action cap), the Drafts dialog posts `{ confirmation }` to approve as a session, commitments complete from the
+browser, then remove `device-bridge.ts`; one `web` device per browser after that.
+
 **Feeds:** web app slice 2 (device kind), accounts A3 (sessions).
 
 ---
