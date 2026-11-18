@@ -1,5 +1,5 @@
 /*
- * SideKiqq service worker: offline shell ONLY (docs/WEBAPP.md §1.1).
+ * SideKiqq service worker: offline shell ONLY (docs/WEBAPP.md §1.1), plus alert notifications (§5).
  * Template: GET /service-worker (src/app/service-worker/route.ts) serves this file with __SK_BUILD__ replaced by the
  * deploy id, so every deploy changes the worker's bytes, the browser reinstalls it, and activate
  * drops the previous deploy's cache (old /_next/static chunks included).
@@ -15,6 +15,11 @@
  * Set-Cookie, a forbidden response header; what keeps cookie-bearing responses out is that only the
  * precache list and /_next/static/* are ever stored.)
  * The precached manifest and icons follow the spec's allowlist; the fetch handler doesn't serve them.
+ *
+ * Web Push (docs/WEBAPP.md §5): `push` always shows a notification (no silent pushes) built only
+ * from the payload's title/body/kind. A tap opens or focuses a same-origin dashboard path picked
+ * from ALERT_PATHS by `kind`; a URL in the payload is never used. No notification actions, so
+ * nothing can be confirmed or sent from a notification.
  */
 "use strict";
 
@@ -96,4 +101,76 @@ self.addEventListener("fetch", (event) => {
   }
   if (isShellNavigation(req, url)) event.respondWith(networkOrOffline(req));
   // Everything else (/api/*, /auth/*, callbacks, RSC, images, the manifest) goes to the network as if no worker existed.
+});
+
+// ---- Web Push alerts -------------------------------------------------------------------------
+
+const ALERT_PATHS = {
+  email: "/dashboard",
+  commitment_overdue: "/dashboard/commitments",
+  connection_needs_reauth: "/dashboard/connections",
+};
+const DEFAULT_ALERT_PATH = "/dashboard";
+const ALERT_TITLE_MAX = 120;
+const ALERT_BODY_MAX = 600;
+
+function alertPath(kind) {
+  return typeof kind === "string" && Object.prototype.hasOwnProperty.call(ALERT_PATHS, kind) ? ALERT_PATHS[kind] : DEFAULT_ALERT_PATH;
+}
+
+function clipText(v, max) {
+  if (typeof v !== "string") return "";
+  const t = v.trim();
+  return t.length <= max ? t : t.slice(0, max - 1) + "\u2026";
+}
+
+/** Only title/body/kind are read from the payload; a bad payload still shows a generic alert. */
+function alertFromPush(data) {
+  let d = null;
+  try {
+    d = data ? data.json() : null;
+  } catch (err) {
+    d = null;
+  }
+  if (!d || typeof d !== "object") d = {};
+  const kind = typeof d.kind === "string" && Object.prototype.hasOwnProperty.call(ALERT_PATHS, d.kind) ? d.kind : null;
+  return {
+    title: clipText(d.title, ALERT_TITLE_MAX) || "SideKiqq",
+    options: {
+      body: clipText(d.body, ALERT_BODY_MAX) || "You have a new alert.",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      tag: kind ? "sk-" + kind : "sk-alert",
+      renotify: true,
+      requireInteraction: d.importance === "CRITICAL",
+      data: { kind: kind },
+    },
+  };
+}
+
+self.addEventListener("push", (event) => {
+  const alert = alertFromPush(event.data);
+  event.waitUntil(self.registration.showNotification(alert.title, alert.options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  const path = alertPath(data && data.kind);
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      for (const w of windows) {
+        let u = null;
+        try {
+          u = new URL(w.url);
+        } catch (err) {
+          u = null;
+        }
+        if (u && u.origin === self.location.origin && (u.pathname === "/dashboard" || u.pathname.startsWith("/dashboard/"))) {
+          return w.focus().then((fw) => (fw && typeof fw.navigate === "function" ? fw.navigate(path) : fw));
+        }
+      }
+      return self.clients.openWindow(path);
+    }),
+  );
 });

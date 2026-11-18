@@ -215,6 +215,10 @@ data class ItemsResponse<T>(val items: List<T> = emptyList())
 @Serializable
 data class OkResponse(val ok: Boolean = false)
 
+/**
+ * POST /api/devices/register, FCM form. The brain's `transport` field defaults to "fcm", so native apps
+ * omit it. `transport: "webpush"` is for browsers (`web` devices) only and has no Kotlin model.
+ */
 @Serializable
 data class RegisterDeviceRequest(val fcmToken: String, val device: Device)
 

@@ -351,6 +351,21 @@ race that can mint two shared devices), move `/api/ask`, `/api/transcribe`, `/ap
 
 **Feeds:** web app slice 3.
 
+**Status (slice 3a, 2026-11-18, `crew/web-push`):** brain side and service worker done.
+`POST /api/devices/register` takes `transport: "webpush"` from `web` devices only (FCM refused for them), with the
+endpoint allowlist and key checks in the schema (`lib/push/endpoint.ts`) and again before every send. Subscriptions
+live in `WebPushStore` (`lib/push/webpush-store.ts`), sealed with `TOKEN_ENCRYPTION_KEY` and bound to the device id
+(A4 moves this to the tenant DEK), with a per-prefix `webpush:ep:<sha256>` index that moves an endpoint to the newest
+device (A2 makes it the global `g:push:` index). `deliverAlert` sends Web Push first and never lets it block FCM or
+the log; 404/410 clear, 429 sets a `webpush:backoff:` key for Retry-After (60 s–1 h), 400/413/5xx keep. `web-push`
+3.6.7 (pinned) sends; VAPID_* unset = off. The worker's `push`/`notificationclick` handlers follow the bullets above
+(`email` → `/dashboard`, `commitment_overdue` → `/dashboard/commitments`, `connection_needs_reauth` →
+`/dashboard/connections`). **Remaining (3b):** the "Turn on alerts" button (tap only) and the iOS "Add to Home
+Screen" hint, handing the page the VAPID public key, registering from the dashboard session (needs one `web` device
+per browser from slice 2c-ii and `/api/devices/register` on `withPrincipal`), turning alerts off (clear the
+subscription; also on device revoke), the 60 s `/api/alerts` fallback while open, and the "Alerts hide content"
+setting. Not tried against a real push service yet.
+
 ---
 
 ## 6. Browser tap-to-talk

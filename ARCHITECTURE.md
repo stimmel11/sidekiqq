@@ -53,7 +53,7 @@ device ("approved on web").
 | POST | /api/commands | `CreateCommandRequest` | `201 { "command": DeviceCommand, "deviceId": string, "device": DeviceKind }`. Queues a command started on this device to run on another. 400 bad fields/URL/number, 404 unknown `target.deviceId`, 409 no device that can run it (`no_target_device`, `wrong_target`), 429 `queue_full` |
 | GET | /api/commands?limit=<1..50> | – | `{ "items": DeviceCommand[] }` — this device's pending, unexpired commands, oldest first. A command stays listed until acked or expired, so dedupe by `id` |
 | POST | /api/commands/:id/ack | `{ "result": "opened"\|"dismissed"\|"failed" }` | `{ "ok": true }`. Target device only (others get 404). Same result again is a no-op; a different one is 409; `opened` after `expiresAt` is 410 |
-| POST | /api/devices/register | `{ "fcmToken": string, "device": string }` | `{ "ok": true }` |
+| POST | /api/devices/register | `{ "transport"?: "fcm", "fcmToken": string, "device": string }` (native apps; `transport` defaults to `"fcm"`), or `{ "transport": "webpush", "subscription": { "endpoint": string, "keys": { "p256dh": string, "auth": string } } }` (`web` devices only) | `{ "ok": true }`. 400 `transport_not_allowed` (webpush from a non-`web` device, or FCM from a `web` device); 400 if the endpoint is not `https` on a browser push service (`fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.apple.com`, `*.notify.windows.com`; no credentials or port); 503 `webpush_disabled` (VAPID not configured). A subscription belongs to one device; registering it elsewhere moves it |
 | POST | /api/cron/scan | (Vercel Cron, secret header) | scans Gmail, extracts commitments, pushes alerts |
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
@@ -93,6 +93,12 @@ no `title`/`body`, sent only to the target device of a newly queued command (see
 `kind` first and never show, relay or log it as an alert.
 Every alert is also written to a 7-day alert log (`lib/push/alerts.ts` → `deliverAlert`), so `GET /api/alerts`
 returns exactly the same title/body/data as the push.
+Web Push (browsers, `web` devices; `lib/push/web-alerts.ts`): every alert also goes to each subscribed `web` device as
+an encrypted VAPID push with the JSON payload `{ title, body, kind?, importance?, messageId?, threadId?, commitmentId? }`
+(no `client`, no draft content, no URLs), TTL 24 h, `Urgency: high` for CRITICAL. The service worker always shows a
+notification (no silent web pushes, so the command nudge never goes to browsers) with no actions; a tap opens a fixed
+dashboard path chosen by `kind`. 404/410 clear the subscription, 429 backs that endpoint off for Retry-After, other
+errors keep it.
 
 ### Models (TypeScript names; Kotlin mirrors them in /android/shared)
 ```ts

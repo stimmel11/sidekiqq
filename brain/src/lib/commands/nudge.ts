@@ -19,7 +19,9 @@ export const NUDGE_TIMEOUT_MS = 3_000;
 export type NudgeResult = "sent" | "no_token" | "push_disabled" | "failed";
 
 export async function nudgeCommandTarget(deps: Deps, target: DeviceRecord, commandId: string): Promise<NudgeResult> {
-  if (target.revoked || !target.fcmToken) return "no_token";
+  // Never to browsers: every web push must show a notification (docs/WEBAPP.md §5), and a `web`
+  // device can't hold an FCM token anyway (POST /api/devices/register refuses it).
+  if (target.revoked || target.kind === "web" || !target.fcmToken) return "no_token";
   const push = deps.push();
   if (!push.enabled) return "push_disabled";
   const token = target.fcmToken;

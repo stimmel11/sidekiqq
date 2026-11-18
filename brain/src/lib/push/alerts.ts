@@ -1,11 +1,13 @@
 import type { Deps } from "../deps";
 import { AlertKindSchema, ImportanceSchema } from "../models";
 import type { PushMessage } from "./index";
+import { deliverWebPush } from "./web-alerts";
 
 /**
  * The single place a proactive alert is delivered. It is written to the alert log first (so
  * polling devices such as Reachy Mini get exactly the same title/body/data as the push), then
- * sent over FCM to every device with a push token.
+ * sent over Web Push to every subscribed browser (`web` device) and over FCM to every device with
+ * a push token.
  *
  * Returns 1 if the alert reached at least one channel (logged counts), else 0.
  */
@@ -35,10 +37,13 @@ export async function deliverAlert(deps: Deps, msg: PushMessage): Promise<number
     console.warn(`[alerts] not logging alert with unknown kind "${data.kind}"`);
   }
 
+  // Browsers first: deliverWebPush never throws, so an FCM outage can't stop web alerts.
+  const web = await deliverWebPush(deps, msg);
+
   const push = deps.push();
   const tokens = await deps.repos.devices.pushTokens();
-  if (!tokens.length) return logged ? 1 : 0;
+  if (!tokens.length) return logged || web.sent > 0 ? 1 : 0;
   const res = await push.send(tokens, msg);
   for (const t of res.invalidTokens) await deps.repos.devices.clearFcmToken(t);
-  return logged || res.sent > 0 || !push.enabled ? 1 : 0;
+  return logged || web.sent > 0 || res.sent > 0 || !push.enabled ? 1 : 0;
 }
