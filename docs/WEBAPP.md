@@ -363,8 +363,10 @@ the log; 404/410 clear, 429 sets a `webpush:backoff:` key for Retry-After (60 sâ
 `/dashboard/connections`). **Remaining (3b):** the "Turn on alerts" button (tap only) and the iOS "Add to Home
 Screen" hint, handing the page the VAPID public key, registering from the dashboard session (needs one `web` device
 per browser from slice 2c-ii and `/api/devices/register` on `withPrincipal`), turning alerts off (clear the
-subscription; also on device revoke), the 60 s `/api/alerts` fallback while open, and the "Alerts hide content"
-setting. Not tried against a real push service yet.
+subscription; also on device revoke), a `pushsubscriptionchange` handler (re-register a rotated subscription), the
+60 s `/api/alerts` fallback while open, and the "Alerts hide content" setting. Known gap: if a sealed record can't be
+decrypted (key rotated without `_PREV`), its endpoint index entry lingers until that endpoint is registered again.
+Not tried against a real push service yet.
 
 ---
 

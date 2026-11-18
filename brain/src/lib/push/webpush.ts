@@ -128,11 +128,23 @@ export function isValidVapidSubject(s: string): boolean {
   }
 }
 
+/** Same shape checks web-push's setVapidDetails makes: a 65-byte uncompressed public key and a 32-byte private key. */
+export function isValidVapidKeyPair(pub: string, priv: string): boolean {
+  const b64 = /^[A-Za-z0-9_-]+=*$/;
+  if (!b64.test(pub) || !b64.test(priv)) return false;
+  const p = Buffer.from(pub, "base64url");
+  return p.length === 65 && p[0] === 0x04 && Buffer.from(priv, "base64url").length === 32;
+}
+
 export function webPushSenderFromEnv(): WebPushSender {
   const pub = optional("VAPID_PUBLIC_KEY");
   const priv = optional("VAPID_PRIVATE_KEY");
   const subject = optional("VAPID_SUBJECT");
   if (!pub || !priv || !subject) return new NoopWebPushSender();
+  if (!isValidVapidKeyPair(pub, priv)) {
+    console.error("[webpush] VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY are not a base64url P-256 key pair; Web Push is off");
+    return new NoopWebPushSender();
+  }
   if (!isValidVapidSubject(subject)) {
     console.error("[webpush] VAPID_SUBJECT must be mailto:<address> or an https URL; Web Push is off");
     return new NoopWebPushSender();

@@ -66,7 +66,13 @@ describe("Web Push endpoint allowlist", () => {
     ["https://a..push.apple.com/x", "not_a_url"],
     ["https://fcm.googleapis.com./x", "host"],
     ["https://127.0.0.1/x", "host"],
-    ["https://[::1]/x", "port"],
+    ["https://[::1]/x", "host"],
+    ["https://127.0.0.1%2enotify.windows.com/a", "host"],
+    ["https://localhost%2Epush.apple.com/x", "host"],
+    ["https://169.254.169.254%2Epush.apple.com/x", "host"],
+    ["https://fcm%2Egoogleapis.com/x", "host"],
+    ["https:/fcm.googleapis.com/x", "not_a_url"],
+    ["https:fcm.googleapis.com/x", "not_a_url"],
     ["https://localhost/x", "host"],
     ["https://fcm.googleapis.com/x y", "not_a_url"],
     ["https://fcm.googleapis.com\\@evil.example/x", "not_a_url"],
@@ -382,15 +388,21 @@ describe("VapidWebPushSender", () => {
 
   it("from env: off unless all three VAPID vars are set and the subject is valid", () => {
     expect(webPushSenderFromEnv()).toBeInstanceOf(NoopWebPushSender);
+    const pub = Buffer.concat([Buffer.from([4]), randomBytes(64)]).toString("base64url");
+    const priv = randomBytes(32).toString("base64url");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubEnv("VAPID_PUBLIC_KEY", "pub");
     vi.stubEnv("VAPID_PRIVATE_KEY", "priv");
+    vi.stubEnv("VAPID_SUBJECT", "mailto:owner@example.com");
+    expect(webPushSenderFromEnv().enabled).toBe(false); // malformed keys
+    vi.stubEnv("VAPID_PUBLIC_KEY", pub);
+    vi.stubEnv("VAPID_PRIVATE_KEY", priv);
     vi.stubEnv("VAPID_SUBJECT", "owner@example.com");
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(webPushSenderFromEnv().enabled).toBe(false);
+    expect(webPushSenderFromEnv().enabled).toBe(false); // bad subject
     vi.stubEnv("VAPID_SUBJECT", "mailto:owner@example.com");
     const s = webPushSenderFromEnv();
     expect(s.enabled).toBe(true);
-    expect(s.publicKey).toBe("pub");
+    expect(s.publicKey).toBe(pub);
   });
 });
 
@@ -430,12 +442,13 @@ describe("WebPushStore", () => {
 
 const ORIGIN = "https://app.sidekiqq.test";
 
-function loadPushWorker(windows: { url: string }[] = []) {
+function loadPushWorker(windows: { url: string; navigateThrows?: boolean }[] = []) {
   const listeners: Record<string, ((e: any) => void)[]> = {};
   const shown: { title: string; options: any }[] = [];
   const opened: string[] = [];
   const navigated: string[] = [];
   const focused: string[] = [];
+  const matchOpts: any[] = [];
   const clientWindows = windows.map((w) => ({
     url: w.url,
     focus: async function (this: any) {
@@ -443,6 +456,7 @@ function loadPushWorker(windows: { url: string }[] = []) {
       return this;
     },
     navigate: async (p: string) => {
+      if (w.navigateThrows) throw new TypeError("not controlled");
       navigated.push(p);
       return null;
     },
@@ -458,7 +472,10 @@ function loadPushWorker(windows: { url: string }[] = []) {
     },
     clients: {
       claim: async () => undefined,
-      matchAll: async () => clientWindows,
+      matchAll: async (opts: any) => {
+        matchOpts.push(opts);
+        return clientWindows;
+      },
       openWindow: async (p: string) => {
         opened.push(p);
         return null;
@@ -487,7 +504,7 @@ function loadPushWorker(windows: { url: string }[] = []) {
     await p;
     return closed;
   }
-  return { push, click, shown, opened, navigated, focused };
+  return { push, click, shown, opened, navigated, focused, matchOpts };
 }
 
 describe("service worker: push alerts", () => {
@@ -553,5 +570,31 @@ describe("the real web-push library accepts our request", () => {
     expect(String(details.headers.Authorization)).toMatch(/^vapid t=.+, k=/);
     expect(Buffer.isBuffer(details.body)).toBe(true);
     expect(details.body!.toString()).not.toContain("email"); // encrypted
+  });
+});
+
+describe("service worker: push alerts (review fixes)", () => {
+  it("tags by the alert's own id, so separate alerts don't replace each other", async () => {
+    const w = loadPushWorker();
+    await w.push({ title: "a", body: "b", kind: "email", messageId: "m1" });
+    await w.push({ title: "a", body: "b", kind: "email", messageId: "m2" });
+    await w.push({ title: "a", body: "b", kind: "email" });
+    await w.push({ title: "a", body: "b", kind: "email", messageId: "bad id<" });
+    expect(w.shown.map((s) => s.options.tag)).toEqual(["sk-email-m1", "sk-email-m2", undefined, undefined]);
+  });
+
+  it("only looks at controlled windows, and doesn't reload one already on the path", async () => {
+    const w = loadPushWorker([{ url: `${ORIGIN}/dashboard/commitments` }]);
+    await w.click({ kind: "commitment_overdue" });
+    expect(w.matchOpts[0]).not.toHaveProperty("includeUncontrolled");
+    expect(w.focused).toEqual([`${ORIGIN}/dashboard/commitments`]);
+    expect(w.navigated).toEqual([]);
+    expect(w.opened).toEqual([]);
+  });
+
+  it("falls back to opening a window when navigate fails", async () => {
+    const w = loadPushWorker([{ url: `${ORIGIN}/dashboard`, navigateThrows: true }]);
+    await w.click({ kind: "connection_needs_reauth" });
+    expect(w.opened).toEqual(["/dashboard/connections"]);
   });
 });

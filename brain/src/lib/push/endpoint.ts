@@ -23,6 +23,16 @@ export function pushEndpointProblem(endpoint: string): PushEndpointProblem | nul
   if (endpoint.length > MAX_PUSH_ENDPOINT_LENGTH) return "too_long";
   // Reject whitespace and control characters outright: URL() would silently strip some of them.
   if (/[\s\u0000-\u001f\u007f\\]/.test(endpoint)) return "not_a_url";
+  // The authority must be plain host characters. WHATWG URL percent-decodes a host, but web-push
+  // sends with the legacy url.parse, which cuts it at the first "%": `https://127.0.0.1%2epush.apple.com/`
+  // would pass the check below and connect to 127.0.0.1. So no "%", "@", ":", "[" or anything else.
+  const authority = /^https:\/\/([^/?#]*)/i.exec(endpoint)?.[1];
+  if (authority === undefined) return /^https:/i.test(endpoint) ? "not_a_url" : "not_https";
+  if (!/^[A-Za-z0-9.-]+$/.test(authority)) {
+    if (authority.includes("@")) return "credentials";
+    if (/:\d*$/.test(authority) && !authority.includes("[")) return "port";
+    return "host";
+  }
   let url: URL;
   try {
     url = new URL(endpoint);

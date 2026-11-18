@@ -52,6 +52,18 @@ export function webPushUrgency(msg: PushMessage): "high" | "normal" {
   return msg.data?.importance === "CRITICAL" ? "high" : "normal";
 }
 
+/** Whole-send cap per browser (web-push's own timeout is a socket idle timeout), so FCM isn't held up. */
+export const WEB_PUSH_TOTAL_TIMEOUT_MS = 6_000;
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | { status: "failed" }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<{ status: "failed" }>((resolve) => (timer = setTimeout(() => resolve({ status: "failed" }), ms)))]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface WebPushDelivery {
   sent: number;
   attempted: number;
@@ -78,7 +90,7 @@ export async function deliverWebPush(deps: Deps, msg: PushMessage): Promise<WebP
           if (!sub) return;
           if (await deps.webPushSubs.backingOff(sub.endpoint)) return;
           result.attempted++;
-          const outcome: WebPushOutcome = await sender.send(sub, payload, opts);
+          const outcome: WebPushOutcome = await withTimeout(sender.send(sub, payload, opts), WEB_PUSH_TOTAL_TIMEOUT_MS);
           switch (outcome.status) {
             case "sent":
               result.sent++;
