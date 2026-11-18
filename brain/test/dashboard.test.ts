@@ -134,9 +134,9 @@ describe("dashboard middleware protection", () => {
     expect((await middleware(get("/dashboard", t.value))).status).toBe(303);
   });
 
-  it("a session cookie does not authenticate the device API", async () => {
+  it("a session cookie does not authenticate device-only routes", async () => {
     const t = await signSession(SECRET);
-    const res = await middleware(get("/api/commitments", t.value));
+    const res = await middleware(get("/api/followups", t.value));
     expect(res.status).toBe(401);
   });
 

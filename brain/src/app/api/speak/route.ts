@@ -1,4 +1,4 @@
-import { withDevice } from "@/lib/auth";
+import { withPrincipal } from "@/lib/auth";
 import { config } from "@/lib/env";
 import { HttpError, parseJson } from "@/lib/http";
 import { SpeakRequestSchema } from "@/lib/models";
@@ -14,7 +14,7 @@ export const maxDuration = 60;
  * SPEAK_MAX_CHARS (default 1000); longer text gets 413 so the device can split at sentences.
  * Read-only: this never sends anything.
  */
-export const POST = withDevice(async (req, { deps }) => {
+export const POST = withPrincipal(async (req, { deps }) => {
   const body = await parseJson(req, SpeakRequestSchema);
   const max = config.speakMaxChars();
   if (body.text.length > max) throw new HttpError(413, `text too long (max ${max} characters)`, "text_too_long");
