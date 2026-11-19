@@ -344,9 +344,13 @@ describe("GET /api/drafts with invites", () => {
 
 describe("dashboard approval of an invite", () => {
   it("the fingerprint covers time, place and Meet; the approve route does the rest", async () => {
-    const { CONFIRM_VALUE, approveDraftFromDashboard, draftFingerprint } = await import("@/lib/dashboard/approval");
+    const { draftFingerprint } = await import("@/lib/confirmation");
+    const { approveDraft } = await import("@/lib/dashboard/browser-api");
+    const { sessionFetch } = await import("./session-fetch");
     const { randomBytes } = await import("node:crypto");
-    const key = randomBytes(32);
+    process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef";
+    process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+    const f = await sessionFetch();
     const { deps } = await setup();
     const out = await prepareCalendarInvite(deps, invite({ conference: "meet" }), { caller: "dashboard" });
     const d = (await deps.repos.drafts.get(out.draftId))!;
@@ -354,17 +358,22 @@ describe("dashboard approval of an invite", () => {
     const stale = draftFingerprint({ ...d, when: { start: "2026-11-03T22:00:00.000Z", end: "2026-11-03T22:30:00.000Z" } });
     expect(stale).not.toBe(draftFingerprint(d));
     expect(draftFingerprint({ ...d, conference: undefined })).not.toBe(draftFingerprint(d));
-    expect(await approveDraftFromDashboard(deps, d.id, { confirm: CONFIRM_VALUE, confirmation: stale }, key)).toMatchObject({ ok: false });
+    expect(await approveDraft(d.id, stale, f)).toMatchObject({ ok: false, error: expect.stringMatching(/changed after you opened it/) });
     expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
 
     deps.setNow(new Date("2026-11-03T21:05:00Z"));
-    const late = await approveDraftFromDashboard(deps, d.id, { confirm: CONFIRM_VALUE, confirmation: draftFingerprint(d) }, key);
-    expect(late).toMatchObject({ ok: false, error: expect.stringMatching(/start time has passed/) });
-    expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
+    try {
+      const late = await approveDraft(d.id, draftFingerprint(d), f);
+      expect(late).toMatchObject({ ok: false, error: expect.stringMatching(/start time has passed/) });
+      expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.SESSION_SECRET;
+      delete process.env.TOKEN_ENCRYPTION_KEY;
+    }
   });
 
   it("an email's fingerprint is unchanged by this slice (v1)", async () => {
-    const { draftFingerprint } = await import("@/lib/dashboard/approval");
+    const { draftFingerprint } = await import("@/lib/confirmation");
     const { sha256 } = await import("@/lib/crypto");
     const d = { id: "drf_1", to: ["a@b.co"], cc: [], subject: "s", body: "b" };
     expect(draftFingerprint(d)).toBe(sha256(JSON.stringify(["v1", "drf_1", ["a@b.co"], [], "s", "b"])));
