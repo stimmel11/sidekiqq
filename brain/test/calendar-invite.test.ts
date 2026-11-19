@@ -350,6 +350,7 @@ describe("dashboard approval of an invite", () => {
     const { randomBytes } = await import("node:crypto");
     process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef";
     process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+    try {
     const f = await sessionFetch();
     const { deps } = await setup();
     const out = await prepareCalendarInvite(deps, invite({ conference: "meet" }), { caller: "dashboard" });
@@ -362,10 +363,9 @@ describe("dashboard approval of an invite", () => {
     expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
 
     deps.setNow(new Date("2026-11-03T21:05:00Z"));
-    try {
-      const late = await approveDraft(d.id, draftFingerprint(d), f);
-      expect(late).toMatchObject({ ok: false, error: expect.stringMatching(/start time has passed/) });
-      expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
+    const late = await approveDraft(d.id, draftFingerprint(d), f);
+    expect(late).toMatchObject({ ok: false, error: expect.stringMatching(/start time has passed/) });
+    expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
     } finally {
       delete process.env.SESSION_SECRET;
       delete process.env.TOKEN_ENCRYPTION_KEY;

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { buttonClass } from "@/components/ui/Button";
-import { completeCommitment } from "@/lib/dashboard/browser-api";
+import { SESSION_EXPIRED, completeCommitment } from "@/lib/dashboard/browser-api";
 
 function Submit({ what }: { what: string }) {
   const { pending } = useFormStatus();
@@ -20,6 +20,10 @@ export function CompleteButton({ id, what, back }: { id: string; what: string; b
   const router = useRouter();
   async function complete(): Promise<void> {
     const r = await completeCommitment(id);
+    if (!r.ok && r.error === SESSION_EXPIRED) {
+      router.replace(`/login?next=${encodeURIComponent(`/dashboard/commitments?status=${back}`)}`);
+      return;
+    }
     router.replace(`/dashboard/commitments?status=${back}&done=${r.ok ? "completed" : "error"}`);
     router.refresh();
   }

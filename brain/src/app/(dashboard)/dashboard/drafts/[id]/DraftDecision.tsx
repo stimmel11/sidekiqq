@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { ConfirmDialog, type ConfirmState } from "@/components/ui/ConfirmDialog";
-import { approveDraft, discardDraft } from "@/lib/dashboard/browser-api";
+import { SESSION_EXPIRED, approveDraft, discardDraft } from "@/lib/dashboard/browser-api";
 
 type Props = {
   id: string;
@@ -23,21 +23,35 @@ type Props = {
  */
 export function DraftDecision({ id, confirmation, invite, approvable, approveBody, discardBody }: Props) {
   const router = useRouter();
+  // Once a decision succeeded, further clicks (before navigation commits) do nothing.
+  const settled = useRef(false);
 
-  async function finish(done: "sent" | "discarded"): Promise<ConfirmState> {
+  async function finish(done: "sent" | "sent_warning" | "discarded"): Promise<ConfirmState> {
+    settled.current = true;
     router.replace(`/dashboard/drafts?done=${done}`);
     router.refresh();
     return undefined;
   }
 
   async function onApprove(): Promise<ConfirmState> {
+    if (settled.current) return undefined;
     const r = await approveDraft(id, confirmation);
-    return r.ok ? finish("sent") : { error: r.error };
+    if (!r.ok) return unauthorized(r.error) ?? { error: r.error };
+    // The route's warning (ARCHITECTURE.md: show or speak it) becomes a fixed notice on Drafts.
+    return finish(r.warning ? "sent_warning" : "sent");
   }
 
   async function onDiscard(): Promise<ConfirmState> {
+    if (settled.current) return undefined;
     const r = await discardDraft(id);
-    return r.ok ? finish("discarded") : { error: r.error };
+    return r.ok ? finish("discarded") : (unauthorized(r.error) ?? { error: r.error });
+  }
+
+  /** An expired session goes to sign-in (and back to this draft); nothing was changed. */
+  function unauthorized(error: string): ConfirmState | null {
+    if (error !== SESSION_EXPIRED) return null;
+    router.replace(`/login?next=${encodeURIComponent(`/dashboard/drafts/${id}`)}`);
+    return { error };
   }
 
   return (

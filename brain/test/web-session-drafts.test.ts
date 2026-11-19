@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { draftFingerprint } from "@/lib/confirmation";
 import { invokeCapability } from "@/lib/connectors/invoke";
-import { CODE_MESSAGES, approveDraft, completeCommitment, discardDraft, outcomeFor, type FetchLike } from "@/lib/dashboard/browser-api";
+import { CODE_MESSAGES, SESSION_EXPIRED, approveDraft, completeCommitment, discardDraft, outcomeFor, type FetchLike } from "@/lib/dashboard/browser-api";
 import { makeDeps, type TestDeps } from "./fakes";
 import { sessionFetch } from "./session-fetch";
 
@@ -131,6 +131,20 @@ describe("outcomes", () => {
     const f = vi.fn<FetchLike>().mockRejectedValue(new TypeError("Failed to fetch"));
     const r = await approveDraft("drf_1", "a".repeat(64), f);
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/result is unknown/) });
+  });
+
+  it("a gateway error or timeout on approve is also 'result unknown' (Gmail may have sent it)", async () => {
+    for (const status of [502, 504]) {
+      const { f } = recorder(status, "<html>gateway</html>");
+      expect(await approveDraft("drf_1", "a".repeat(64), f)).toMatchObject({ ok: false, error: expect.stringMatching(/result is unknown/) });
+    }
+    const { f } = recorder(503, {});
+    expect((await approveDraft("drf_1", "a".repeat(64), f)) as { error: string }).toMatchObject({ error: expect.stringMatching(/nothing was sent/) });
+  });
+
+  it("a 401 is the SESSION_EXPIRED message the components send to sign-in", async () => {
+    const { f } = recorder(401, { code: "unauthorized", error: "x" });
+    expect(await completeCommitment("cmt_1", f)).toEqual({ ok: false, error: SESSION_EXPIRED });
   });
 
   it("maps codes first, then status, then the route's message", () => {

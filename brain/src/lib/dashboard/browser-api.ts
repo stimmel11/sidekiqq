@@ -19,6 +19,12 @@ export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const FINGERPRINT = /^[0-9a-f]{64}$/;
 
+/** The 401 message; callers compare against it to send the owner to sign-in. */
+export const SESSION_EXPIRED = "Your session has expired. Sign in again; nothing was changed.";
+
+/** For approve, when the request may or may not have reached the provider. */
+const RESULT_UNKNOWN = "Couldn't reach SideKiqq, so the result is unknown. Check Drafts (and Gmail Sent or your calendar) before trying again.";
+
 const CONFIRM_FIRST = "Confirm the draft in the send dialog first. Nothing was sent.";
 
 /** Route error codes whose own message is the one to show (more specific than the status). */
@@ -34,7 +40,7 @@ export const CODE_MESSAGES: Record<string, string> = {
   not_pending: "This draft is no longer pending. Reload to see what happened to it.",
   in_progress: "This draft is already being sent. Reload in a moment to check.",
   gone: "The Gmail draft was deleted, so nothing was sent. It has been marked discarded.",
-  unauthorized: "Your session has expired. Sign in again; nothing was changed.",
+  unauthorized: SESSION_EXPIRED,
   cross_site: "The request was refused by the browser check; nothing was changed. Reload the page and try again.",
 };
 
@@ -43,7 +49,10 @@ const APPROVE_STATUS: Record<number, string> = {
   409: "This draft is already being sent or is no longer pending.",
   410: "The Gmail draft was deleted, so nothing was sent. It has been marked discarded.",
   500: "The server reported an error. Check Drafts and Gmail before trying again.",
+  // A gateway error or timeout in front of the route: Gmail may already have sent it.
+  502: RESULT_UNKNOWN,
   503: "Gmail isn't connected or the server isn't configured, so nothing was sent.",
+  504: RESULT_UNKNOWN,
 };
 
 /** Turn a route reply into an outcome. Unknown codes fall back to the status, then the route's message. */
@@ -96,7 +105,7 @@ export async function approveDraft(id: string, confirmation: string, fetchFn: Fe
     { confirmation },
     APPROVE_STATUS,
     // The request may or may not have reached the server.
-    "Couldn't reach SideKiqq, so the result is unknown. Reload Drafts to check before trying again.",
+    RESULT_UNKNOWN,
   );
 }
 
