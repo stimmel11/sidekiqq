@@ -456,6 +456,15 @@ and ARCHITECTURE.md, including `/api/ask`'s `device` field. Native clients must 
 - `rel="noopener noreferrer"` and `target="_blank"` on https links; `tel:` opens the dialer, which
   still needs the owner's Call tap.
 
+**Status (2026-11-20, slice 4, `crew/web-handoffs`):** `COMMAND_TARGETS` lets `open_url`/`call_contact` target `web`
+(default: newest phone, else newest `web`); `reachy_start` stays phone-only. `GET /api/commands` and the ack are on
+`withPrincipal` (middleware `PRINCIPAL_ROUTES`), `POST /api/commands` stays device-only. The allowlist and the browser
+re-checks live in client-safe `lib/commands/links.ts`; `components/handoffs/HandoffCards.tsx` (in the dashboard layout,
+so on every screen) polls, shows label + number/host + link, acks `opened` on the tap (keepalive), `dismissed` on
+Dismiss, and `failed` once for a command that fails a check. The assistant's `call_on_phone` / `open_on_phone` notes
+say "waiting in the web app" when that's where it went. Until one `web` device per browser exists (§4.2), every
+signed-in browser shares the one dashboard device, so all of them show the same hand-offs.
+
 **Feeds:** web app slice 4.
 
 ---
