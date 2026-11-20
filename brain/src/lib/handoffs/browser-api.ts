@@ -80,3 +80,25 @@ export async function ackHandoff(id: string, result: CommandResult, fetchImpl: F
     return false;
   }
 }
+
+/**
+ * Next card list from the latest GET reply. Drops what the owner already acted on. Liveness is
+ * what the server lists, not this browser's clock (ARCHITECTURE.md: a skewed clock must not hide
+ * a live hand-off). A card acked `failed` (it failed the browser's check) stays until the owner
+ * dismisses it, even after the server stops listing it, so it never vanishes unexplained; it has
+ * no link, so the local clock only bounds how long it lingers.
+ */
+export function mergeHandoffs(
+  prev: HandoffItem[],
+  server: HandoffItem[],
+  done: ReadonlySet<string>,
+  failedAcked: ReadonlySet<string>,
+  now: number = Date.now(),
+): HandoffItem[] {
+  const next = server.filter((c) => !done.has(c.id));
+  const ids = new Set(next.map((c) => c.id));
+  for (const c of prev) {
+    if (failedAcked.has(c.id) && !ids.has(c.id) && !done.has(c.id) && Date.parse(c.expiresAt) > now) next.push(c);
+  }
+  return next;
+}

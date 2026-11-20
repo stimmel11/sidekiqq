@@ -9,7 +9,7 @@ import { checkNumber, checkOpenUrl, handoffLink } from "@/lib/commands/links";
 import { handoffCapability } from "@/lib/connectors/handoff";
 import { SESSION_COOKIE, signSession } from "@/lib/dashboard/session";
 import { dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
-import { ackHandoff, fetchHandoffs } from "@/lib/handoffs/browser-api";
+import { ackHandoff, fetchHandoffs, mergeHandoffs } from "@/lib/handoffs/browser-api";
 import type { DeviceRecord } from "@/lib/models";
 import { middleware } from "@/middleware";
 import { GET as listCommands, POST as createCommand } from "@/app/api/commands/route";
@@ -266,5 +266,26 @@ describe("browser client (lib/handoffs/browser-api.ts)", () => {
     expect(code).toMatch(/rel: "noopener noreferrer"/);
     // The card shows the label as text only.
     expect(code).not.toMatch(/dangerouslySetInnerHTML/);
+  });
+});
+
+describe("mergeHandoffs (card list after a poll)", () => {
+  const item = (id: string, expiresAt = "2026-11-20T10:15:00.000Z") => ({ id, kind: "call_contact", label: id, expiresAt });
+  const NOW = Date.parse("2026-11-20T10:00:00.000Z");
+
+  it("drops acted-on cards and follows the server's list, not the local clock", () => {
+    const server = [item("a"), item("b", "2026-11-20T09:00:00.000Z")];
+    // "b" looks expired to this clock but the server still lists it: still shown.
+    expect(mergeHandoffs([], server, new Set(["a"]), new Set(), NOW).map((c) => c.id)).toEqual(["b"]);
+    expect(mergeHandoffs([item("x")], [], new Set(), new Set(), NOW)).toEqual([]);
+  });
+
+  it("keeps a failed card until it's dismissed or expired, even once the server drops it", () => {
+    const failed = new Set(["f"]);
+    expect(mergeHandoffs([item("f")], [], new Set(), failed, NOW).map((c) => c.id)).toEqual(["f"]);
+    expect(mergeHandoffs([item("f")], [], new Set(["f"]), failed, NOW)).toEqual([]);
+    expect(mergeHandoffs([item("f", "2026-11-20T09:59:00.000Z")], [], new Set(), failed, NOW)).toEqual([]);
+    // No duplicate while the server still lists it.
+    expect(mergeHandoffs([item("f")], [item("f")], new Set(), failed, NOW)).toHaveLength(1);
   });
 });

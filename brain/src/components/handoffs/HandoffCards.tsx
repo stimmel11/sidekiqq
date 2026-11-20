@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, buttonClass } from "@/components/ui/Button";
 import { handoffLink } from "@/lib/commands/links";
-import { ackHandoff, fetchHandoffs, POLL_MS, type HandoffItem } from "@/lib/handoffs/browser-api";
+import { ackHandoff, fetchHandoffs, mergeHandoffs, POLL_MS, type HandoffItem } from "@/lib/handoffs/browser-api";
 
 /**
  * Hand-offs waiting for this browser (docs/WEBAPP.md §7): "call Dana" or a meeting join link
@@ -21,23 +21,26 @@ export function HandoffCards() {
   const done = useRef(new Set<string>());
   const failedAcked = useRef(new Set<string>());
   const stopped = useRef(false);
+  // Only the newest poll's reply is applied (focus + visibilitychange can overlap).
+  const seq = useRef(0);
 
   const refresh = useCallback(async () => {
     if (stopped.current || document.visibilityState !== "visible") return;
+    const mine = ++seq.current;
     const r = await fetchHandoffs();
+    if (mine !== seq.current) return;
     if (!r.ok) {
       // Signed out: stop polling; the next navigation goes to the sign-in page.
       if (r.status === 401) stopped.current = true;
       return;
     }
-    const live = r.items.filter((c) => !done.current.has(c.id));
-    for (const c of live) {
-      if (!handoffLink(c).ok && !failedAcked.current.has(c.id)) {
+    for (const c of r.items) {
+      if (!done.current.has(c.id) && !handoffLink(c).ok && !failedAcked.current.has(c.id)) {
         failedAcked.current.add(c.id);
         void ackHandoff(c.id, "failed");
       }
     }
-    setItems(live);
+    setItems((prev) => mergeHandoffs(prev, r.items, done.current, failedAcked.current));
   }, []);
 
   useEffect(() => {
@@ -63,7 +66,7 @@ export function HandoffCards() {
 
   if (items.length === 0) return null;
   return (
-    <section aria-label="Hand-offs waiting" className="mb-6 space-y-3">
+    <section aria-label="Hand-offs waiting" aria-live="polite" className="mb-6 space-y-3">
       {items.map((c) => {
         const link = handoffLink(c);
         return (
@@ -79,6 +82,10 @@ export function HandoffCards() {
                     {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                     className={buttonClass("primary", "md")}
                     onClick={() => finish(c.id, "opened")}
+                    // Middle-click / Ctrl-click opens the link too.
+                    onAuxClick={(e) => {
+                      if (e.button === 1) finish(c.id, "opened");
+                    }}
                   >
                     {link.action}
                   </a>
