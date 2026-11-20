@@ -1,3 +1,4 @@
+import { HandoffCards } from "@/components/handoffs/HandoffCards";
 import { AppShell } from "@/components/ui/AppShell";
 import type { NavItem } from "@/components/ui/NavLinks";
 import { getDeps } from "@/lib/deps";
@@ -31,6 +32,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   );
   return (
     <AppShell nav={nav} signOut={signOut}>
+      <HandoffCards />
       {children}
     </AppShell>
   );

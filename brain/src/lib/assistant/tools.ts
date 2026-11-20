@@ -305,7 +305,8 @@ const callOnPhone = tool({
       label: row.label,
       number: row.number,
       expiresAt: row.expiresAt,
-      note: "Nothing was dialled. Tell the owner it's on their phone: open SideKiqq there and tap Call within 15 minutes. Don't say the call was made.",
+      device: target.kind,
+      note: `Nothing was dialled. ${waitingOn(target.kind, "Call")} Don't say the call was made.`,
     };
   },
 });
@@ -367,6 +368,17 @@ const startReachy = tool({
 });
 
 /**
+ * Where a hand-off is waiting, for the tool note. The default target is the phone; with no phone
+ * paired it is the owner's signed-in browser (docs/WEBAPP.md §7), which shows it while open.
+ */
+function waitingOn(kind: DeviceKind, tap: "Call" | "Open"): string {
+  if (kind === "web") {
+    return `No phone is paired, so it's waiting in the SideKiqq web app: tell the owner to open the dashboard in their browser and tap ${tap} within 15 minutes.`;
+  }
+  return `Tell the owner it's on their phone: open SideKiqq there and tap ${tap} within 15 minutes.`;
+}
+
+/**
  * "Put the Zoom link on my phone": queues an `open_url` hand-off through handoffCapability
  * (`device.open_url`, user_finishes). The phone shows the link and opens it only on a tap. The URL
  * must be a link the brain created in THIS request (start_video_room's join link); everything else
@@ -392,7 +404,8 @@ const openOnPhone = tool({
       queued: true,
       label: r.label,
       expiresAt: r.expiresAt,
-      note: "Nothing was opened. Tell the owner it's on their phone: open SideKiqq there and tap Open within 15 minutes. Don't say it was opened.",
+      device: r.device,
+      note: `Nothing was opened. ${waitingOn(r.device, "Open")} Don't say it was opened.`,
     };
   },
 });

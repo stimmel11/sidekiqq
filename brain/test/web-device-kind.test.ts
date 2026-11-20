@@ -85,26 +85,36 @@ describe("/api/ask: body device must match the authenticated device", () => {
 });
 
 describe("dashboard device is kind web", () => {
-  it("mints a web device, which phone hand-offs never target", async () => {
+  it("mints a web device, which gets call/link hand-offs only when no phone is paired (WEBAPP.md §7)", async () => {
     const deps = makeDeps();
     setDeps(deps);
     const token = await dashboardDeviceToken(deps, key);
     const dev = await deps.repos.devices.findByToken(token);
     expect(dev).toMatchObject({ kind: "web", name: DASHBOARD_DEVICE_NAME });
 
-    // A watch asks for a phone hand-off while only the dashboard exists: nothing to route to.
+    // A watch asks for a call while only the dashboard exists: it waits in the browser.
     const watch = await pairDevice(deps, "watch");
     const body = { kind: "call_contact", number: "303 555 0142" };
-    const none = await createCommand(req("POST", "/api/commands", { token: watch.token, body }), params({}));
-    expect(none.status).toBe(409);
-    expect(((await none.json()) as { code: string }).code).toBe("no_target_device");
+    const toWeb = await createCommand(req("POST", "/api/commands", { token: watch.token, body }), params({}));
+    expect(toWeb.status).toBe(201);
+    expect(await toWeb.json()).toMatchObject({ deviceId: dev!.id, device: "web" });
 
-    // ...and it can't be targeted explicitly either.
-    const byId = await createCommand(req("POST", "/api/commands", { token: watch.token, body: { ...body, target: { deviceId: dev!.id } } }), params({}));
-    expect(byId.status).toBe(409);
+    // reachy_start stays phone-only: an https page can't reach the robot's LAN daemon.
+    const reachy = { kind: "reachy_start" };
+    for (const target of [undefined, { deviceId: dev!.id }, { device: "web" }]) {
+      const r = await createCommand(req("POST", "/api/commands", { token: watch.token, body: { ...reachy, ...(target ? { target } : {}) } }), params({}));
+      expect(r.status).toBe(409);
+    }
+
+    // Once a phone is paired it is the default again, even if the browser was seen more recently.
+    const phone = await pairDevice(deps, "phone");
+    await deps.repos.devices.touch(dev!.id);
+    const toPhone = await createCommand(req("POST", "/api/commands", { token: watch.token, body }), params({}));
+    expect(await toPhone.json()).toMatchObject({ deviceId: phone.device.id, device: "phone" });
+    // ...and the browser can still be picked explicitly.
     const byKind = await createCommand(req("POST", "/api/commands", { token: watch.token, body: { ...body, target: { device: "web" } } }), params({}));
-    expect(byKind.status).toBe(409);
-    expect(await deps.repos.commands.pendingFor(dev!.id)).toEqual([]);
+    expect(await byKind.json()).toMatchObject({ deviceId: dev!.id, device: "web" });
+    expect(await deps.repos.commands.pendingFor(dev!.id)).toHaveLength(2);
   });
 
   it("retires a legacy phone-kind dashboard device and replaces it with a web one", async () => {
