@@ -84,7 +84,7 @@ other than the owner signs in.
 
 ### 3.1 Tenants and keys
 
-- A **tenant** is one customer account. `tenantId` = `t_` + 26 random base32 chars (128 bits).
+- A **tenant** is one customer account. `tenantId` = `t_` + 26 random base32 chars (130 bits).
   It is never derived from an email address or Google id, and never shown to other customers.
 - Every key that holds customer data lives under the tenant's **prefix**. A new tenant's prefix is
   `${REDIS_PREFIX}:t:<tenantId>` (e.g. `sk:t:t_8h2…`). All current keys (`sk:drafts`,
@@ -103,7 +103,8 @@ other than the owner signs in.
 
 | Key | Value | Why it is global |
 |---|---|---|
-| `g:tenant:<tenantId>` | `{ id, prefix, createdAt, status, plan, dek }` | Tenant record (`dek` wrapped, §3.5) |
+| `g:tenant:<tenantId>` | `{ id, prefix, createdAt, status, role, plan, dek }` | Tenant record (`dek` wrapped, §3.5) |
+| `g:owner` | owner `tenantId` (SET NX, once) | Finds the owner tenant (`OWNER_SECRET`, legacy device tokens) |
 | `g:ident:google:<sha256(sub)>` | `tenantId` | Sign-in lookup (Google `sub`, never email: emails change) |
 | `g:ident:gmail:<sha256(sub)>` | `tenantId` | One connected Google mailbox per tenant (§3.4) |
 | `g:devtok:<sha256(token)>` | `{ tenantId, deviceId }` | Device-token lookup (replaces the per-prefix `devtok`) |
@@ -511,6 +512,19 @@ Multi-tenant accounts (before any second customer):
 
 - **A1** `PlatformDeps`/`TenantDeps` split; owner tenant record with `prefix: "sk"`; static
   prefix test. No behaviour change.
+  **Done 2026-11-21 (`crew/tenant-deps`):** `lib/platform/keys.ts` is the only reader of
+  `REDIS_PREFIX` (`globalKey`, `tenantPrefixFor`, `legacyOwnerPrefix`, reserved `t`/`g`);
+  `lib/platform/tenants.ts` `TenantRegistry` (`g:owner`, `g:tenant:<id>`, `g:tenants`; records
+  whose prefix doesn't fit their id/role, or that claim the owner role or legacy prefix without
+  being the `g:owner` tenant, are refused; prefixes are stored absolute, so changing
+  `REDIS_PREFIX` makes the old owner record unreadable on purpose; `createCustomerTenant` exists but no route
+  calls it); `lib/deps.ts` now has `PlatformDeps`, `TenantDeps` (with `tenant: { id, prefix }`),
+  `tenantDeps(platform, scope)` and `buildDeps` = platform + legacy owner scope (same keys).
+  Owner sign-in ensures the owner tenant record (best effort). Login rate limit moved to
+  `g:rl:login:<sha256(ip)>`; scan lock is `<tenant prefix>:lock:scan` (unchanged key for the
+  owner). Static tests: only the keys module reads `REDIS_PREFIX` (temporary exception
+  `lib/dashboard/device-bridge.ts`, removed with the bridge); no key builder uses `t`/`g` as a
+  first segment. Routes still use `getDeps()`; A2 resolves the tenant from the principal.
 - **A2** Global indexes (`g:devtok` with owner fallback, `g:pair`, `g:oauth`, `g:ticket`,
   `g:push`, `g:fcm`); `withPrincipal` resolves the tenant; delete the legacy Google aliases.
 - **A3** Google sign-in, invite codes, v2 sessions, per-tenant profile, session-auth
