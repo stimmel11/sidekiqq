@@ -1,0 +1,115 @@
+# Builds the Android debug APKs and runs the JVM unit tests.
+# The cloud build crew can't reach Google Maven, so this workflow is where the
+# Android code (phone, Galaxy Glasses, watch, shared client) is first compiled.
+#
+# Glasses XR uses an alpha artifact (androidx.xr.projected). The phone is built
+# with XR first; if that fails, the job retries with -Psidekiqq.xr=false and
+# says so in the job summary (the job then still passes, but the summary and a
+# warning annotation show the XR build is broken).
+name: Android
+
+on:
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: android
+
+jobs:
+  build:
+    name: Debug APKs + JVM tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Also validates gradle/wrapper/gradle-wrapper.jar against Gradle's known checksums.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Only main writes the cache, so PRs can't poison it.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Accept Android SDK licenses
+        working-directory: .
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      # google-services.json is never committed; the phone builds without push.
+      - name: Check no Firebase config is present
+        run: test ! -f phone/google-services.json
+
+      - name: JVM unit tests (shared, phone, watch)
+        run: ./gradlew --stacktrace :shared:testDebugUnitTest :phone:testDebugUnitTest :watch:testDebugUnitTest -Psidekiqq.xr=false
+
+      - name: Assemble debug APKs (with glasses XR)
+        id: xr
+        continue-on-error: true
+        run: ./gradlew --stacktrace :phone:assembleDebug :watch:assembleDebug
+
+      - name: Assemble debug APKs (fallback, -Psidekiqq.xr=false)
+        id: noxr
+        if: steps.xr.outcome == 'failure'
+        run: |
+          echo "::warning title=Glasses XR build failed::The phone was rebuilt with -Psidekiqq.xr=false. See the 'with glasses XR' step log."
+          ./gradlew --stacktrace :phone:assembleDebug :watch:assembleDebug -Psidekiqq.xr=false
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Android build"
+            echo "- JVM unit tests: see the test step (reports are uploaded as \`android-test-reports\`)"
+            if [ "${{ steps.xr.outcome }}" = "success" ]; then
+              echo "- Debug APKs: built **with** glasses XR"
+            elif [ "${{ steps.noxr.outcome }}" = "success" ]; then
+              echo "- Debug APKs: XR build **failed**; built with \`-Psidekiqq.xr=false\` (glasses use the Bluetooth-headset bridge only)"
+            else
+              echo "- Debug APKs: **not built** (both the XR and the no-XR build failed)"
+            fi
+            echo ""
+            echo "Debug builds only: unsigned for release, no google-services.json, so no FCM push."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload debug APKs
+        if: steps.xr.outcome == 'success' || steps.noxr.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidekiqq-debug-apks
+          path: |
+            android/phone/build/outputs/apk/debug/*.apk
+            android/watch/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: android/*/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
