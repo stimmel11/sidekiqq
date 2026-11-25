@@ -369,7 +369,7 @@ export const DraftWhenSchema = z.object({ start: isoDate, end: isoDate });
 export type DraftWhen = z.infer<typeof DraftWhenSchema>;
 
 /** Video link added to a calendar invite when it is executed. Zoom comes in a later slice. */
-export const DraftConferenceSchema = z.enum(["meet"]);
+export const DraftConferenceSchema = z.enum(["meet", "zoom"]);
 export type DraftConference = z.infer<typeof DraftConferenceSchema>;
 
 /**
@@ -402,7 +402,7 @@ function upgradeLegacyDraft(raw: unknown): unknown {
       cc: strs(d.cc),
       subject: typeof d.subject === "string" ? d.subject : "",
       ...(when.success ? { when: when.data } : {}),
-      ...(d.conference === "meet" ? { conference: "meet" as const } : {}),
+      ...(d.conference === "meet" || d.conference === "zoom" ? { conference: d.conference } : {}),
       ...(typeof d.location === "string" ? { location: d.location } : {}),
     });
   }
@@ -450,8 +450,14 @@ export const DraftSchema = z.preprocess(
       when: DraftWhenSchema.optional(),
       /** Calendar kinds only: the event location (untrusted model text, shown, never spoken). */
       location: z.string().optional(),
-      /** calendar_invite only: a video link the executor adds ("meet" = Google Meet). */
+      /** calendar_invite only: a video link the executor adds ("meet" = Google Meet, "zoom" = a Zoom room made at approve time). */
       conference: DraftConferenceSchema.optional(),
+      /**
+       * calendar_invite with conference "zoom" only: the Zoom room the executor created on an
+       * earlier approve attempt, saved BEFORE the event write so a retried approve reuses it
+       * instead of making a second room. Internal: never returned by GET /api/drafts.
+       */
+      videoRoom: z.object({ provider: z.literal("zoom"), meetingId: z.string().min(1), joinUrl: z.string().min(1), passcode: z.string().optional() }).optional(),
       threadId: z.string().optional(),
       client: z.string().optional(),
       followupId: z.string().optional(),
@@ -463,12 +469,14 @@ export const DraftSchema = z.preprocess(
         if (d.when) issue("an email has no time", "when");
         if (d.location !== undefined) issue("an email has no location", "location");
         if (d.conference) issue("an email has no conference link", "conference");
+        if (d.videoRoom) issue("an email has no video room", "videoRoom");
       } else {
         if (!d.when) issue("a calendar draft needs a start and end", "when");
         else if (Date.parse(d.when.end) <= Date.parse(d.when.start)) issue("end must be after start", "when");
         if (d.kind === "calendar_invite" && d.to.length < 1) issue("an invite needs at least one attendee", "to");
         if (d.kind === "calendar_hold" && (d.to.length > 0 || d.cc.length > 0)) issue("a hold has no attendees", "to");
         if (d.kind === "calendar_hold" && d.conference) issue("a hold has no conference link", "conference");
+        if (d.videoRoom && d.conference !== "zoom") issue("only a Zoom invite has a Zoom room", "videoRoom");
         if (d.providerDraftId) issue("only email drafts have a provider draft", "providerDraftId");
       }
     }),

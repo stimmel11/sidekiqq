@@ -30,7 +30,7 @@ row reflects its output shape (`id`, `match`, `ambiguous`).
 Meet invites slice 1 (2026-11-08): `calendar.invite.prepare` on the `google` connector, through the new
 prepare path `lib/connectors/prepare.ts` (owner callers only; makes ONE pending `calendar_invite` Draft, no
 provider call). Input as in §2 but `body?` ≤ 5,000 chars, ≤ 10 attendees, ≤ 12 h, start ≥ 1 min and ≤ 1 year
-ahead, `conference` is `"meet"` only (Zoom later). The executor `google:calendar_invite` (`google/send.ts`)
+ahead, `conference` is `"meet"` (Zoom since slice 2, below). The executor `google:calendar_invite` (`google/send.ts`)
 runs only from approve: re-checks strict attendees and a future start (else 410 `expired`), then
 `events.insert` on `primary` with `sendUpdates: "all"`, `guestsCanInviteOthers: false`, a Meet
 `conferenceData.createRequest` when asked, and an event id derived from the draft id (a retried approve
@@ -42,6 +42,15 @@ Google didn't create is reported as an approve `warning`. Deviations to resolve 
 requested for every owner at connect (no incremental scopes yet, §7), and an already-pending invite stays
 approvable if the owner switches invites off afterwards (approve doesn't re-check the switch).
 Attendees see each other (Google's default `guestsCanSeeOtherGuests`).
+Zoom in invites, slice 2 (2026-11-25): `conference: "zoom"`. Prepare refuses it (no Draft) unless Zoom is
+registered, connected, not `needs_reauth` and `video.create_room` is switched on; it makes no room. At approve
+the `google:calendar_invite` executor makes the room through `invokeCapability("video.create_room")` (caller
+`task`: fixed no-invite body, connection checks, audit row), saves it on the draft (`videoRoom`, internal,
+never in `GET /api/drafts`) BEFORE `events.insert`, and reuses a saved room on a retried approve, so one draft
+gets at most one room (a Zoom timeout may still leave one orphan room, unannounced). The join link becomes the
+event location when the owner gave none, and "Join Zoom meeting: <link> / Meeting ID / Passcode" is appended to
+the description. Room length = event length, clamped to 5–240 min. Any Zoom failure happens before the event
+write: 422 `provider_refused`, nothing sent, draft still pending. The readback says "with a Zoom link".
 This doc is binding for connector work in the same way `ARCHITECTURE.md` is for the device contract.
 If they disagree, `ARCHITECTURE.md` wins until it is updated.
 

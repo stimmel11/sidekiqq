@@ -24,6 +24,8 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
  *  4. Input is validated (strict bare attendee addresses, end after start, max length) and the
  *     start must be in the future (and within a year) by the brain's clock.
  *  5. The read-back must fit one /api/speak call; longer is refused, never truncated.
+ *  5a. `conference: "zoom"` needs Zoom usable now (zoomUnusable): no Draft promises a link that
+ *     approve can't make. The room itself is made only at approve time.
  *  6. Every attempt that passes rule 2 writes an audit row, refusals included (body redacted: only title, time and
  *     attendee count).
  */
@@ -31,6 +33,21 @@ import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableEr
 /** An invite may start no earlier than this from now (the owner still has to hear it and approve). */
 export const INVITE_MIN_LEAD_MS = 60_000;
 export const INVITE_MAX_AHEAD_MS = 366 * 86_400_000;
+
+/**
+ * Why a Zoom room couldn't be made for an invite right now, or null when it can (Zoom configured,
+ * connected, not `needs_reauth`, `video.create_room` switched on). Checked again at approve time by
+ * `invokeCapability`, which is what actually makes the room.
+ */
+async function zoomUnusable(deps: Deps): Promise<string | null> {
+  const zoom = connectorFor(deps.connectors(), "video.create_room");
+  if (!zoom) return "Zoom isn't set up on this SideKiqq, so the invite can't have a Zoom link. Offer a Google Meet link instead.";
+  const stored = await deps.connections.load(zoom.id);
+  if (!stored) return "Zoom isn't connected. Ask the owner to connect Zoom from Connections, or offer a Google Meet link instead.";
+  if (stored.status === "needs_reauth") return "Zoom needs to be reconnected before an invite can have a Zoom link. Ask the owner to reconnect it, or offer a Google Meet link.";
+  if (!effectiveCapabilities(zoom, stored).includes("video.create_room")) return "Zoom rooms are turned off in Connections, so the invite can't have a Zoom link.";
+  return null;
+}
 
 export async function prepareCalendarInvite(deps: Deps, input: unknown, ctx: ConnCtx): Promise<PrepareOutput> {
   const cap = "calendar.invite.prepare" as const;
@@ -72,6 +89,13 @@ export async function prepareCalendarInvite(deps: Deps, input: unknown, ctx: Con
   }
 
   const parsed = CalendarInvitePrepareInput.safeParse(input);
+  if (parsed.success && parsed.data.conference === "zoom") {
+    const zoomProblem = await zoomUnusable(deps);
+    if (zoomProblem) {
+      await audit(false, "invite (zoom unavailable)", zoomProblem);
+      throw new CapabilityDeniedError(cap, zoomProblem);
+    }
+  }
   if (!parsed.success) {
     const message = `invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`;
     await audit(false, "invite (invalid input)", message);

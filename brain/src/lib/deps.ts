@@ -12,6 +12,7 @@ import { ZoomAuth, zoomConfigFromEnv, zoomRefreshLock } from "./connectors/zoom/
 import { ZoomMeetings } from "./connectors/zoom/meetings";
 import { GmailDraftSender, GoogleCalendarInviter } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
+import { invokeCapability } from "./connectors/invoke";
 import type { Connector } from "./connectors/types";
 import { llmFromEnv, type LLM } from "./assistant/llm";
 import { pushSenderFromEnv, type PushSender } from "./push";
@@ -78,7 +79,7 @@ export function buildDeps(kv: KV): Deps {
   const zoomMeetings = zoomAuth ? new ZoomMeetings(zoomAuth) : null;
   let connectors: Connector[] | null = null;
   let senders: SenderRegistry | null = null;
-  return {
+  const deps: Deps = {
     kv,
     repos,
     clock,
@@ -99,6 +100,13 @@ export function buildDeps(kv: KV): Deps {
           calendar: async () => new GoogleCalendarInviter(await googleTokens.authorizedClient()),
         },
         clock,
+        // The Zoom room inside an approved invite goes through invokeCapability like any other
+        // room (fixed no-invite body, connection checks, audit). Caller "task": the owner just
+        // approved this draft on a device.
+        videoRooms: {
+          create: (input) => invokeCapability(deps, "video.create_room", input, { caller: "task" }),
+          save: (draftId, room) => repos.drafts.setVideoRoom(draftId, room),
+        },
       })),
     push: () => (push ??= pushSenderFromEnv()),
     webPush: () => (webPush ??= webPushSenderFromEnv()),
@@ -106,6 +114,7 @@ export function buildDeps(kv: KV): Deps {
     transcriber: () => transcriberFromEnv(),
     tts: () => speechSynthesizerFromEnv(),
   };
+  return deps;
 }
 
 export function getDeps(): Deps {

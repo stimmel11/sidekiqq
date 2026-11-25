@@ -144,7 +144,7 @@ data class Draft(
     val `when`: DraftWhen? = null,
     /** Calendar kinds only: the event location. */
     val location: String? = null,
-    /** calendar_invite only: "meet" = a Google Meet link is added when it's sent. */
+    /** calendar_invite only: "meet" = a Google Meet link, "zoom" = a Zoom link, added when it's sent. */
     val conference: String? = null,
     val client: String? = null,
     val createdAt: String,

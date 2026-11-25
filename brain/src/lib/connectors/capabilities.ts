@@ -141,13 +141,14 @@ export const VideoCreateRoomInput = z.object({
  * `calendar.invite.prepare` (confirm): PREPARES an invite as a pending Draft. Nothing is written to
  * any calendar and nobody is notified until the owner approves it (POST /api/drafts/:id/approve,
  * executor `google:calendar_invite` in the sender registry). Attendees are strict bare addresses,
- * like email recipients. `conference: "meet"` adds a Google Meet link at execute time; Zoom in
- * invites is a later slice. Time rules (future start, max length) are checked by the prepare path
+ * like email recipients. `conference: "meet"` adds a Google Meet link at execute time;
+ * `conference: "zoom"` makes a Zoom room at execute time (through `video.create_room`, so Zoom must
+ * be connected) and puts its join link in the event. Time rules (future start, max length) are checked by the prepare path
  * against the clock, and again at approve time.
  */
 export const INVITE_ATTENDEES_MAX = 10;
 export const INVITE_MAX_MINUTES = 12 * 60;
-export const INVITE_CONFERENCES = ["meet"] as const;
+export const INVITE_CONFERENCES = ["meet", "zoom"] as const;
 export const CalendarInvitePrepareInput = z
   .object({
     title: z.string().trim().min(1).max(200),

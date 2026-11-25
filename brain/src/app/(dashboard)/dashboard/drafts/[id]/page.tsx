@@ -22,6 +22,7 @@ function Envelope({ draft }: { draft: Draft }) {
         ["When", draft.when ? `${formatDateTime(draft.when.start)} – ${formatDateTime(draft.when.end)}` : "(no time)"],
         ...(draft.location ? ([["Where", draft.location]] as [string, string][]) : []),
         ...(draft.conference === "meet" ? ([["Video", "Google Meet link added when sent"]] as [string, string][]) : []),
+        ...(draft.conference === "zoom" ? ([["Video", "Zoom link added when sent"]] as [string, string][]) : []),
         ["Title", draft.subject || "(no title)"],
       ]
     : [
