@@ -175,6 +175,21 @@ describe("approving a Zoom invite", () => {
     }
   });
 
+  it("the room can't be saved on the draft: 422 provider_refused, no event", async () => {
+    const { deps, token } = await setup();
+    const out = await prepareCalendarInvite(deps, invite(), { caller: "ask" });
+    const orig = deps.repos.drafts.setVideoRoom.bind(deps.repos.drafts);
+    for (const broken of [async () => false, async () => Promise.reject(new Error("kv down"))]) {
+      deps.repos.drafts.setVideoRoom = broken as typeof orig;
+      const res = await approve(req("POST", "/x", { token }), params({ id: out.draftId }));
+      expect(res.status).toBe(422);
+      expect(JSON.stringify(await res.json())).toMatch(/couldn't save it.*not sent/);
+    }
+    expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
+    expect(await deps.repos.drafts.get(out.draftId)).toMatchObject({ status: "pending" });
+    deps.repos.drafts.setVideoRoom = orig;
+  });
+
   it("Zoom disconnected or switched off after prepare: refused at approve, nothing written", async () => {
     for (const arrange of [
       async (d: TestDeps) => void (await d.connections.markNeedsReauth("zoom", "x", "zoom-rt")),

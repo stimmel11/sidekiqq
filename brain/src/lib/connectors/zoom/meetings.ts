@@ -10,8 +10,9 @@ import { ZoomApiError } from "./errors";
  * in code. It has no `meeting_invitees`, no `alternative_hosts`, no `schedule_for`, no registration
  * (approval_type 2 = none) and every Zoom email notification turned off, so creating a room emails
  * no one. Only `topic`, `start` and `duration` come from the caller, and those are validated by
- * `VideoCreateRoomInput` before this runs. Inviting people is `calendar.invite.prepare` (confirm),
- * a later slice, and goes through draft approval.
+ * `VideoCreateRoomInput` before this runs. Inviting people is `calendar.invite.prepare` (confirm)
+ * with `conference: "zoom"`: its executor makes the room through `video.create_room` only after the
+ * owner approves the invite.
  *
  * The host `start_url` (it embeds a host token) is never returned, logged or stored.
  *

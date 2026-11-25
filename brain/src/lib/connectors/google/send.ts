@@ -231,7 +231,10 @@ export function googleInviteExecutor(inviter: () => Promise<CalendarInviter>, cl
           throw zoomRefusal(err);
         }
         room = { provider: "zoom", meetingId: made.meetingId, joinUrl: made.joinUrl, ...(made.passcode ? { passcode: made.passcode } : {}) };
-        if (!(await rooms.save(d.id, room))) throw new Error("Could not save the Zoom room on the invite draft; nothing was sent");
+        // No event was written, so this is still a definite "nothing sent" (the unsaved room is
+        // unannounced; a retry may make one more).
+        const saved = await rooms.save(d.id, room).catch(() => false);
+        if (!saved) throw new ProviderRefusedError("SideKiqq made the Zoom room but couldn't save it on the invite. The invite was not sent; try approving again.");
       }
       const description = [d.body, room ? zoomJoinText(room) : ""].filter(Boolean).join("\n\n");
       const location = d.location ?? room?.joinUrl;

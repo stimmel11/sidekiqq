@@ -47,7 +47,11 @@ registered, connected, not `needs_reauth` and `video.create_room` is switched on
 the `google:calendar_invite` executor makes the room through `invokeCapability("video.create_room")` (caller
 `task`: fixed no-invite body, connection checks, audit row), saves it on the draft (`videoRoom`, internal,
 never in `GET /api/drafts`) BEFORE `events.insert`, and reuses a saved room on a retried approve, so one draft
-gets at most one room (a Zoom timeout may still leave one orphan room, unannounced). The join link becomes the
+gets at most one room once one is saved. Orphan rooms (unannounced, never cleaned up by the brain) can still
+happen: a Zoom timeout that made the room anyway, a failed save, the function being cut off between room and
+save (approve `maxDuration` raised to 60 s for this), or a draft discarded/expired/refused by Google after its
+room was saved. Known race: `setVideoRoom` is read-then-write, and discard doesn't take the send lock, so a
+discard landing in that window can be undone (same class as `markSent`). The join link becomes the
 event location when the owner gave none, and "Join Zoom meeting: <link> / Meeting ID / Passcode" is appended to
 the description. Room length = event length, clamped to 5–240 min. Any Zoom failure happens before the event
 write: 422 `provider_refused`, nothing sent, draft still pending. The readback says "with a Zoom link".

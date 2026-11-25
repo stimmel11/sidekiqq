@@ -39,13 +39,13 @@ export const INVITE_MAX_AHEAD_MS = 366 * 86_400_000;
  * connected, not `needs_reauth`, `video.create_room` switched on). Checked again at approve time by
  * `invokeCapability`, which is what actually makes the room.
  */
-async function zoomUnusable(deps: Deps): Promise<string | null> {
+async function zoomUnusable(deps: Deps): Promise<{ message: string; reason?: "needs_reauth" | "disabled" } | null> {
   const zoom = connectorFor(deps.connectors(), "video.create_room");
-  if (!zoom) return "Zoom isn't set up on this SideKiqq, so the invite can't have a Zoom link. Offer a Google Meet link instead.";
+  if (!zoom) return { message: "Zoom isn't set up on this SideKiqq, so the invite can't have a Zoom link. Offer a Google Meet link instead." };
   const stored = await deps.connections.load(zoom.id);
-  if (!stored) return "Zoom isn't connected. Ask the owner to connect Zoom from Connections, or offer a Google Meet link instead.";
-  if (stored.status === "needs_reauth") return "Zoom needs to be reconnected before an invite can have a Zoom link. Ask the owner to reconnect it, or offer a Google Meet link.";
-  if (!effectiveCapabilities(zoom, stored).includes("video.create_room")) return "Zoom rooms are turned off in Connections, so the invite can't have a Zoom link.";
+  if (!stored) return { message: "Zoom isn't connected. Ask the owner to connect Zoom from Connections, or offer a Google Meet link instead." };
+  if (stored.status === "needs_reauth") return { reason: "needs_reauth", message: "Zoom needs to be reconnected before an invite can have a Zoom link. Ask the owner to reconnect it, or offer a Google Meet link." };
+  if (!effectiveCapabilities(zoom, stored).includes("video.create_room")) return { reason: "disabled", message: "Zoom rooms are turned off in Connections, so the invite can't have a Zoom link." };
   return null;
 }
 
@@ -92,8 +92,9 @@ export async function prepareCalendarInvite(deps: Deps, input: unknown, ctx: Con
   if (parsed.success && parsed.data.conference === "zoom") {
     const zoomProblem = await zoomUnusable(deps);
     if (zoomProblem) {
-      await audit(false, "invite (zoom unavailable)", zoomProblem);
-      throw new CapabilityDeniedError(cap, zoomProblem);
+      await audit(false, "invite (zoom unavailable)", zoomProblem.message);
+      if (zoomProblem.reason) throw new ConnectionUnusableError(cap, "zoom", zoomProblem.reason, zoomProblem.message);
+      throw new CapabilityDeniedError(cap, zoomProblem.message);
     }
   }
   if (!parsed.success) {

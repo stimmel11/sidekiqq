@@ -368,7 +368,7 @@ export type DraftKind = z.infer<typeof DraftKindSchema>;
 export const DraftWhenSchema = z.object({ start: isoDate, end: isoDate });
 export type DraftWhen = z.infer<typeof DraftWhenSchema>;
 
-/** Video link added to a calendar invite when it is executed. Zoom comes in a later slice. */
+/** Video link added to a calendar invite when it is executed. "zoom" = a Zoom room made at approve time. */
 export const DraftConferenceSchema = z.enum(["meet", "zoom"]);
 export type DraftConference = z.infer<typeof DraftConferenceSchema>;
 
