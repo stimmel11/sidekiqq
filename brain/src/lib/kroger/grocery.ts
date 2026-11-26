@@ -17,8 +17,8 @@ export * from "./rules";
 
 /**
  * Kroger / King Soopers grocery module (docs/CONNECTORS.md §2, §7; backlog "Connector: Kroger").
- * Slice 1: provider logic only. Registering `grocery.search` / `grocery.cart.add` on a `kroger`
- * connector, OAuth + ConnectionStore wiring and the Claude tools come in slice 2.
+ * Provider logic. The `kroger` connector (lib/connectors/kroger) registers it as `grocery.search` /
+ * `grocery.cart.add` behind `invokeCapability`; the Claude tools come in a later slice.
  *
  * - Scopes: `product.compact` (search) and `cart.basic:write` (add). Kroger's public API has no
  *   checkout, order, pickup-slot or payment endpoint, and this module calls none. Checkout is a

@@ -38,6 +38,8 @@ const validInputs: Record<ImplementedCapability, unknown> = {
   "files.read": { query: "proposal", max: 3, includeContent: false },
   "contacts.lookup": { name: "Dana", max: 5 },
   "video.create_room": { topic: "Sync with Dana" },
+  "grocery.search": { query: "2% milk", max: 5 },
+  "grocery.cart.add": { items: [{ productId: "0001111041700", quantity: 2 }] },
 };
 
 describe("policy table (docs/CONNECTORS.md §2, §4 floor)", () => {

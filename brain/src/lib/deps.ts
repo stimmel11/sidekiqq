@@ -10,6 +10,10 @@ import { ConnectionStore } from "./connectors/store";
 import { ZoomConnector } from "./connectors/zoom";
 import { ZoomAuth, zoomConfigFromEnv, zoomRefreshLock } from "./connectors/zoom/auth";
 import { ZoomMeetings } from "./connectors/zoom/meetings";
+import { KrogerConnector, krogerAuthedApi } from "./connectors/kroger";
+import { KrogerAuth, krogerConfigFromEnv, krogerRefreshLock } from "./connectors/kroger/auth";
+import { KrogerGrocery } from "./kroger/grocery";
+import { KvSearchedProducts } from "./kroger/searched";
 import { GmailDraftSender, GoogleCalendarInviter } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
 import type { Connector } from "./connectors/types";
@@ -35,12 +39,14 @@ export interface Deps {
   /** Google's view of `connections`, used by the Google OAuth routes. */
   googleTokens: GoogleTokenStore;
   /**
-   * Connectors (Google: Gmail/Calendar/Drive/Contacts; Zoom when configured). Only lib/connectors/invoke.ts may call
+   * Connectors (Google: Gmail/Calendar/Drive/Contacts; Zoom and Kroger when configured). Only lib/connectors/invoke.ts may call
    * `Connector.invoke`; everything else goes through `invokeCapability`.
    */
   connectors(): readonly Connector[];
   /** Zoom sign-in and token minting for the Zoom OAuth flow; null when Zoom isn't configured. */
   zoomAuth(): ZoomAuth | null;
+  /** Kroger sign-in and token minting for the Kroger OAuth flow; null when Kroger isn't configured. */
+  krogerAuth(): KrogerAuth | null;
   /** SENDER REGISTRY. Must only be used by /api/drafts/[id]/approve (see test/no-send.test.ts). */
   senders(): SenderRegistry;
   push(): PushSender;
@@ -76,6 +82,10 @@ export function buildDeps(kv: KV): Deps {
   const zoomCfg = zoomConfigFromEnv(config.appUrl());
   const zoomAuth = zoomCfg ? new ZoomAuth(zoomCfg, connections, fetch, Date.now, zoomRefreshLock(kv, prefix)) : null;
   const zoomMeetings = zoomAuth ? new ZoomMeetings(zoomAuth) : null;
+  // Kroger is registered only when KROGER_CLIENT_ID/KROGER_CLIENT_SECRET are set.
+  const krogerCfg = krogerConfigFromEnv(config.appUrl());
+  const krogerAuth = krogerCfg ? new KrogerAuth(krogerCfg, connections, fetch, Date.now, krogerRefreshLock(kv, prefix)) : null;
+  const krogerGrocery = krogerAuth ? new KrogerGrocery(krogerAuthedApi(krogerAuth), new KvSearchedProducts(kv, prefix)) : null;
   let connectors: Connector[] | null = null;
   let senders: SenderRegistry | null = null;
   return {
@@ -89,8 +99,10 @@ export function buildDeps(kv: KV): Deps {
       (connectors ??= [
         new GoogleConnector(googleWorkspace, googleContacts),
         ...(zoomMeetings ? [new ZoomConnector(async () => zoomMeetings)] : []),
+        ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery)] : []),
       ]),
     zoomAuth: () => zoomAuth,
+    krogerAuth: () => krogerAuth,
     senders: () =>
       (senders ??= buildSenders({
         google: {

@@ -1,6 +1,7 @@
 import type { Deps } from "../deps";
 import { googleOAuth } from "./google/oauth";
 import { zoomOAuth } from "./zoom/oauth";
+import { krogerOAuth } from "./kroger/oauth";
 
 /**
  * Per-connector OAuth flows behind the generic connections routes (docs/CONNECTORS.md §7, §9).
@@ -29,6 +30,7 @@ export interface OAuthFlow {
 const FLOWS: Record<string, OAuthFlow> = {
   google: googleOAuth,
   zoom: zoomOAuth,
+  kroger: krogerOAuth,
 };
 
 export function oauthFlow(connectorId: string): OAuthFlow | undefined {
