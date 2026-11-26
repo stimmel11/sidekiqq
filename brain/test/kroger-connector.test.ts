@@ -294,8 +294,15 @@ describe("grocery capabilities through invokeCapability", () => {
     return Object.assign(deps, { api });
   }
 
-  it("search runs without the owner's Kroger sign-in (app token) and audits the query", async () => {
+  it("search needs the owner's Kroger connection, though it runs on the app token", async () => {
     const deps = setup();
+    await expect(invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" })).rejects.toBeInstanceOf(KrogerNotConnectedError);
+    expect(deps.api.searches).toHaveLength(0);
+  });
+
+  it("search runs on a connected Kroger and audits the query", async () => {
+    const deps = setup();
+    await connect(deps.connections);
     const out = await invokeCapability(deps, "grocery.search", { query: "2% milk", locationId: "01400943", max: 5 }, { caller: "ask", device: "phone" });
     expect(out.map((p) => p.id)).toEqual([MILK, EGGS]);
     expect(deps.api.searches).toEqual([{ term: "2% milk", locationId: "01400943", limit: 5 }]);
@@ -326,6 +333,17 @@ describe("grocery capabilities through invokeCapability", () => {
     expect(row?.summary).toBe("cart add: 3 lines, 4 items");
   });
 
+  it("the owner's off switch stops search and cart add separately", async () => {
+    const deps = setup();
+    await deps.connections.save("kroger", { secret: "k-rt-1", secretKind: "refresh_token", grantedScopes: [...KROGER_USER_SCOPES], connectedAt: NOW.toISOString(), enabled: ["grocery.cart.add"] });
+    await expect(invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" })).rejects.toBeInstanceOf(ConnectionUnusableError);
+    expect(deps.api.searches).toHaveLength(0);
+    await deps.connections.save("kroger", { secret: "k-rt-1", secretKind: "refresh_token", grantedScopes: [...KROGER_USER_SCOPES], connectedAt: NOW.toISOString(), enabled: ["grocery.search"] });
+    await invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" });
+    await expect(invokeCapability(deps, "grocery.cart.add", { items: [{ productId: MILK, quantity: 1 }] }, { caller: "ask" })).rejects.toBeInstanceOf(ConnectionUnusableError);
+    expect(deps.api.adds).toHaveLength(0);
+  });
+
   it("refuses a product id that no search returned, before any cart call", async () => {
     const deps = setup();
     await connect(deps.connections);
@@ -340,7 +358,7 @@ describe("grocery capabilities through invokeCapability", () => {
     await connect(deps.connections);
     await invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" });
     // A new connector instance (as in a new serverless invocation) over the same KV.
-    const later = { ...deps, connectors: () => [new KrogerConnector(async () => new KrogerGrocery(deps.api, new KvSearchedProducts(deps.kv, "t", undefined, () => NOW.getTime())))] };
+    const later = { ...deps, connectors: () => [new KrogerConnector(async () => new KrogerGrocery(deps.api, new KvSearchedProducts(deps.kv, "t", undefined, () => NOW.getTime())), deps.connections)] };
     await expect(invokeCapability(later, "grocery.cart.add", { items: [{ productId: MILK, quantity: 1 }] }, { caller: "ask" })).resolves.toEqual({ ok: true, count: 1 });
   });
 
@@ -360,11 +378,13 @@ describe("grocery capabilities through invokeCapability", () => {
 
   it("schemas refuse UPCs, codes, URLs, too many lines and big quantities before Kroger sees them", async () => {
     const deps = setup();
-    for (const query of ["0001111041700", "call 303-555-1234", "https://evil.example/x", "dana%40acme.com", "ab", "one two three four five six seven eight nine"]) {
+    await connect(deps.connections);
+    for (const query of ["a".repeat(81), "0001111041700", "call 303-555-1234", "https://evil.example/x", "dana%40acme.com", "ab", "one two three four five six seven eight nine"]) {
       expect(GrocerySearchInput.safeParse({ query }).success, query).toBe(false);
       await expect(invokeCapability(deps, "grocery.search", { query }, { caller: "ask" })).rejects.toBeInstanceOf(CapabilityDeniedError);
     }
     expect(GrocerySearchInput.safeParse({ query: "2% milk 1/2 gallon" }).success).toBe(true);
+    expect(GrocerySearchInput.safeParse({ query: "a".repeat(80) }).success).toBe(true);
     expect(GrocerySearchInput.safeParse({ query: "milk", locationId: "../x" }).success).toBe(false);
     expect(GrocerySearchInput.safeParse({ query: "milk", max: 26 }).success).toBe(false);
     expect(GroceryCartAddInput.safeParse({ items: [] }).success).toBe(false);
@@ -375,7 +395,7 @@ describe("grocery capabilities through invokeCapability", () => {
     expect(deps.api.searches).toHaveLength(0);
   });
 
-  it("the owner's switch and the granted scopes gate each capability separately", async () => {
+  it("an ungranted cart scope disables cart add but not search", async () => {
     const deps = setup();
     await connect(deps.connections, "k-rt-1", ["product.compact"]); // cart scope not granted
     await invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" });
@@ -403,7 +423,7 @@ describe("Kroger end to end over a fake Kroger (real KrogerAuth + HTTP layer)", 
     const f = fakeFetch(handler);
     const auth = new KrogerAuth(CFG, deps.connections, f.fn, () => NOW.getTime());
     const grocery = new KrogerGrocery(krogerAuthedApi(auth, f.fn), new KvSearchedProducts(deps.kv, "t", undefined, () => NOW.getTime()));
-    const d = { ...deps, connectors: () => [new KrogerConnector(async () => grocery)] };
+    const d = { ...deps, connectors: () => [new KrogerConnector(async () => grocery, deps.connections)] };
     setDeps(d);
     return { deps: d, calls: f.calls };
   }
@@ -437,13 +457,47 @@ describe("Kroger end to end over a fake Kroger (real KrogerAuth + HTTP layer)", 
     expect((await deps.connections.load("kroger"))?.status).toBe("connected");
   });
 
-  it("cart add without a Kroger connection says so and calls nothing but search", async () => {
+  it("without a Kroger connection nothing at all reaches Kroger", async () => {
     const { deps, calls } = real((url) => (url.endsWith("/token") ? json(200, { access_token: "app", expires_in: 1800 }) : json(200, productsBody())));
-    await invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" });
+    await expect(invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" })).rejects.toBeInstanceOf(KrogerNotConnectedError);
     await expect(invokeCapability(deps, "grocery.cart.add", { items: [{ productId: MILK, quantity: 1 }] }, { caller: "ask" })).rejects.toBeInstanceOf(
       KrogerNotConnectedError,
     );
-    expect(calls.some((c) => c.url.includes("/cart/add"))).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("cart add 401, then a dead refresh: needs_reauth, one alert, exactly one cart call", async () => {
+    let userRefreshes = 0;
+    const { deps, calls } = real((url, init) => {
+      if (url.endsWith("/token")) {
+        if (tokenFor(init) === "client_credentials") return json(200, { access_token: "app", expires_in: 1800 });
+        return ++userRefreshes === 1 ? json(200, { access_token: "user-1", refresh_token: "k-rt-1", expires_in: 1800 }) : json(400, { error: "invalid_grant" });
+      }
+      if (url.includes("/products")) return json(200, productsBody());
+      return json(401, {});
+    });
+    await connect(deps.connections);
+    await invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" });
+    await expect(invokeCapability(deps, "grocery.cart.add", { items: [{ productId: MILK, quantity: 1 }] }, { caller: "ask" })).rejects.toBeInstanceOf(
+      ReauthRequiredError,
+    );
+    expect(calls.filter((c) => c.url.includes("/cart/add"))).toHaveLength(1);
+    expect((await deps.connections.load("kroger"))?.status).toBe("needs_reauth");
+    expect((await deps.repos.alerts.since(null)).items).toHaveLength(1);
+  });
+
+  it("a search 401 through the real KrogerAuth mints a fresh app token", async () => {
+    let appMints = 0;
+    let searches = 0;
+    const { deps, calls } = real((url, init) => {
+      if (url.endsWith("/token") && tokenFor(init) === "client_credentials") return json(200, { access_token: `app-${++appMints}`, expires_in: 1800 });
+      return ++searches === 1 ? json(401, {}) : json(200, productsBody());
+    });
+    await connect(deps.connections);
+    await expect(invokeCapability(deps, "grocery.search", { query: "milk" }, { caller: "ask" })).resolves.toHaveLength(1);
+    expect(appMints).toBe(2);
+    const auths = calls.filter((c) => c.url.includes("/products")).map((c) => (c.init.headers as Record<string, string>).Authorization);
+    expect(auths).toEqual(["Bearer app-1", "Bearer app-2"]);
   });
 
   it("the full happy path: app-token search, owner-token add after one expired-token 401", async () => {

@@ -91,8 +91,11 @@ export class GroceryInputError extends Error {
 }
 
 /**
- * 401/403: token expired, revoked or missing a scope. Slice 2 maps an owner-token failure to
- * `needs_reauth`; an app-token (client credentials) failure is a server config problem, not the owner's.
+ * 401/403: token expired, revoked or missing a scope. Not mapped to `needs_reauth`: the connector
+ * retries a 401 once with a freshly refreshed token, and a dead grant already surfaces from the
+ * refresh as `ReauthRequiredError` (→ `needs_reauth`). A 401/403 that survives a good refresh is a
+ * scope or Kroger-side problem, so the connection is left as is and the message asks the owner to
+ * reconnect. An app-token (client credentials) failure is a server config problem, not the owner's.
  */
 export class KrogerAuthError extends Error {
   constructor(

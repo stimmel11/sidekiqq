@@ -99,7 +99,7 @@ export function buildDeps(kv: KV): Deps {
       (connectors ??= [
         new GoogleConnector(googleWorkspace, googleContacts),
         ...(zoomMeetings ? [new ZoomConnector(async () => zoomMeetings)] : []),
-        ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery)] : []),
+        ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery, connections)] : []),
       ]),
     zoomAuth: () => zoomAuth,
     krogerAuth: () => krogerAuth,

@@ -192,7 +192,7 @@ export const GrocerySearchInput = z.object({
     .string()
     .trim()
     .min(GROCERY_QUERY_MIN_CHARS)
-    .max(GROCERY_QUERY_MAX_CHARS * 2)
+    .refine((q) => Array.from(q).length <= GROCERY_QUERY_MAX_CHARS, `at most ${GROCERY_QUERY_MAX_CHARS} characters`)
     .refine((q) => !GROCERY_QUERY_DIGIT_RUN_RE.test(q), "a grocery search can't contain long numbers (codes, UPCs or phone numbers)")
     .refine((q) => GROCERY_QUERY_RE.test(q), "a grocery search can only contain letters, numbers, spaces and basic punctuation")
     .refine((q) => q.split(/\s+/).length <= GROCERY_QUERY_MAX_WORDS, `at most ${GROCERY_QUERY_MAX_WORDS} words`),

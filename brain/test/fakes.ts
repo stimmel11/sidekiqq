@@ -290,7 +290,7 @@ export function makeDeps(
     connections,
     googleTokens: new GoogleTokenStore(connections),
     connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : []),
-      ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery)] : []),
+      ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery, connections)] : []),
     ],
     zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
     krogerAuth: () => (krogerAuth ??= opts.krogerAuth?.(connections) ?? null),

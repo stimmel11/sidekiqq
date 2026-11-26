@@ -1,7 +1,8 @@
 import type { CapabilityId, ImplementedCapability, In, ProviderOut } from "../capabilities";
 import type { Connector } from "../types";
 import { KROGER_SCOPES, KrogerAuthError, krogerHttpApi, type KrogerApi, type KrogerGrocery } from "../../kroger/grocery";
-import { KROGER_CONNECTOR_ID, type KrogerAuth } from "./auth";
+import type { ConnectionStore } from "../store";
+import { KROGER_CONNECTOR_ID, KrogerNotConnectedError, type KrogerAuth } from "./auth";
 
 /**
  * The built-in Kroger / King Soopers connector (docs/CONNECTORS.md §2, §10 step 6; backlog
@@ -9,6 +10,11 @@ import { KROGER_CONNECTOR_ID, type KrogerAuth } from "./auth";
  * `grocery.cart.add` (auto, capped, add-only, owner token). No checkout, order, pickup-slot or
  * payment call exists anywhere: Kroger's public API has none, and checkout is a `user_finishes`
  * hand-off to the phone (later slice).
+ *
+ * Both capabilities need the owner's stored Kroger connection, search included (even though search
+ * runs on the app token): the query goes to a third party, so it only does so once the owner chose
+ * to connect Kroger, and the owner's on/off switch (checked by `invokeCapability` against the
+ * stored record) always applies. Disconnecting stops search too.
  *
  * Not first-party, so `invokeCapability` logs its arguments (query / product ids + quantities).
  */
@@ -21,7 +27,10 @@ export class KrogerConnector implements Connector {
   readonly firstParty = false;
   readonly capabilities: readonly CapabilityId[] = KROGER_CAPABILITIES;
 
-  constructor(private readonly grocery: () => Promise<KrogerGrocery>) {}
+  constructor(
+    private readonly grocery: () => Promise<KrogerGrocery>,
+    private readonly connections: Pick<ConnectionStore, "load">,
+  ) {}
 
   scopesFor(caps: readonly CapabilityId[]): string[] {
     const out: string[] = [];
@@ -31,6 +40,7 @@ export class KrogerConnector implements Connector {
   }
 
   async invoke<C extends ImplementedCapability>(cap: C, input: In<C>): Promise<ProviderOut<C>> {
+    if (!(await this.connections.load(KROGER_CONNECTOR_ID))) throw new KrogerNotConnectedError(cap);
     const g = await this.grocery();
     if (cap === "grocery.search") return (await g.search(input as In<"grocery.search">)) as ProviderOut<C>;
     if (cap === "grocery.cart.add") return (await g.addToCart(input as In<"grocery.cart.add">)) as ProviderOut<C>;
