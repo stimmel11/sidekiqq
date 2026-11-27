@@ -6,14 +6,9 @@ import { makeDeps } from "./fakes";
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, sessionCookieOptions, signSession, verifySession, sessionSecretFromEnv } from "@/lib/dashboard/session";
 import { safeNextPath, isDashboardPath } from "@/lib/dashboard/guard";
 import { middleware, config as middlewareConfig } from "@/middleware";
-import {
-  CONFIRM_VALUE,
-  approveDraftFromDashboard,
-  checkApprovalConfirmation,
-  completeCommitmentFromDashboard,
-  discardDraftFromDashboard,
-  draftFingerprint,
-} from "@/lib/dashboard/approval";
+import { draftFingerprint } from "@/lib/confirmation";
+import { approveDraft, completeCommitment, discardDraft } from "@/lib/dashboard/browser-api";
+import { sessionFetch } from "./session-fetch";
 import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
 
 const SECRET = "test-session-secret-0123456789abcdef";
@@ -206,6 +201,14 @@ describe("owner login", () => {
 
 describe("dashboard approve requires explicit confirmation", () => {
   const key = randomBytes(32);
+  beforeEach(() => {
+    process.env.SESSION_SECRET = SECRET;
+    process.env.TOKEN_ENCRYPTION_KEY = key.toString("base64");
+  });
+  afterEach(() => {
+    delete process.env.SESSION_SECRET;
+    delete process.env.TOKEN_ENCRYPTION_KEY;
+  });
 
   async function setup() {
     const deps = makeDeps();
@@ -213,21 +216,8 @@ describe("dashboard approve requires explicit confirmation", () => {
     const g = await deps.ws.createDraft({ to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached." });
     const fu = await deps.repos.followups.upsert({ person: "Dana", client: "ACME", reason: "waiting", importance: "HIGH" });
     const d = await deps.repos.drafts.create({ providerDraftId: g.gmailDraftId, to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached.", client: "ACME", followupId: fu.followUp.id });
-    return { deps, d, fu };
+    return { deps, d, fu, f: await sessionFetch() };
   }
-
-  it("checkApprovalConfirmation needs the confirm value and a matching fingerprint", async () => {
-    const { d } = await setup();
-    const fp = draftFingerprint(d);
-    expect(checkApprovalConfirmation(null, { confirm: CONFIRM_VALUE, confirmation: fp })).toMatchObject({ ok: false, status: 404 });
-    expect(checkApprovalConfirmation(d, {})).toMatchObject({ ok: false, status: 400 });
-    expect(checkApprovalConfirmation(d, { confirmation: fp })).toMatchObject({ ok: false, status: 400 });
-    expect(checkApprovalConfirmation(d, { confirm: "yes", confirmation: fp })).toMatchObject({ ok: false, status: 400 });
-    expect(checkApprovalConfirmation(d, { confirm: CONFIRM_VALUE })).toMatchObject({ ok: false, status: 409 });
-    expect(checkApprovalConfirmation({ ...d, body: "changed" }, { confirm: CONFIRM_VALUE, confirmation: fp })).toMatchObject({ ok: false, status: 409 });
-    expect(checkApprovalConfirmation({ ...d, status: "sent" }, { confirm: CONFIRM_VALUE, confirmation: fp })).toMatchObject({ ok: false, status: 409 });
-    expect(checkApprovalConfirmation(d, { confirm: CONFIRM_VALUE, confirmation: fp })).toEqual({ ok: true });
-  });
 
   it("fingerprint covers recipients, cc, subject and body", async () => {
     const { d } = await setup();
@@ -238,42 +228,45 @@ describe("dashboard approve requires explicit confirmation", () => {
     expect(draftFingerprint({ ...d, body: "Other" })).not.toBe(fp);
   });
 
-  it("never sends without confirmation", async () => {
-    const { deps, d } = await setup();
-    expect(await approveDraftFromDashboard(deps, d.id, {}, key)).toMatchObject({ ok: false });
-    expect(await approveDraftFromDashboard(deps, d.id, { confirm: CONFIRM_VALUE, confirmation: "stale" }, key)).toMatchObject({ ok: false });
+  it("never sends without a matching confirmation", async () => {
+    const { deps, d, f } = await setup();
+    // Malformed confirmations never leave the browser.
+    expect(await approveDraft(d.id, "", f)).toMatchObject({ ok: false });
+    expect(await approveDraft(d.id, "stale", f)).toMatchObject({ ok: false });
+    expect(f.calls).toHaveLength(0);
+    // A well-formed but wrong fingerprint reaches the route, which refuses (409 changed).
+    expect(await approveDraft(d.id, "0".repeat(64), f)).toMatchObject({ ok: false, error: expect.stringMatching(/changed after you opened it/) });
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
     expect((await deps.repos.drafts.get(d.id))?.status).toBe("pending");
   });
 
-  it("sends exactly once through the existing approve route after confirmation", async () => {
-    const { deps, d, fu } = await setup();
-    const form = { confirm: CONFIRM_VALUE, confirmation: draftFingerprint(d) };
-    expect(await approveDraftFromDashboard(deps, d.id, form, key)).toEqual({ ok: true });
+  it("sends exactly once through the approve route after confirmation", async () => {
+    const { deps, d, fu, f } = await setup();
+    expect(await approveDraft(d.id, draftFingerprint(d), f)).toEqual({ ok: true });
     expect(deps.sender.sendDraft).toHaveBeenCalledExactlyOnceWith(d.providerDraftId);
     expect((await deps.repos.drafts.get(d.id))?.status).toBe("sent");
     expect((await deps.repos.followups.get(fu.followUp.id))?.resolved).toBe(true);
     // Replaying the same confirmation is refused.
-    expect(await approveDraftFromDashboard(deps, d.id, form, key)).toMatchObject({ ok: false });
+    expect(await approveDraft(d.id, draftFingerprint(d), f)).toMatchObject({ ok: false, error: expect.stringMatching(/no longer pending/) });
     expect(deps.sender.sendDraft).toHaveBeenCalledOnce();
   });
 
   it("surfaces the route's 410 when the Gmail draft is gone, without sending", async () => {
-    const { deps, d } = await setup();
+    const { deps, d, f } = await setup();
     deps.ws.drafts.clear();
-    const r = await approveDraftFromDashboard(deps, d.id, { confirm: CONFIRM_VALUE, confirmation: draftFingerprint(d) }, key);
+    const r = await approveDraft(d.id, draftFingerprint(d), f);
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/deleted/) });
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
   });
 
   it("discard and complete go through the existing routes and never send", async () => {
-    const { deps, d } = await setup();
-    expect(await discardDraftFromDashboard(deps, d.id, key)).toEqual({ ok: true });
+    const { deps, d, f } = await setup();
+    expect(await discardDraft(d.id, f)).toEqual({ ok: true });
     expect((await deps.repos.drafts.get(d.id))?.status).toBe("discarded");
     const { commitment } = await deps.repos.commitments.add({ who: "Stimmel", what: "Send pricing", source: { kind: "voice" }, confidence: "CONFIRMED" });
-    expect(await completeCommitmentFromDashboard(deps, commitment.id, key)).toEqual({ ok: true });
+    expect(await completeCommitment(commitment.id, f)).toEqual({ ok: true });
     expect((await deps.repos.commitments.get(commitment.id))?.status).toBe("done");
-    expect(await completeCommitmentFromDashboard(deps, "cmt_missing", key)).toMatchObject({ ok: false });
+    expect(await completeCommitment("cmt_missing", f)).toMatchObject({ ok: false });
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
   });
 
