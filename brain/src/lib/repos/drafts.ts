@@ -9,7 +9,7 @@ import { Collection } from "./collection";
  * What a caller supplies to create a draft. `readback` is deliberately absent: the repo builds it
  * from the structured fields (docs/CONNECTORS.md §5), so no caller (and no model) can write it.
  */
-export type NewDraft = Omit<Draft, "id" | "status" | "createdAt" | "cc" | "kind" | "connectorId" | "readback" | "sentAt" | "providerMessageId" | "gmailDraftId" | "gmailMessageId" | "videoRoom"> & {
+export type NewDraft = Omit<Draft, "id" | "status" | "createdAt" | "cc" | "kind" | "connectorId" | "readback" | "sentAt" | "providerMessageId" | "videoRoom"> & {
   cc?: string[];
   kind?: Draft["kind"];
   connectorId?: string;

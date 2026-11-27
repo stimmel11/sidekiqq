@@ -137,17 +137,30 @@ describe("DraftSchema", () => {
     gmailMessageId: "msg_1",
   };
 
-  it("upgrades a pre-slice-3 record: gmail ids mapped (and kept as mirrors), kind/connector defaulted, readback built", () => {
+  it("upgrades a pre-slice-3 record: gmail ids mapped (old names dropped), kind/connector defaulted, readback built", () => {
     const d = DraftSchema.parse(legacy);
     expect(d).toMatchObject({
       kind: "email",
       connectorId: "google",
       providerDraftId: "gdraft_9",
       providerMessageId: "msg_1",
-      gmailDraftId: "gdraft_9",
-      gmailMessageId: "msg_1",
       readback: "Email to dana@acme.com, with the subject: Old one.",
     });
+    expect(d).not.toHaveProperty("gmailDraftId");
+    expect(d).not.toHaveProperty("gmailMessageId");
+  });
+
+  it("a record with both names keeps providerDraftId and drops the old one", () => {
+    const d = DraftSchema.parse({ ...legacy, providerDraftId: "gdraft_new", providerMessageId: "msg_new" });
+    expect(d).toMatchObject({ providerDraftId: "gdraft_new", providerMessageId: "msg_new" });
+    expect(d).not.toHaveProperty("gmailDraftId");
+    expect(d).not.toHaveProperty("gmailMessageId");
+  });
+
+  it("a non-Google record keeps its own providerDraftId and a stray gmailDraftId is dropped", () => {
+    const d = DraftSchema.parse({ ...legacy, connectorId: "imap", providerDraftId: "l1", gmailMessageId: undefined });
+    expect(d).toMatchObject({ connectorId: "imap", providerDraftId: "l1" });
+    expect(d).not.toHaveProperty("gmailDraftId");
   });
 
   it("the to-rule depends on kind", () => {
@@ -172,13 +185,16 @@ describe("DraftsRepo.create", () => {
     expect(d.connectorId).toBe("google");
   });
 
-  it("writes gmailDraftId alongside providerDraftId for Google drafts only (rollback safety)", async () => {
+  it("no longer writes the deprecated gmailDraftId/gmailMessageId mirrors, for any connector", async () => {
     const deps = makeDeps();
     const g = await deps.repos.drafts.create({ providerDraftId: "g1", to: ["a@b.co"], subject: "s", body: "b" });
     const other = await deps.repos.drafts.create({ connectorId: "imap", providerDraftId: "l1", to: ["a@b.co"], subject: "s", body: "b" });
     const raw = async (id: string) => JSON.parse((await deps.kv.hget("t:drafts", id))!) as Record<string, unknown>;
-    expect((await raw(g.id)).gmailDraftId).toBe("g1");
-    expect((await raw(other.id)).gmailDraftId).toBeUndefined();
+    for (const id of [g.id, other.id]) {
+      expect(await raw(id)).not.toHaveProperty("gmailDraftId");
+      expect(await raw(id)).not.toHaveProperty("gmailMessageId");
+    }
+    expect((await raw(g.id)).providerDraftId).toBe("g1");
   });
 
   it("refuses a draft whose read-back would be too long to speak", async () => {
@@ -340,7 +356,10 @@ describe("GET /api/drafts and approve: new fields, back-compat, drift", () => {
     expect(sent).toMatchObject({ status: "sent", kind: "email", connectorId: "google", providerDraftId: gmailId, providerMessageId: `msg_for_${gmailId}` });
     const raw = JSON.parse((await deps.kv.hget("t:drafts", "drf_legacy"))!) as Record<string, unknown>;
     expect(raw.providerDraftId).toBe(gmailId);
-    expect(raw.gmailDraftId).toBe(gmailId); // still readable by the previous release
+    expect(raw.providerMessageId).toBe(`msg_for_${gmailId}`);
+    // Re-saved on send: the old names are migrated away, not mirrored.
+    expect(raw).not.toHaveProperty("gmailDraftId");
+    expect(raw).not.toHaveProperty("gmailMessageId");
   });
 
   it("refuses with changed_in_provider when To/Cc/Bcc/Subject were edited in Gmail; nothing is sent", async () => {
