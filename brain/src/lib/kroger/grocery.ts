@@ -17,8 +17,8 @@ export * from "./rules";
 
 /**
  * Kroger / King Soopers grocery module (docs/CONNECTORS.md §2, §7; backlog "Connector: Kroger").
- * Slice 1: provider logic only. Registering `grocery.search` / `grocery.cart.add` on a `kroger`
- * connector, OAuth + ConnectionStore wiring and the Claude tools come in slice 2.
+ * Provider logic. The `kroger` connector (lib/connectors/kroger) registers it as `grocery.search` /
+ * `grocery.cart.add` behind `invokeCapability`; the Claude tools come in a later slice.
  *
  * - Scopes: `product.compact` (search) and `cart.basic:write` (add). Kroger's public API has no
  *   checkout, order, pickup-slot or payment endpoint, and this module calls none. Checkout is a
@@ -91,8 +91,11 @@ export class GroceryInputError extends Error {
 }
 
 /**
- * 401/403: token expired, revoked or missing a scope. Slice 2 maps an owner-token failure to
- * `needs_reauth`; an app-token (client credentials) failure is a server config problem, not the owner's.
+ * 401/403: token expired, revoked or missing a scope. Not mapped to `needs_reauth`: the connector
+ * retries a 401 once with a freshly refreshed token, and a dead grant already surfaces from the
+ * refresh as `ReauthRequiredError` (→ `needs_reauth`). A 401/403 that survives a good refresh is a
+ * scope or Kroger-side problem, so the connection is left as is and the message asks the owner to
+ * reconnect. An app-token (client credentials) failure is a server config problem, not the owner's.
  */
 export class KrogerAuthError extends Error {
   constructor(

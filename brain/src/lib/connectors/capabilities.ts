@@ -3,6 +3,20 @@ import { ADDRESS_MAX, normalizeAddress } from "../address";
 import type { CalendarEvent, DriveFile, EmailMessage, EmailSummary } from "../google/workspace";
 import type { ContactLookup } from "../google/contacts";
 import { CONTACT_NAME_MAX_CHARS, CONTACT_NAME_RE, CONTACTS_MAX } from "../google/contacts-rules";
+import type { CartAddResult, Product } from "../kroger/grocery";
+import {
+  CART_MAX_LINES,
+  CART_MAX_QTY,
+  CART_MIN_QTY,
+  GROCERY_QUERY_DIGIT_RUN_RE,
+  GROCERY_QUERY_MAX_CHARS,
+  GROCERY_QUERY_MAX_WORDS,
+  GROCERY_QUERY_MIN_CHARS,
+  GROCERY_QUERY_RE,
+  GROCERY_SEARCH_MAX,
+  KROGER_LOCATION_ID_RE,
+  KROGER_PRODUCT_ID_RE,
+} from "../kroger/rules";
 
 /**
  * Capability interfaces (docs/CONNECTORS.md §2).
@@ -173,6 +187,40 @@ export const CalendarInvitePrepareInput = z
   });
 export type CalendarInvitePrepareIn = z.infer<typeof CalendarInvitePrepareInput>;
 
+/**
+ * `grocery.search` (auto, read-only): the query goes to a third party, so it is short and plain
+ * (lib/kroger/rules.ts: no URLs, addresses, percent-encoding or runs of 5+ digits). The provider
+ * module checks the same rules again, counting code points.
+ */
+export const GrocerySearchInput = z.object({
+  query: z
+    .string()
+    .trim()
+    .min(GROCERY_QUERY_MIN_CHARS)
+    .refine((q) => Array.from(q).length <= GROCERY_QUERY_MAX_CHARS, `at most ${GROCERY_QUERY_MAX_CHARS} characters`)
+    .refine((q) => !GROCERY_QUERY_DIGIT_RUN_RE.test(q), "a grocery search can't contain long numbers (codes, UPCs or phone numbers)")
+    .refine((q) => GROCERY_QUERY_RE.test(q), "a grocery search can only contain letters, numbers, spaces and basic punctuation")
+    .refine((q) => q.split(/\s+/).length <= GROCERY_QUERY_MAX_WORDS, `at most ${GROCERY_QUERY_MAX_WORDS} words`),
+  locationId: z.string().regex(KROGER_LOCATION_ID_RE, "must be a Kroger store id").optional(),
+  max: z.number().int().min(1).max(GROCERY_SEARCH_MAX).optional(),
+});
+
+/**
+ * `grocery.cart.add` (auto, capped, add-only): product ids must also have come from a recent
+ * `grocery.search` (checked by the provider module before any call). No money moves.
+ */
+export const GroceryCartAddInput = z.object({
+  items: z
+    .array(
+      z.object({
+        productId: z.string().regex(KROGER_PRODUCT_ID_RE, "must be a product id from a grocery search"),
+        quantity: z.number().int().min(CART_MIN_QTY).max(CART_MAX_QTY),
+      }),
+    )
+    .min(1)
+    .max(CART_MAX_LINES),
+});
+
 /** What a prepare-tier capability returns: the pending Draft and its code-built read-back. Nothing was sent. */
 export interface PrepareOutput {
   draftId: string;
@@ -229,6 +277,8 @@ export interface CapabilityIO {
   "files.read": { in: z.infer<typeof FilesReadInput>; out: DriveFile[]; provider: DriveFile[] };
   "contacts.lookup": { in: z.infer<typeof ContactsLookupInput>; out: ContactLookup; provider: ContactLookup };
   "video.create_room": { in: z.infer<typeof VideoCreateRoomInput>; out: VideoRoom; provider: VideoRoom };
+  "grocery.search": { in: z.infer<typeof GrocerySearchInput>; out: Product[]; provider: Product[] };
+  "grocery.cart.add": { in: z.infer<typeof GroceryCartAddInput>; out: CartAddResult; provider: CartAddResult };
 }
 export type ImplementedCapability = keyof CapabilityIO;
 export type In<C extends ImplementedCapability> = CapabilityIO[C]["in"];
@@ -243,6 +293,8 @@ export const INPUT_SCHEMAS: { [C in ImplementedCapability]: z.ZodType<In<C>> } =
   "files.read": FilesReadInput,
   "contacts.lookup": ContactsLookupInput,
   "video.create_room": VideoCreateRoomInput,
+  "grocery.search": GrocerySearchInput,
+  "grocery.cart.add": GroceryCartAddInput,
 };
 
 /** Plain words for the owner (Connections screen). */

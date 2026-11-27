@@ -63,6 +63,13 @@ function summarize(cap: CapabilityId, input: unknown): string {
       return `lookup "${String(i.name)}"`;
     case "video.create_room":
       return `room "${String(i.topic)}"${typeof i.start === "string" ? ` at ${i.start}` : " (instant)"}`;
+    case "grocery.search":
+      return `grocery search "${String(i.query)}"${typeof i.locationId === "string" ? ` at store ${i.locationId}` : ""}`;
+    case "grocery.cart.add": {
+      const items = Array.isArray(i.items) ? (i.items as { quantity?: unknown }[]) : [];
+      const units = items.reduce((n, l) => n + (typeof l.quantity === "number" ? l.quantity : 0), 0);
+      return `cart add: ${items.length} line${items.length === 1 ? "" : "s"}, ${units} item${units === 1 ? "" : "s"}`;
+    }
     default:
       return cap;
   }
