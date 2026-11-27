@@ -21,6 +21,8 @@ const PRINCIPAL_ROUTES = [
   /^\/api\/drafts(\/[A-Za-z0-9_-]{1,64}\/(approve|discard))?$/,
   /^\/api\/(ask|transcribe|speak)$/,
   /^\/api\/commitments(\/[A-Za-z0-9_-]{1,64}\/complete)?$/,
+  // GET /api/commands and the ack only; POST /api/commands stays withDevice, so a cookie alone gets 401 there.
+  /^\/api\/commands(\/[A-Za-z0-9_-]{1,64}\/ack)?$/,
 ];
 const isPrincipalRoute = (p: string) => PRINCIPAL_ROUTES.some((r) => r.test(p));
 
