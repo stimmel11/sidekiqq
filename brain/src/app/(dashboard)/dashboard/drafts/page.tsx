@@ -13,12 +13,14 @@ export const dynamic = "force-dynamic";
 
 const DONE: Record<string, string> = {
   sent: "Sent. It went out from your Google account, and any linked follow-up is closed.",
+  sent_warning: "Sent, with a warning: part of it didn't go as planned (for an invite, usually the video link). Check it in Google Calendar or Gmail.",
   discarded: "Discarded. Nothing was sent; the Gmail copy is still in your Drafts folder.",
 };
 
 export default async function DraftsPage({ searchParams }: { searchParams: Promise<{ done?: string }> }) {
   await requireOwnerSession();
-  const done = DONE[(await searchParams).done ?? ""];
+  const key = (await searchParams).done ?? "";
+  const done = Object.hasOwn(DONE, key) ? DONE[key] : undefined;
   const drafts = (await getDeps().repos.drafts.listPending()).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
   return (
