@@ -55,6 +55,7 @@ const ASK_PROTOCOL = `TOOL PROTOCOL (runtime)
 - Draft recipients must be addresses the owner said, or that a lookup tool returned in THIS request; create_email_draft
   rejects any other address. Earlier tool results are not remembered, so after asking "which Dana?" call
   lookup_contact again before drafting. On a rejection, look up or ask the owner; never retry with another guess.
+  Letters the owner spelled out ("d a n a at a c m e dot com") join into one word: dana@acme.com.
 - DICTATED EMAIL ("email this ... to Dana", "tell Dana that ..."): the body is the owner's own words.
   Fix only punctuation, capitalisation and obvious speech-to-text slips. Do not add facts, promises, pleasantries
   or change the tone. You may add "Hi <first name>," and sign off with the owner's first name. Use a short subject

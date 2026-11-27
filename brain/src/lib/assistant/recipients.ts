@@ -28,11 +28,35 @@ const JSON_ESCAPE_RE = /\\[nrtbf"\\/]/g;
 // Spoken / mixed forms from speech-to-text: "dana at acme dot com", "dana.kim at acme dot com",
 // "dana at acme.com", "dana dot kim at acme dot co dot uk", "j underscore lee at mail dash host dot io".
 // A word may itself contain literal . _ - (STT often writes those). Spelled-out letters
-// ("d a n a at ...") are not handled: the owner gets asked for the address instead.
+// ("d a n a at a c m e dot com", "D, A, N, A at ...", "D-A-N-A at ...") are joined first by
+// joinSpelledLetters; "d. a. n. a." (dots) and letters glued to a word ("dana.k i m") are not.
 const WORD = "[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?";
 const SEP = "\\s+(?:dot|period|underscore|dash|hyphen)\\s+";
 const LABEL = `${WORD}(?:\\s+(?:dash|hyphen)\\s+${WORD}){0,4}`;
 const SPOKEN_RE = new RegExp(`(?<![A-Za-z0-9._-])(${WORD}(?:${SEP}${WORD}){0,3})\\s+at\\s+(${LABEL}(?:\\s+dot\\s+${LABEL}){0,4})(?![A-Za-z0-9])`, "gi");
+
+// A run of single letters/digits read out one by one, never touching . _ - or another letter
+// (so "dana.k i m" and "j_l e e" are not glued into a word). Anywhere, the letters may be
+// separated by spaces ("a c m e dot com"). Commas ("D, A, N, A") and hyphens (three or more
+// letters: "D-A-N-A") are joined only right before "at", i.e. in the local part: in a domain
+// "x-y-z" is a real hyphenated label and "a, b" is not a domain anyone said. Each run is capped
+// at 64 characters (an address's local part) so the scan stays linear on hostile input.
+const ONE = "[A-Za-z0-9](?![A-Za-z0-9._])";
+const BEFORE = "(?<![A-Za-z0-9._-])";
+const AFTER_SPACES = "(?![._-][A-Za-z0-9])";
+const BEFORE_AT = "(?=,?[ \\t]+at[ \\t])";
+const SPELLED_SPACES_RE = new RegExp(`${BEFORE}${ONE}(?:[ \\t]+${ONE}){1,63}${AFTER_SPACES}`, "g");
+const SPELLED_COMMAS_RE = new RegExp(`${BEFORE}${ONE}(?:,[ \\t]*${ONE}){1,63}${BEFORE_AT}`, "g");
+const SPELLED_HYPHENS_RE = new RegExp(`${BEFORE}${ONE}(?:-${ONE}){2,63}${BEFORE_AT}`, "g");
+
+/**
+ * Joins spelled-out letters into one word: "d a n a at a c m e dot com" → "dana at acme dot com".
+ * Only for the spoken-form scan; written addresses are scanned on the original text.
+ */
+export function joinSpelledLetters(text: string): string {
+  const join = (run: string) => run.replace(/[^A-Za-z0-9]/g, "");
+  return text.replace(SPELLED_COMMAS_RE, join).replace(SPELLED_HYPHENS_RE, join).replace(SPELLED_SPACES_RE, join);
+}
 
 const SEP_CHAR: Record<string, string> = { dot: ".", period: ".", underscore: "_", dash: "-", hyphen: "-" };
 
@@ -60,10 +84,13 @@ export function extractAddresses(text: string): string[] {
   const out = new Set<string>();
   const clean = text.replace(JSON_ESCAPE_RE, " ");
   for (const m of clean.matchAll(EMAIL_RE)) out.add(m[0].replace(/^['.]+|['.]+$/g, "").toLowerCase());
-  for (const m of clean.matchAll(SPOKEN_RE)) {
-    const domain = joinSpoken(m[2]!);
-    if (!domain.includes(".")) continue; // "at noon" is English, not an address
-    out.add(`${joinSpoken(m[1]!)}@${domain}`.toLowerCase());
+  const spelled = joinSpelledLetters(clean);
+  for (const t of spelled === clean ? [clean] : [clean, spelled]) {
+    for (const m of t.matchAll(SPOKEN_RE)) {
+      const domain = joinSpoken(m[2]!);
+      if (!domain.includes(".")) continue; // "at noon" is English, not an address
+      out.add(`${joinSpoken(m[1]!)}@${domain}`.toLowerCase());
+    }
   }
   return [...out];
 }
