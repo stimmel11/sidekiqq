@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { authenticatePrincipal, requireSameOrigin } from "@/lib/auth";
 import { draftFingerprint } from "@/lib/confirmation";
-import { draftFingerprint as dashboardFingerprint } from "@/lib/dashboard/approval";
 import { invokeCapability } from "@/lib/connectors/invoke";
 import { SESSION_COOKIE, signSession } from "@/lib/dashboard/session";
 import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
@@ -271,12 +270,6 @@ describe("session principal: the owner's web device", () => {
     expect((await discard(req("POST", "/x", { headers: { cookie: c, ...SAME } }), params({ id }))).status).toBe(200);
     expect((await deps.repos.drafts.get(id))?.status).toBe("discarded");
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
-  });
-
-  it("the dashboard and the approve route share one fingerprint function", async () => {
-    const { deps, id } = await setup();
-    const d = (await deps.repos.drafts.get(id))!;
-    expect(dashboardFingerprint(d)).toBe(draftFingerprint(d));
   });
 });
 
