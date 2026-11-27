@@ -292,7 +292,8 @@ export class OutlookMail {
 
   /**
    * Ids of messages received in the Inbox and Sent Items since `since`, newest first, for the cron
-   * scanner (the Gmail scanner's `(in:inbox OR in:sent) after:` query). Follows `@odata.nextLink`
+   * scanner (`email.read` `list_ids`; Gmail's equivalent is `(in:inbox OR in:sent) after:`). Mail an
+   * Inbox rule files into a subfolder is not listed (known limitation). Follows `@odata.nextLink`
    * up to `max` per folder, then merges and caps at `max`.
    */
   async listRecentIds(since: Date, max: number): Promise<{ id: string; threadId: string }[]> {
@@ -308,21 +309,30 @@ export class OutlookMail {
           $filter: `${field} ge ${iso}`,
           $orderby: `${field} desc`,
           $top: String(Math.min(max, 100)),
-          $select: `id,conversationId,${field}`,
+          $select: `id,conversationId,internetMessageId,${field}`,
         });
-        const rows: { id: string; threadId: string; at: number }[] = [];
+        const rows: { id: string; threadId: string; at: number; mid?: string }[] = [];
         for await (const m of this.pages<GraphMessage>(first, max)) {
           if (!usable(m)) continue;
-          rows.push({ id: m.id!, threadId: m.conversationId!, at: Date.parse((field === "sentDateTime" ? m.sentDateTime : m.receivedDateTime) ?? "") || 0 });
+          const mid = typeof m.internetMessageId === "string" && m.internetMessageId ? m.internetMessageId.slice(0, 1000) : undefined;
+          rows.push({ id: m.id!, threadId: m.conversationId!, at: Date.parse((field === "sentDateTime" ? m.sentDateTime : m.receivedDateTime) ?? "") || 0, ...(mid ? { mid } : {}) });
         }
         return rows;
       }),
     );
+    // Mail the owner sends to themselves has an Inbox copy and a Sent Items copy with different
+    // ids but the same Internet Message-ID: keep one, so the scanner doesn't analyse it twice.
     const seen = new Set<string>();
+    const seenMid = new Set<string>();
     return perFolder
       .flat()
       .sort((a, b) => b.at - a.at)
-      .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+      .filter((r) => {
+        if (seen.has(r.id) || (r.mid && seenMid.has(r.mid))) return false;
+        seen.add(r.id);
+        if (r.mid) seenMid.add(r.mid);
+        return true;
+      })
       .slice(0, max)
       .map(({ id, threadId }) => ({ id, threadId }));
   }

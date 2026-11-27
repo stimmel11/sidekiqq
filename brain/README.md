@@ -142,7 +142,8 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
    permissions `offline_access`, `User.Read` and `Mail.Read` (nothing else), and create a client secret. Set
    `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET` (optional: `MICROSOFT_TENANT`, default `common`;
    `MICROSOFT_REDIRECT_URI`; `MICROSOFT_ALLOWED_EMAIL`). Then press **Connect** next to Outlook on the Connections
-   screen. SideKiqq reads Outlook only when Google is not connected (with both, it reads Gmail). Microsoft has no
+   screen. SideKiqq reads Outlook only when Gmail can't be read (Google not connected, or Gmail reading off; with
+   both usable, it reads Gmail). Drafts are still Gmail only. Microsoft has no
    revoke endpoint, so after Disconnect remove the app's consent in your Microsoft account too. The client secret
    expires (Azure's maximum is 2 years): renew it before then, or sign-in fails with `invalid_client`.
 

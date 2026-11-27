@@ -187,6 +187,16 @@ describe("OutlookMail.getMessage / getThread / account", () => {
 });
 
 describe("OutlookMail.listRecentIds", () => {
+  it("lists a message the owner sent to themselves once (Inbox and Sent copies share the Message-ID)", async () => {
+    const g = new FakeGraph((u) => {
+      expect(u.searchParams.get("$select")).toContain("internetMessageId");
+      if (u.pathname.includes("/inbox/"))
+        return { body: { value: [gm("inSelf", { receivedDateTime: "2026-10-30T12:00:01Z", internetMessageId: "<self@contoso.com>" }), gm("i2", { receivedDateTime: "2026-10-30T09:00:00Z" })] } };
+      return { body: { value: [gm("sentSelf", { receivedDateTime: undefined, sentDateTime: "2026-10-30T12:00:00Z", internetMessageId: "<self@contoso.com>" })] } };
+    });
+    expect((await mail(g).listRecentIds(new Date("2026-10-30T00:00:00Z"), 10)).map((r) => r.id)).toEqual(["inSelf", "i2"]);
+  });
+
   it("lists Inbox and Sent Items since a date, merges newest first, dedupes and caps", async () => {
     const g = new FakeGraph((u) => {
       if (u.pathname.includes("/inbox/")) {

@@ -81,16 +81,24 @@ export function connectorFor(connectors: readonly Connector[], cap: CapabilityId
 
 /**
  * Which connector serves `cap` for this call. With one provider (the usual case) it is that one.
- * When several offer it (Gmail and Outlook both offer `email.read`), the first in registration order
- * that has a stored connection wins, so an Outlook-only owner reads Outlook and a Google owner keeps
- * reading Gmail. With none stored, the first one answers (its "not connected" error is the one the
- * owner hears). A stored connection that needs reauth or is switched off still wins: the call then
- * fails with "reconnect X" / "turned off" instead of silently reading another mailbox (§7).
- * Limitation: with both connected, only the first (Google) is read; choosing per call is later work.
+ * When several offer it (Gmail and Outlook both offer `email.read`), in registration order:
+ *  1. the first connected one that can serve `cap` (owner switch on, scope granted), so an owner who
+ *     uses Google only for calendar (Gmail reading off) and Outlook for mail reads Outlook;
+ *  2. else the first with any stored record (e.g. needs reauth): the call then fails with
+ *     "reconnect X" instead of silently reading another mailbox (§7);
+ *  3. else the first one, whose "not connected" error is the one the owner hears.
+ * Limitation: with both usable, only the first (Google) is read; choosing per call is later work.
+ * The choice is made per call, so it only changes when the owner connects, disconnects or flips a switch.
  */
 export async function routeConnector(deps: Deps, cap: CapabilityId): Promise<Connector | undefined> {
   const candidates = deps.connectors().filter((c) => c.capabilities.includes(cap));
   if (candidates.length <= 1) return candidates[0];
+  const stored = await Promise.all(candidates.map((c) => deps.connections.load(c.id).catch(() => null)));
+  const usable = candidates.find((c, i) => {
+    const s = stored[i];
+    return s && s.status === "connected" && effectiveCapabilities(c, s).includes(cap);
+  });
+  if (usable) return usable;
   for (const c of candidates) if (await deps.connections.hasRecord(c.id)) return c;
   return candidates[0];
 }

@@ -12,6 +12,7 @@ the thinking.
                      HTTPS  [SideKiqq Brain on Vercel] <--HTTPS (polls /api/alerts)-- [Reachy Mini desktop robot]
                                |-- Claude API (EA operating rules)
                                |-- Gmail / Google Calendar / Google Drive (OAuth)
+                               |-- Outlook / Microsoft 365 mail, read-only (OAuth, optional)
                                |-- Upstash Redis (commitments, open loops, clients, timeline)
                                \-- FCM push (proactive alerts)
 ```
@@ -55,7 +56,7 @@ device ("approved on web"), so `/api/ask` with a session accepts only `"device":
 | GET | /api/commands?limit=<1..50> | – | `{ "items": DeviceCommand[] }` — this device's pending, unexpired commands, oldest first. A command stays listed until acked or expired, so dedupe by `id` |
 | POST | /api/commands/:id/ack | `{ "result": "opened"\|"dismissed"\|"failed" }` | `{ "ok": true }`. Target device only (others get 404). Same result again is a no-op; a different one is 409; `opened` after `expiresAt` is 410 |
 | POST | /api/devices/register | `{ "transport"?: "fcm", "fcmToken": string, "device": string }` (native apps; `transport` defaults to `"fcm"`), or `{ "transport": "webpush", "subscription": { "endpoint": string, "keys": { "p256dh": string, "auth": string } } }` (`web` devices only) | `{ "ok": true }`. 400 `transport_not_allowed` (webpush from a non-`web` device, or FCM from a `web` device); 400 if the endpoint is not `https` on a browser push service (`fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.apple.com`, `*.notify.windows.com`; no credentials or port); 503 `webpush_disabled` (VAPID not configured). A subscription belongs to one device; registering it elsewhere moves it |
-| POST | /api/cron/scan | (Vercel Cron, secret header) | scans Gmail, extracts commitments, pushes alerts |
+| POST | /api/cron/scan | (Vercel Cron, secret header) | scans the connected mailbox (Gmail, or Outlook when Gmail can't be read), extracts commitments, pushes alerts |
 
 `spoken` is a short (<= 2 sentences) version of `reply` for watch TTS and glasses audio.
 
@@ -229,7 +230,9 @@ while the command is still listed). Kinds Reachy doesn't run are ignored and not
 Connecting more services (Outlook, IMAP, Zoom, Meet, Kroger, remote MCP servers) follows `docs/CONNECTORS.md` (framework
 slices 1–4 implemented: every Gmail/Calendar/Drive/Contacts call goes through `invokeCapability` and its fixed policy table;
 `email.draft` creates the pending Draft with its code-built `readback`; the owner manages connections on the dashboard Connections
-screen; a refresh failure marks the connection `needs_reauth` and raises one `connection_needs_reauth` alert): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
+screen; a refresh failure marks the connection `needs_reauth` and raises one `connection_needs_reauth` alert; Outlook / Microsoft 365
+is a read-only `email.read` connector when `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET` are set, and when Gmail and Outlook are both
+connected and usable only Gmail is read; drafts are Gmail only so far): capability interfaces, a fixed per-capability safety policy, and confirm-tier actions stored as Drafts so
 `/api/drafts/:id/approve` stays the only executor.
 
 ## Auth

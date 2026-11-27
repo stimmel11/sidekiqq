@@ -18,8 +18,8 @@ import { MicrosoftAuthError, OUTLOOK_CONNECTOR_ID } from "./auth";
  * refused and nothing is saved. The account label comes from Graph `/me` (User.Read).
  *
  * No `revoke`: Microsoft has no OAuth token revocation endpoint. Disconnect deletes the stored token
- * and forgets the in-memory access token; the owner removes the app's consent in their Microsoft
- * account if they want the grant gone too.
+ * (a cached access token then stops working: `MicrosoftAuth` re-checks the record on every use); the
+ * owner removes the app's consent in their Microsoft account if they want the grant gone too.
  */
 
 export const outlookOAuth: OAuthFlow = {
@@ -32,7 +32,14 @@ export const outlookOAuth: OAuthFlow = {
   },
 
   async complete(deps: Deps, query: URLSearchParams): Promise<ConnectResult> {
-    if (query.get("error")) return { code: "cancelled" };
+    const error = query.get("error");
+    if (error) {
+      // Only the owner saying no is "cancelled". consent_required (a work tenant needing admin
+      // consent), invalid_scope, server_error etc. are failures. Log the code, never error_description.
+      if (error === "access_denied") return { code: "cancelled" };
+      console.error("[outlook] sign-in returned an error", error.replace(/[^a-z_]/g, "").slice(0, 40));
+      return { code: "failed" };
+    }
     const code = query.get("code");
     const state = query.get("state");
     if (!code || !state) return { code: "invalid" };

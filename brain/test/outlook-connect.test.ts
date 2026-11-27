@@ -244,6 +244,11 @@ describe("Outlook connect (generic /api/connections/outlook/*)", () => {
     const { state } = await issueState(deps);
     expect(await callback(`error=access_denied&state=${state}`)).toBe("cancelled");
     expect(await callback(`state=${state}`)).toBe("invalid");
+    // Anything but the owner saying no is a failure (e.g. a work tenant that needs admin consent).
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await callback(`error=consent_required&error_description=AADSTS65001+tenant+detail&state=${state}`)).toBe("failed");
+    expect(JSON.stringify(errors.mock.calls)).toContain("consent_required");
+    expect(JSON.stringify(errors.mock.calls)).not.toContain("AADSTS");
     expect(await callback(`code=c&state=${"x".repeat(32)}`)).toBe("expired");
     expect(calls).toHaveLength(0);
     expect(await deps.connections.load("outlook")).toBeNull();
@@ -379,6 +384,26 @@ describe("MicrosoftAuth token minting", () => {
     expect((await deps.connections.load("outlook"))!.secret).toBe("ms-rt-OLD");
   });
 
+  it("doesn't bring back a connection the owner disconnected while the rotated token was being saved", async () => {
+    let disconnectNext = false;
+    const { deps } = outlookDeps(() => {
+      disconnectNext = true;
+      return json(200, { access_token: "ms-at-1", refresh_token: "ms-rt-ROTATED", expires_in: 3600 });
+    });
+    await storeOutlook(deps);
+    const load = deps.connections.load.bind(deps.connections);
+    vi.spyOn(deps.connections, "load").mockImplementation(async (id: string) => {
+      const out = await load(id);
+      if (disconnectNext) {
+        disconnectNext = false;
+        await deps.connections.clear("outlook"); // lands between the write-back's read and its write
+      }
+      return out;
+    });
+    await deps.outlookAuth()!.accessToken();
+    expect(await deps.connections.hasRecord("outlook")).toBe(false);
+  });
+
   it("doesn't overwrite a reconnect that landed during a refresh", async () => {
     let deps!: TestDeps;
     ({ deps } = outlookDeps(() => {
@@ -421,6 +446,11 @@ describe("MicrosoftAuth token minting", () => {
     const err = await deps.outlookAuth()!.accessToken().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(MicrosoftAuthError);
     expect((err as Error).message).toBe("Microsoft sign-in failed (HTTP 400, invalid_client).");
+    // Microsoft usually answers invalid_client with 401: still not a reconnect.
+    const { deps: d401 } = outlookDeps(() => json(401, { error: "invalid_client" }));
+    await storeOutlook(d401);
+    await expect(d401.outlookAuth()!.accessToken()).rejects.toBeInstanceOf(MicrosoftAuthError);
+    expect((await d401.connections.load("outlook"))!.status).toBe("connected");
   });
 
   it("not connected is OutlookNotConnectedError, before any network call", async () => {
@@ -453,6 +483,7 @@ describe("MicrosoftAuth token minting", () => {
 describe("email.read routing between Gmail and Outlook", () => {
   it("keeps reading Gmail when Outlook isn't configured or isn't connected", async () => {
     const deps = makeDeps({ outlook: true });
+    await deps.connections.save("google", { secret: "g-rt", secretKind: "refresh_token", grantedScopes: [], connectedAt: "2026-10-01T00:00:00.000Z" });
     deps.ws.messages = [email("g1")];
     expect((await routeConnector(deps, "email.read"))!.id).toBe("google");
     const out = await readEmail(deps, { op: "search", query: "deposit", max: 5 }, { caller: "ask" });
@@ -477,6 +508,28 @@ describe("email.read routing between Gmail and Outlook", () => {
     await deps.connections.save("google", { secret: "g-rt", secretKind: "refresh_token", grantedScopes: [], connectedAt: "2026-10-01T00:00:00.000Z" });
     await storeOutlook(deps);
     expect((await routeConnector(deps, "email.read"))!.id).toBe("google");
+  });
+
+  it("reads Outlook when Google is connected but can't read mail (switched off or scope not granted)", async () => {
+    const deps = makeDeps({ outlook: true });
+    await storeOutlook(deps);
+    const google = { secret: "g-rt", secretKind: "refresh_token" as const, connectedAt: "2026-10-01T00:00:00.000Z" };
+    await deps.connections.save("google", { ...google, grantedScopes: [], enabled: ["calendar.read"] });
+    expect((await routeConnector(deps, "email.read"))!.id).toBe("outlook");
+    expect((await routeConnector(deps, "calendar.read"))!.id).toBe("google");
+    await deps.connections.save("google", { ...google, grantedScopes: ["https://www.googleapis.com/auth/calendar.readonly"] });
+    expect((await routeConnector(deps, "email.read"))!.id).toBe("outlook");
+  });
+
+  it("an Outlook sign-in without Mail.Read shows as disabled and never reads", async () => {
+    const deps = makeDeps({ outlook: true, googleConnected: false });
+    setDeps(deps);
+    await storeOutlook(deps, { grantedScopes: ["offline_access", "User.Read"] });
+    const row = await outlookRow();
+    expect(row).toMatchObject({ status: "disabled" });
+    expect(row!.capabilities[0]).toMatchObject({ id: "email.read", enabled: false, granted: false });
+    await expect(readEmail(deps, { op: "account" }, { caller: "cron" })).rejects.toBeInstanceOf(ConnectionUnusableError);
+    expect(deps.outlook.calls).toHaveLength(0);
   });
 
   it("an Outlook connection that needs reauth fails with 'reconnect Outlook' instead of falling back to Gmail", async () => {
@@ -548,11 +601,19 @@ describe("email.read routing between Gmail and Outlook", () => {
     expect((await deps.repos.commitments.list("open"))[0]).toMatchObject({ what: "Send deposit", source: { kind: "email", ref: "o1" } });
   });
 
-  it("the cron scan answers 409 when the routed mailbox isn't connected", async () => {
+  it("the cron scan answers 409 when no mailbox is connected", async () => {
+    const deps = makeDeps({ outlook: true, googleConnected: false });
+    setDeps(deps);
+    const res = await scanGet(req("GET", "/api/cron/scan", { token: "test-cron-secret" }));
+    expect(res.status).toBe(409);
+    expect(deps.outlook.calls).toHaveLength(0);
+  });
+
+  it("the cron scan answers 409 when the stored Outlook record can't be read", async () => {
     const deps = makeDeps({ outlook: true, googleConnected: false });
     setDeps(deps);
     await storeOutlook(deps);
-    deps.outlook.connected = false;
+    deps.outlook.connected = false; // what MicrosoftAuth throws when load() finds no readable record
     const res = await scanGet(req("GET", "/api/cron/scan", { token: "test-cron-secret" }));
     expect(res.status).toBe(409);
   });

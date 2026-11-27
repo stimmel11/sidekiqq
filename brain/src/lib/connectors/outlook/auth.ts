@@ -20,7 +20,8 @@ import { CapabilityDeniedError, ReauthRequiredError } from "../types";
  *
  * The connect/callback/disconnect legs are the generic `/api/connections/outlook/*` routes, through
  * the `OAuthFlow` in ./oauth.ts. Microsoft has no OAuth token revocation endpoint, so disconnect
- * deletes the stored token only; the owner removes the app's consent at
+ * deletes the stored token only (a cached access token is refused afterwards because every use
+ * re-checks the stored record); the owner removes the app's consent at
  * account.live.com/consent/Manage (personal) or myapps.microsoft.com (work/school).
  */
 
@@ -116,7 +117,7 @@ interface TokenResponse {
 export class MicrosoftAuth implements OutlookTokenSource {
   private cached: { token: string; expiresAt: number; connectedAt: string } | null = null;
   private inflight: Promise<string> | null = null;
-  /** Bumped by every code exchange and forget, so a refresh started before one can't cache its token after it. */
+  /** Bumped by every code exchange, so a refresh started before one can't cache its token after it. */
   private generation = 0;
 
   constructor(
@@ -207,12 +208,6 @@ export class MicrosoftAuth implements OutlookTokenSource {
     this.cached = null;
   }
 
-  /** Forget everything in memory (disconnect). Microsoft has no token revocation endpoint. */
-  forget(): void {
-    this.cached = null;
-    this.generation++;
-  }
-
   private async refresh(): Promise<string> {
     const generation = this.generation;
     const stored = await this.connections.load(OUTLOOK_CONNECTOR_ID);
@@ -225,9 +220,10 @@ export class MicrosoftAuth implements OutlookTokenSource {
       // Best effort: the old refresh token stays valid at Microsoft, so a failed write only means
       // the next refresh uses the older one. Only replace the record we refreshed from.
       const rotated = t.refreshToken;
+      // A disconnect or reconnect since our load wins (the record is left alone).
       await this.connections
-        .update(OUTLOOK_CONNECTOR_ID, (v) => {
-          if (v.secret !== stored.secret || v.connectedAt !== stored.connectedAt) return v;
+        .updateIfUnchanged(OUTLOOK_CONNECTOR_ID, (v) => {
+          if (v.secret !== stored.secret || v.connectedAt !== stored.connectedAt) return null;
           const { lastError: _drop, ...rest } = v;
           return { ...rest, secret: rotated, status: "connected", ...(t.scopes.length ? { grantedScopes: t.scopes } : {}) };
         })
