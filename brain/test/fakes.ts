@@ -15,6 +15,10 @@ import { GoogleConnector, type ContactsLookup } from "@/lib/connectors/google";
 import { ZoomConnector } from "@/lib/connectors/zoom";
 import type { ZoomRooms } from "@/lib/connectors/zoom/meetings";
 import type { ZoomAuth } from "@/lib/connectors/zoom/auth";
+import { KrogerConnector } from "@/lib/connectors/kroger";
+import type { KrogerAuth } from "@/lib/connectors/kroger/auth";
+import { KrogerGrocery, type KrogerApi } from "@/lib/kroger/grocery";
+import { KvSearchedProducts } from "@/lib/kroger/searched";
 import type { In, VideoRoom } from "@/lib/connectors/capabilities";
 import type { ContactLookup, ContactQuery } from "@/lib/google/contacts";
 import { buildSenders } from "@/lib/connectors/senders";
@@ -244,7 +248,7 @@ export class FakeZoomRooms implements ZoomRooms {
 }
 
 export function makeDeps(
-  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean; zoomAuth?: (connections: ConnectionStore) => ZoomAuth } = {},
+  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean; zoomAuth?: (connections: ConnectionStore) => ZoomAuth; kroger?: KrogerApi; krogerAuth?: (connections: ConnectionStore) => KrogerAuth } = {},
 ): TestDeps {
   let now = opts.now ?? new Date("2026-10-16T15:00:00Z");
   const clock = () => now;
@@ -260,6 +264,8 @@ export function makeDeps(
   const webPushFake = new FakeWebPush();
   const zoom = new FakeZoomRooms();
   let zoomAuth: ZoomAuth | null | undefined; // one shared instance, like buildDeps
+  let krogerAuth: KrogerAuth | null | undefined;
+  const krogerGrocery = opts.kroger ? new KrogerGrocery(opts.kroger, new KvSearchedProducts(kv, "t", undefined, () => now.getTime())) : null;
   const connected = opts.googleConnected ?? true;
   const workspace = async (): Promise<Workspace> => {
     if (!connected) {
@@ -287,8 +293,11 @@ export function makeDeps(
     },
     connections,
     googleTokens: new GoogleTokenStore(connections),
-    connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : [])],
+    connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : []),
+      ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery, connections)] : []),
+    ],
     zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
+    krogerAuth: () => (krogerAuth ??= opts.krogerAuth?.(connections) ?? null),
     senders: () =>
       buildSenders({
         google: { workspace, mailer: async () => sender, calendar: async () => inviter },

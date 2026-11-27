@@ -57,8 +57,8 @@ export function krogerConfigFromEnv(appUrl: string): KrogerAppConfig | null {
 }
 
 export class KrogerNotConnectedError extends CapabilityDeniedError {
-  constructor() {
-    super("grocery.cart.add", "Kroger is not connected. Ask the owner to connect Kroger from the dashboard's Connections screen.");
+  constructor(capability = "grocery.cart.add") {
+    super(capability, "Kroger is not connected. Ask the owner to connect Kroger from the dashboard's Connections screen.");
     this.name = "KrogerNotConnectedError";
   }
 }
