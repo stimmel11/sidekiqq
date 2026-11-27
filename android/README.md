@@ -14,7 +14,7 @@ The binding contracts are in `../ARCHITECTURE.md`: the Brain API and the medalli
 - Android Studio Narwhal or newer. To use the AI Glasses emulator you need the **latest Canary**, because the XR tools ship there first.
 - JDK 17+. The JBR bundled with Studio works.
 - AGP 8.13, Kotlin 2.2, Gradle 8.14.3. The Gradle wrapper (`gradlew`, `gradle/wrapper/gradle-wrapper.jar`) is committed.
-- **Build status:** this project has not yet been compiled end to end with AGP. The sandbox it was written in cannot reach Google Maven or dl.google.com. The pure-JVM logic and its tests were compiled and run with Kotlin 2.0.21. The first real `./gradlew build` may still surface API mismatches, most likely in the alpha XR code (see below).
+- **Build status:** `.github/workflows/android.yml` compiles the project on GitHub Actions for every PR that touches `android/`. The first run (2026-11-22) built the phone (with glasses XR) and watch debug APKs and passed the JVM tests. Download the APKs from the run's `sidekiqq-debug-apks` artifact. They have not been installed on a real phone, watch or glasses yet.
 - Phone: Android 11 (API 30) or newer. Glasses projection needs Android 16 (API 36) on the phone. On older phones the glasses fall back to plain Bluetooth-headset mode.
 
 ## Open and run

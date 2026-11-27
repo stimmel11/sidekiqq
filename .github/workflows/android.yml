@@ -1,0 +1,142 @@
+# Builds the Android debug APKs and runs the JVM unit tests.
+# The cloud build crew can't reach Google Maven, so this workflow is where the
+# Android code (phone, Galaxy Glasses, watch, shared client) is first compiled.
+#
+# Glasses XR uses an alpha artifact (androidx.xr.projected). If it can't be
+# resolved, the phone is built with -Psidekiqq.xr=false and a warning says so.
+# If it resolves, a compile error in the XR code fails the job.
+name: Android
+
+on:
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: android
+
+jobs:
+  build:
+    name: Debug APKs + JVM tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Also validates gradle/wrapper/gradle-wrapper.jar against Gradle's known checksums.
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          # Only main writes the cache, so PRs can't poison it.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Accept Android SDK licenses
+        working-directory: .
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      # google-services.json is never committed; the apps build without push.
+      - name: Check no Firebase config is present
+        run: test ! -f phone/google-services.json && test ! -f watch/google-services.json
+
+      - name: JVM unit tests (shared, phone, watch)
+        id: tests
+        run: ./gradlew --stacktrace --continue :shared:testDebugUnitTest :phone:testDebugUnitTest :watch:testDebugUnitTest -Psidekiqq.xr=false
+
+      - name: Assemble watch debug APK
+        id: watch
+        run: ./gradlew --stacktrace :watch:assembleDebug
+
+      # Falls back to -Psidekiqq.xr=false only when the alpha XR artifact can't be
+      # resolved. If it resolves, a compile error in src/xr fails the job.
+      - name: Resolve glasses XR dependency
+        id: resolve
+        continue-on-error: true
+        run: |
+          ./gradlew -q :phone:dependencies --configuration debugCompileClasspath > "$RUNNER_TEMP/phone-deps.txt"
+          grep -q "androidx.xr.projected" "$RUNNER_TEMP/phone-deps.txt"
+          if grep -E "FAILED|Could not resolve" "$RUNNER_TEMP/phone-deps.txt"; then exit 1; fi
+
+      - name: Assemble phone debug APK (with glasses XR)
+        id: xr
+        if: steps.resolve.outcome == 'success'
+        run: ./gradlew --stacktrace :phone:assembleDebug
+
+      - name: Assemble phone debug APK (fallback, -Psidekiqq.xr=false)
+        id: noxr
+        if: steps.resolve.outcome == 'failure'
+        run: |
+          echo "::warning title=Glasses XR unavailable::androidx.xr.projected did not resolve; the phone is built with -Psidekiqq.xr=false. See the 'Resolve glasses XR dependency' step."
+          ./gradlew --stacktrace :phone:assembleDebug -Psidekiqq.xr=false
+
+      - name: Job summary
+        if: always()
+        env:
+          TESTS: ${{ steps.tests.outcome }}
+          WATCH: ${{ steps.watch.outcome }}
+          RESOLVE: ${{ steps.resolve.outcome }}
+          XR: ${{ steps.xr.outcome }}
+          NOXR: ${{ steps.noxr.outcome }}
+        run: |
+          {
+            echo "### Android build"
+            echo "- JVM unit tests: **${TESTS}** (reports in the \`android-test-reports\` artifact)"
+            echo "- Watch debug APK: **${WATCH}**"
+            if [ "$XR" = "success" ]; then
+              echo "- Phone debug APK: built **with** glasses XR"
+            elif [ "$XR" = "failure" ]; then
+              echo "- Phone debug APK: **failed** with glasses XR (the XR artifact resolved, so there is no fallback)"
+            elif [ "$NOXR" = "success" ]; then
+              echo "- Phone debug APK: XR artifact did not resolve; built with \`-Psidekiqq.xr=false\` (glasses use the Bluetooth-headset bridge only)"
+            elif [ "$NOXR" = "failure" ]; then
+              echo "- Phone debug APK: **failed** (also with \`-Psidekiqq.xr=false\`)"
+            else
+              echo "- Phone debug APK: not built (an earlier step failed: tests=${TESTS}, watch=${WATCH}, xr-resolve=${RESOLVE})"
+            fi
+            echo ""
+            echo "Debug builds only: no release signing, no google-services.json, so no FCM push."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload debug APKs
+        if: steps.watch.outcome == 'success' && (steps.xr.outcome == 'success' || steps.noxr.outcome == 'success')
+        uses: actions/upload-artifact@v5
+        with:
+          name: sidekiqq-debug-apks
+          path: |
+            android/phone/build/outputs/apk/debug/*.apk
+            android/watch/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: android-test-reports
+          path: |
+            android/*/build/reports/tests/
+            android/*/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
