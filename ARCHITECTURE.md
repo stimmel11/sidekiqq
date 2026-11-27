@@ -30,13 +30,14 @@ the thinking.
 
 ## Brain API contract (all JSON, all require `Authorization: Bearer <device token>`)
 
-Exception (web app slices 2c-i and 2c-ii-a, `withPrincipal`): `GET /api/drafts`, `POST /api/drafts/:id/approve`,
-`POST /api/drafts/:id/discard`, `POST /api/ask`, `POST /api/transcribe`, `POST /api/speak`, `GET /api/commitments`
-and `POST /api/commitments/:id/complete` also accept the owner's dashboard session cookie when no `Authorization` header
+Exception (web app slices 2c-i, 2c-ii-a and 4, `withPrincipal`): `GET /api/drafts`, `POST /api/drafts/:id/approve`,
+`POST /api/drafts/:id/discard`, `POST /api/ask`, `POST /api/transcribe`, `POST /api/speak`, `GET /api/commitments`,
+`POST /api/commitments/:id/complete`, `GET /api/commands` and `POST /api/commands/:id/ack` also accept the owner's dashboard session cookie when no `Authorization` header
 is sent (any `Authorization` header means a device token only; a bad one is 401, never a cookie fallback). A
 session write must be same-origin: `Sec-Fetch-Site: same-origin` and/or `Origin` equal to the brain's origin (or the configured `APP_URL` origin);
 both headers missing, or either one cross-site, is 403 `cross_site`. The session acts as the owner's `web`
 device ("approved on web"), so `/api/ask` with a session accepts only `"device": "web"` (400 `device_mismatch`).
+`POST /api/commands` stays device-token only.
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
@@ -130,7 +131,8 @@ interface DraftItem { id: string; kind: DraftKind /* absent from older brains = 
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy"|"web"
   /* "web" = a signed-in browser (dashboard / web app, docs/WEBAPP.md §6.3): created server-side, never
-     paired with a code, never a command target today. Clients must tolerate it in `from` and timelines. */;
+     paired with a code; a target for `open_url`/`call_contact` only when no phone is paired or when picked explicitly.
+     Clients must tolerate it in `from` and timelines. */;
 interface Alert { id: string /* sequence no. = cursor */; at: string; title: string; body: string;
   kind: "email"|"commitment_overdue"|"connection_needs_reauth" /* clients show unknown kinds as plain alerts */;
   importance?: Importance; priority: "high"|"normal";
@@ -149,8 +151,12 @@ A command is started on one device and runs on another ("call Dana" said to the 
 Every command is a **hand-off** (`user_finishes` in `docs/CONNECTORS.md`): the target shows `label` and acts only after
 the owner taps. Devices never auto-launch a command, dial with `ACTION_DIAL` (never `ACTION_CALL`), and nothing is ever
 sent because of a command; messages still go only through `/api/drafts/:id/approve`.
-- Targets: `open_url`, `call_contact` and `reachy_start` → `phone`; `reachy_wake` → `reachy`. Default is the most recently seen
-  non-revoked device of that kind; `target.deviceId` picks one.
+- Targets: `open_url` and `call_contact` → `phone`, else `web` (a signed-in browser, docs/WEBAPP.md §7); `reachy_start` →
+  `phone` only (an https page can't reach the robot's LAN daemon); `reachy_wake` → `reachy`. Default is the most recently
+  seen non-revoked device of the first kind in that order that has one (any phone beats a browser); `target.device` or
+  `target.deviceId` picks one. A `web` target gets no FCM nudge: the dashboard reads `GET /api/commands` every 15 s while
+  visible (and on focus), re-checks the fields in the browser (`lib/commands/links.ts`), builds `tel:` / `https://wa.me/`
+  / the https link from them (never from `label`), and opens nothing until the owner taps; the tap acks `opened`.
 - `open_url`: `https` only, no credentials or port, host on a code allowlist (`meet.google.com`, `zoom.us` and its
   subdomains, `www.kroger.com`, `www.kingsoopers.com`).
 - `call_contact`: digits with optional `+ ( ) . -` and spaces, 3–15 digits; `*`, `#`, `,` and `;` are rejected (no

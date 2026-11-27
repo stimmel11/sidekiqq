@@ -77,7 +77,7 @@ Live in `brain/src/components/ui/`. Server components unless noted.
 | `Badge` | Importance badge (`importance="HIGH"`). `Tag` for neutral/success/danger/accent labels. |
 | `ListRow` | One item in a `<ul className="divide-y divide-line">`: title, badges, detail, mono meta, actions, optional importance rule on the left edge. |
 | `EmptyState` | Says what an empty list means and what to do next. |
-| `ConfirmDialog` (client) | Native `<dialog>` modal. Focus starts on Cancel; Escape closes. Its confirm button alone carries `confirmName=confirmValue`, so the server can require it. Used for Approve and Discard. |
+| `ConfirmDialog` (client) | Native `<dialog>` modal. Focus starts on Cancel; Escape closes. Its `action` (server action or client function) runs only from its confirm button, which alone carries an optional `confirmName=confirmValue` the server can require (Connections disconnect). Used for Approve, Discard and Disconnect; Approve posts the draft fingerprint to the approve route from the browser. |
 | `AppShell` + `SideNav` / `TabBar` (client) | Ink side rail on desktop; top bar plus bottom tab bar under 768px. Skip link, `aria-current`, counts with screen-reader labels. |
 | `Segmented` | Link-based filter (state lives in the URL). |
 | `PageHeader`, `Notice`, `CopyButton` (client) | Page title + lede; post-action status line (`role=status`/`alert`); clipboard copy. |

@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { authenticatePrincipal, requireSameOrigin } from "@/lib/auth";
 import { draftFingerprint } from "@/lib/confirmation";
-import { draftFingerprint as dashboardFingerprint } from "@/lib/dashboard/approval";
 import { invokeCapability } from "@/lib/connectors/invoke";
 import { SESSION_COOKIE, signSession } from "@/lib/dashboard/session";
 import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
@@ -272,12 +271,6 @@ describe("session principal: the owner's web device", () => {
     expect((await deps.repos.drafts.get(id))?.status).toBe("discarded");
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
   });
-
-  it("the dashboard and the approve route share one fingerprint function", async () => {
-    const { deps, id } = await setup();
-    const d = (await deps.repos.drafts.get(id))!;
-    expect(dashboardFingerprint(d)).toBe(draftFingerprint(d));
-  });
 });
 
 describe("middleware: the session cookie reaches only withPrincipal and connections routes", () => {
@@ -296,7 +289,7 @@ describe("middleware: the session cookie reaches only withPrincipal and connecti
     for (const p of ["/api/drafts/drf_abc123/approve", "/api/drafts"]) expect((await middleware(mk(p, false))).status).toBe(401);
     const basic = new NextRequest(new URL("/api/drafts/drf_abc123/approve", "https://brain.example"), { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${value}`, authorization: "Basic eA==" } });
     expect(await passes(basic)).toBe(true); // the route then refuses it: an Authorization header means a device token only
-    for (const p of ["/api/drafts/drf_abc123", "/api/drafts/drf_abc123/approve/x", "/api/drafts/a.b/approve", "/api/commands"]) {
+    for (const p of ["/api/drafts/drf_abc123", "/api/drafts/drf_abc123/approve/x", "/api/drafts/a.b/approve", "/api/commands/cmd_1"]) {
       expect((await middleware(mk(p, true))).status, p).toBe(401);
     }
   });

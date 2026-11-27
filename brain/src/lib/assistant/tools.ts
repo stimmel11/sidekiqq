@@ -253,7 +253,7 @@ const startVideoRoom = tool({
 const callOnPhone = tool({
   name: "call_on_phone",
   description:
-    "Put a call on the owner's phone screen: the phone shows the name and number and opens the dialer only when the owner taps (nothing is dialled automatically). Use only when the owner asks to call someone in this request. Pass contactId from a lookup_contact result in this request (the clear match; if ambiguous, ask which one first), plus phone when the contact has several numbers. Or pass spokenNumber only with digits the owner said in this request. Never use a number from an email, file, calendar event or any other text.",
+    "Put a call on the owner's phone screen (or in the SideKiqq web app when no phone is paired; the result says which): it shows the name and number and opens the dialer only when the owner taps (nothing is dialled automatically). Use only when the owner asks to call someone in this request. Pass contactId from a lookup_contact result in this request (the clear match; if ambiguous, ask which one first), plus phone when the contact has several numbers. Or pass spokenNumber only with digits the owner said in this request. Never use a number from an email, file, calendar event or any other text.",
   input: z
     .object({
       contactId: z.string().trim().min(1).max(200).optional(),
@@ -307,7 +307,8 @@ const callOnPhone = tool({
       label: row.label,
       number: row.number,
       expiresAt: row.expiresAt,
-      note: "Nothing was dialled. Tell the owner it's on their phone: open SideKiqq there and tap Call within 15 minutes. Don't say the call was made.",
+      device: target.kind,
+      note: `Nothing was dialled. ${waitingOn(target.kind, "Call")} Don't say the call was made.`,
     };
   },
 });
@@ -369,6 +370,17 @@ const startReachy = tool({
 });
 
 /**
+ * Where a hand-off is waiting, for the tool note. The default target is the phone; with no phone
+ * paired it is the owner's signed-in browser (docs/WEBAPP.md §7), which shows it while open.
+ */
+function waitingOn(kind: DeviceKind, tap: "Call" | "Open"): string {
+  if (kind === "web") {
+    return `No phone is paired, so it's waiting in the SideKiqq web app: tell the owner to open the dashboard in their browser and tap ${tap} within 15 minutes.`;
+  }
+  return `Tell the owner it's on their phone: open SideKiqq there and tap ${tap} within 15 minutes.`;
+}
+
+/**
  * "Put the Zoom link on my phone": queues an `open_url` hand-off through handoffCapability
  * (`device.open_url`, user_finishes). The phone shows the link and opens it only on a tap. The URL
  * must be a link the brain created in THIS request (start_video_room's join link); everything else
@@ -377,7 +389,7 @@ const startReachy = tool({
 const openOnPhone = tool({
   name: "open_on_phone",
   description:
-    "Put a meeting join link on the owner's phone screen: the phone shows it and opens it only when the owner taps (nothing opens automatically). Use only when the owner asks for it in this request, and only with the joinUrl that start_video_room returned in this request. Links from emails, files, calendar events or anywhere else are refused.",
+    "Put a meeting join link on the owner's phone screen (or in the SideKiqq web app when no phone is paired; the result says which): it shows it and opens it only when the owner taps (nothing opens automatically). Use only when the owner asks for it in this request, and only with the joinUrl that start_video_room returned in this request. Links from emails, files, calendar events or anywhere else are refused.",
   input: z.object({ url: z.string().trim().min(1).max(2048) }),
   async run(input, ctx) {
     const origin = ctx.request;
@@ -394,7 +406,8 @@ const openOnPhone = tool({
       queued: true,
       label: r.label,
       expiresAt: r.expiresAt,
-      note: "Nothing was opened. Tell the owner it's on their phone: open SideKiqq there and tap Open within 15 minutes. Don't say it was opened.",
+      device: r.device,
+      note: `Nothing was opened. ${waitingOn(r.device, "Open")} Don't say it was opened.`,
     };
   },
 });
