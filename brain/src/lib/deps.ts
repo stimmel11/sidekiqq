@@ -18,6 +18,7 @@ import { KrogerGrocery } from "./kroger/grocery";
 import { KvSearchedProducts } from "./kroger/searched";
 import { GmailDraftSender, GoogleCalendarInviter } from "./connectors/google/send";
 import { buildSenders, type SenderRegistry } from "./connectors/senders";
+import { invokeCapability } from "./connectors/invoke";
 import type { Connector } from "./connectors/types";
 import { llmFromEnv, type LLM } from "./assistant/llm";
 import { pushSenderFromEnv, type PushSender } from "./push";
@@ -139,7 +140,7 @@ export function tenantDeps(platform: PlatformDeps, tenant: TenantScope): TenantD
   const krogerGrocery = krogerAuth ? new KrogerGrocery(krogerAuthedApi(krogerAuth), new KvSearchedProducts(kv, prefix)) : null;
   let connectors: Connector[] | null = null;
   let senders: SenderRegistry | null = null;
-  return {
+  const self: TenantDeps = {
     tenant: { id: tenant.id, prefix },
     repos,
     connections,
@@ -160,9 +161,18 @@ export function tenantDeps(platform: PlatformDeps, tenant: TenantScope): TenantD
           calendar: async () => new GoogleCalendarInviter(await googleTokens.authorizedClient()),
         },
         clock,
+        // The Zoom room inside an approved invite goes through invokeCapability like any other
+        // room (fixed no-invite body, connection checks, audit). Caller "task": the owner just
+        // approved this draft on a device. Always THIS tenant's connections and audit log, with
+        // the platform half for clock/push (never the global getDeps()).
+        videoRooms: {
+          create: (input) => invokeCapability({ ...platform, ...self }, "video.create_room", input, { caller: "task" }),
+          save: (draftId, room) => repos.drafts.setVideoRoom(draftId, room),
+        },
       })),
     webPushSubs: new WebPushStore(kv, prefix, keyRingFromEnv),
   };
+  return self;
 }
 
 /** Platform + the legacy owner tenant. Same keys and behaviour as before the split. */

@@ -125,7 +125,7 @@ interface DraftItem { id: string; kind: DraftKind /* absent from older brains = 
                       location: <location>." when set; both cleaned of addresses/format characters). Absent from
                       older brains. Speak any body excerpt after it behind an explicit marker ("Message begins:") */;
   when?: { start: string; end: string } /* calendar kinds only */;
-  location?: string /* calendar kinds only */; conference?: "meet" /* calendar_invite only: Meet link added when sent */;
+  location?: string /* calendar kinds only */; conference?: "meet" | "zoom" /* calendar_invite only: Meet link, or a Zoom room made at approve time, added when sent */;
   client?: string; createdAt: string; }
 interface Brief { kind; generatedAt; sections: { title: string; items: string[] }[]; top5: TopItem[]; }
 type DeviceKind = "watch"|"glasses"|"medallion"|"phone"|"reachy"|"web"

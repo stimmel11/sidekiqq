@@ -26,7 +26,7 @@ export interface ReadbackFields {
   subject: string;
   when?: { start: string; end: string };
   /** calendar_invite only: a video link the executor will add. */
-  conference?: "meet";
+  conference?: "meet" | "zoom";
   /** Calendar kinds: the event location (untrusted; cleaned like the subject, said last). */
   location?: string;
 }
@@ -131,7 +131,7 @@ export function buildReadback(d: ReadbackFields, timeZone = "UTC"): string {
   const titled = (word: string) => (subject ? `with the ${word}: ${subject}.` : `with no ${word}.`);
   switch (kind) {
     case "calendar_invite":
-      return `Calendar invite to ${list(to) || "no one"}, ${when}, ${d.conference === "meet" ? "with a Google Meet link, " : ""}${titledWithLocation(subject, cleanSubject(d.location ?? ""))}`;
+      return `Calendar invite to ${list(to) || "no one"}, ${when}, ${d.conference === "meet" ? "with a Google Meet link, " : d.conference === "zoom" ? "with a Zoom link, " : ""}${titledWithLocation(subject, cleanSubject(d.location ?? ""))}`;
     case "calendar_hold":
       return `Calendar hold, ${when}, ${titled("title")}`;
     default:

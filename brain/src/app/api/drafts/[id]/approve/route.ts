@@ -5,7 +5,9 @@ import { ProviderRefusedError } from "@/lib/connectors/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// 60 s: a Zoom invite makes the room (up to 10 s, plus one 401 retry and a token refresh) before
+// the Google insert; being cut off between room and save would orphan a room.
+export const maxDuration = 60;
 
 /**
  * THE ONLY ROUTE THAT SENDS EMAIL OR CALENDAR INVITES (see ARCHITECTURE.md safety rules and test/no-send.test.ts).

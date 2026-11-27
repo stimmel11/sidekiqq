@@ -6,8 +6,9 @@ import type { ZoomRooms } from "./meetings";
 /**
  * The built-in Zoom connector (docs/CONNECTORS.md §2, §10 step 5). One capability so far:
  * `video.create_room` (auto, unannounced room for the owner). It has no send path and no way to
- * invite anyone; the Zoom link inside a calendar invite comes later with `calendar.invite.prepare`
- * and is created by its executor at approve time.
+ * invite anyone. A Zoom link inside a calendar invite (`calendar.invite.prepare` with
+ * `conference: "zoom"`) is made by the invite executor at approve time, through this same
+ * capability (invokeCapability, caller "task").
  *
  * Not first-party, so `invokeCapability` logs its arguments (topic, start, duration) in the audit log.
  */
