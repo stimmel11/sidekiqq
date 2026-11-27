@@ -20,6 +20,7 @@ import { OutlookNotConnectedError, type MicrosoftAuth } from "@/lib/connectors/o
 import type { In, VideoRoom } from "@/lib/connectors/capabilities";
 import type { ContactLookup, ContactQuery } from "@/lib/google/contacts";
 import { buildSenders } from "@/lib/connectors/senders";
+import { invokeCapability } from "@/lib/connectors/invoke";
 import type { CreateParams, LLM } from "@/lib/assistant/llm";
 import type { PushMessage, PushSender } from "@/lib/push";
 import type { WebPushOptions, WebPushOutcome, WebPushSender } from "@/lib/push/webpush";
@@ -313,7 +314,7 @@ export function makeDeps(
     }
     return contacts;
   };
-  return {
+  const deps: TestDeps = {
     kv,
     repos,
     clock,
@@ -332,7 +333,16 @@ export function makeDeps(
     ],
     zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
     outlookAuth: () => (outlookAuth ??= opts.outlookAuth?.(connections) ?? null),
-    senders: () => buildSenders({ google: { workspace, mailer: async () => sender, calendar: async () => inviter }, clock }),
+    senders: () =>
+      buildSenders({
+        google: { workspace, mailer: async () => sender, calendar: async () => inviter },
+        clock,
+        // Same wiring as lib/deps.ts.
+        videoRooms: {
+          create: (input) => invokeCapability(deps, "video.create_room", input, { caller: "task" }),
+          save: (draftId, room) => repos.drafts.setVideoRoom(draftId, room),
+        },
+      }),
     push: () => pushFake,
     webPush: () => webPushFake,
     webPushSubs: new WebPushStore(kv, "t", () => ({ current: key })),
@@ -358,6 +368,7 @@ export function makeDeps(
       now = d;
     },
   };
+  return deps;
 }
 
 export function req(

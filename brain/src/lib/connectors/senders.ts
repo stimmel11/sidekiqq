@@ -1,6 +1,6 @@
 import type { Workspace } from "../google/workspace";
 import type { Draft, DraftKind } from "../models";
-import { googleEmailExecutor, googleInviteExecutor, type CalendarInviter, type MailSender } from "./google/send";
+import { googleEmailExecutor, googleInviteExecutor, type CalendarInviter, type InviteVideoRooms, type MailSender } from "./google/send";
 
 export type { DraftKind };
 
@@ -78,11 +78,13 @@ export class SenderRegistry {
 export interface SenderFactories {
   google: { workspace: () => Promise<Workspace>; mailer: () => Promise<MailSender>; calendar: () => Promise<CalendarInviter> };
   clock?: () => Date;
+  /** Zoom rooms for `conference: "zoom"` invites; absent = such invites are refused at approve. */
+  videoRooms?: InviteVideoRooms;
 }
 
 export function buildSenders(f: SenderFactories): SenderRegistry {
   return new SenderRegistry({
     "google:email": googleEmailExecutor(f.google.workspace, f.google.mailer),
-    "google:calendar_invite": googleInviteExecutor(f.google.calendar, f.clock),
+    "google:calendar_invite": googleInviteExecutor(f.google.calendar, f.clock, f.videoRooms),
   });
 }

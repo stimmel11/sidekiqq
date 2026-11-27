@@ -333,7 +333,7 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     public var when: When?
     /** Calendar kinds only: the event location. */
     public var location: String?
-    /** calendar_invite only: "meet" = a Google Meet link is added when it's sent. */
+    /** calendar_invite only: "meet" = a Google Meet link, "zoom" = a Zoom link, added when it's sent. */
     public var conference: String?
     public var client: String?
     public var createdAt: String

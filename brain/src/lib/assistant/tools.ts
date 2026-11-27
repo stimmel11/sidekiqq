@@ -206,7 +206,7 @@ const lookupContact = tool({
 const startVideoRoom = tool({
   name: "start_video_room",
   description:
-    "Create a Zoom meeting room for the owner to open: right now (no start) or at a given start time. Nobody is invited and Zoom emails no one. Returns the join link; show it on screen. To invite people to a video call, use create_calendar_invite with conference \"meet\" instead (Zoom links in invites aren't available yet); never paste the link into an email draft unless the owner asks for exactly that.",
+    "Create a Zoom meeting room for the owner to open: right now (no start) or at a given start time. Nobody is invited and Zoom emails no one. Returns the join link; show it on screen. To invite people to a video call, use create_calendar_invite with conference \"zoom\" (or \"meet\") instead; never paste the link into an email draft unless the owner asks for exactly that.",
   input: z.object({
     topic: z.string().trim().min(1).max(200).describe('Short meeting name, e.g. "Call with Dana"'),
     start: isoish.optional().describe("Start time for a scheduled room. Omit for an instant room."),
@@ -581,7 +581,7 @@ const createEmailDraft = tool({
 const createCalendarInvite = tool({
   name: "create_calendar_invite",
   description:
-    "Prepare a calendar INVITE for the owner to approve. This NEVER sends or creates anything: the invite goes out (Google Calendar emails each attendee) only after the owner approves it on a device. Set conference \"meet\" to add a Google Meet link. Times are in the owner's time zone unless they carry an offset. Attendees must be addresses the owner said or a lookup returned in this request.",
+    "Prepare a calendar INVITE for the owner to approve. This NEVER sends or creates anything: the invite goes out (Google Calendar emails each attendee) only after the owner approves it on a device. Set conference \"meet\" to add a Google Meet link, or \"zoom\" for a Zoom link (the room is made only when the owner approves; needs Zoom connected). Times are in the owner's time zone unless they carry an offset. Attendees must be addresses the owner said or a lookup returned in this request.",
   input: z.object({
     title: z.string().trim().min(1).max(200).describe('Short event title, e.g. "Kickoff with Dana"'),
     start: isoish.describe("Start date and time, e.g. 2026-10-27T14:00"),
@@ -590,7 +590,7 @@ const createCalendarInvite = tool({
     attendees: z.array(z.string().trim().min(3).max(256)).min(1).max(INVITE_ATTENDEES_MAX).describe("Plain addresses only (name@example.com), one per item, not the owner"),
     location: optStr(200),
     description: optStr(5_000).describe("Event description the attendees will see"),
-    conference: z.enum(["meet"]).optional().describe('"meet" adds a Google Meet link'),
+    conference: z.enum(["meet", "zoom"]).optional().describe('"meet" adds a Google Meet link; "zoom" adds a Zoom link'),
     client: optStr(200),
   }),
   async run(input, ctx) {

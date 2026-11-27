@@ -4,8 +4,10 @@ import type { OAuth2Client } from "../../google/auth";
 import { addressesIn, normalizeAddress } from "../../address";
 import type { DraftEnvelope, Workspace } from "../../google/workspace";
 import type { Draft } from "../../models";
+import { VIDEO_ROOM_MAX_MINUTES, type VideoRoom } from "../capabilities";
 import type { DraftCheck, DraftExecutor } from "../senders";
-import { ProviderRefusedError } from "../types";
+import { CapabilityDeniedError, CapabilityUnavailableError, ConnectionUnusableError, ProviderRefusedError, ReauthRequiredError } from "../types";
+import { ZoomApiError } from "../zoom/errors";
 
 /**
  * THE ONLY CODE THAT SENDS GMAIL OR WRITES GOOGLE CALENDAR EVENTS.
@@ -161,8 +163,46 @@ export function inviteEventId(draftId: string): string {
   return `skq${hex.slice(0, 40)}`;
 }
 
+/**
+ * Zoom rooms for `conference: "zoom"` invites. `create` goes through invokeCapability
+ * ("video.create_room": fixed no-invite body, connection/switch checks, audit), wired in lib/deps.ts.
+ * `save` stores the room on the draft (DraftsRepo.setVideoRoom) BEFORE the event is written.
+ */
+export interface InviteVideoRooms {
+  create(input: { topic: string; start: string; durationMin: number }): Promise<VideoRoom>;
+  save(draftId: string, room: NonNullable<Draft["videoRoom"]>): Promise<boolean>;
+}
+
+/** Zoom's room length for an invite: the event's length in minutes, within video.create_room's limits. */
+export function zoomRoomMinutes(when: { start: string; end: string }): number {
+  const min = Math.round((Date.parse(when.end) - Date.parse(when.start)) / 60_000);
+  return Math.min(VIDEO_ROOM_MAX_MINUTES, Math.max(5, Number.isFinite(min) ? min : 30));
+}
+
+/** The join text appended to the event description. Only what Zoom returned: link, id, passcode. */
+export function zoomJoinText(room: NonNullable<Draft["videoRoom"]>): string {
+  return [`Join Zoom meeting: ${room.joinUrl}`, `Meeting ID: ${room.meetingId}`, ...(room.passcode ? [`Passcode: ${room.passcode}`] : [])].join("\n");
+}
+
+/**
+ * Any failure while making the Zoom room happens BEFORE the event write, so nothing was sent:
+ * always a ProviderRefusedError (422, draft stays pending). Fixed messages, never provider text
+ * beyond ZoomApiError's own (which is ours too).
+ */
+function zoomRefusal(err: unknown): ProviderRefusedError {
+  const tail = " The invite was not sent.";
+  if (err instanceof ZoomApiError) return new ProviderRefusedError(`${err.message}${tail}`);
+  if (err instanceof ReauthRequiredError) return new ProviderRefusedError(`Zoom needs to be reconnected from Connections.${tail}`);
+  if (err instanceof ConnectionUnusableError) {
+    return new ProviderRefusedError(err.reason === "needs_reauth" ? `Zoom needs to be reconnected from Connections.${tail}` : `Zoom rooms are turned off in Connections.${tail}`);
+  }
+  if (err instanceof CapabilityUnavailableError) return new ProviderRefusedError(`Zoom isn't set up on this SideKiqq.${tail}`);
+  if (err instanceof CapabilityDeniedError) return new ProviderRefusedError(`Zoom isn't connected, or SideKiqq couldn't make the room.${tail}`);
+  return new ProviderRefusedError(`SideKiqq couldn't make the Zoom room.${tail}`);
+}
+
 /** Sender-registry entry for ("google", "calendar_invite"). */
-export function googleInviteExecutor(inviter: () => Promise<CalendarInviter>, clock: () => Date = () => new Date()): DraftExecutor {
+export function googleInviteExecutor(inviter: () => Promise<CalendarInviter>, clock: () => Date = () => new Date(), rooms?: InviteVideoRooms): DraftExecutor {
   return {
     check: async (d: Draft): Promise<DraftCheck> => {
       if (d.kind !== "calendar_invite" || !d.when || d.to.length < 1 || d.cc.length > 0 || d.providerDraftId) {
@@ -179,11 +219,30 @@ export function googleInviteExecutor(inviter: () => Promise<CalendarInviter>, cl
     },
     execute: async (d: Draft) => {
       if (d.kind !== "calendar_invite" || !d.when) throw new Error("Not a calendar invite draft");
+      // Zoom: reuse the room an earlier attempt saved, else make one and save it before the event
+      // write, so a retried approve never makes a second room. No room → no event, nothing sent.
+      let room = d.conference === "zoom" ? d.videoRoom : undefined;
+      if (d.conference === "zoom" && !room) {
+        if (!rooms) throw new ProviderRefusedError("Zoom isn't set up on this SideKiqq. The invite was not sent.");
+        let made: VideoRoom;
+        try {
+          made = await rooms.create({ topic: d.subject, start: d.when.start, durationMin: zoomRoomMinutes(d.when) });
+        } catch (err) {
+          throw zoomRefusal(err);
+        }
+        room = { provider: "zoom", meetingId: made.meetingId, joinUrl: made.joinUrl, ...(made.passcode ? { passcode: made.passcode } : {}) };
+        // No event was written, so this is still a definite "nothing sent" (the unsaved room is
+        // unannounced; a retry may make one more).
+        const saved = await rooms.save(d.id, room).catch(() => false);
+        if (!saved) throw new ProviderRefusedError("SideKiqq made the Zoom room but couldn't save it on the invite. The invite was not sent; try approving again.");
+      }
+      const description = [d.body, room ? zoomJoinText(room) : ""].filter(Boolean).join("\n\n");
+      const location = d.location ?? room?.joinUrl;
       const created = await (await inviter()).insertInvite({
         eventId: inviteEventId(d.id),
         title: d.subject,
-        ...(d.body ? { description: d.body } : {}),
-        ...(d.location ? { location: d.location } : {}),
+        ...(description ? { description } : {}),
+        ...(location ? { location } : {}),
         start: d.when.start,
         end: d.when.end,
         attendees: [...d.to],
