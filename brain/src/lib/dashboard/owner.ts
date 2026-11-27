@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { isOwnerSecret } from "../auth";
 import { sha256 } from "../crypto";
 import type { Deps } from "../deps";
-import { config } from "../env";
+import { globalKey } from "../platform/keys";
 import { LOGIN_PATH } from "./guard";
 import { SESSION_COOKIE, sessionCookieOptions, sessionSecretFromEnv, signSession, verifySession } from "./session";
 
@@ -31,7 +31,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
 export async function loginWithOwnerSecret(deps: Deps, candidate: string, ip: string, now = new Date()): Promise<LoginResult> {
   const secret = sessionSecretFromEnv();
   if (!secret) return { ok: false, error: "Sign-in is turned off: set SESSION_SECRET (32+ characters) on the server." };
-  const attempts = await deps.kv.incrWithTtl(`${config.redisPrefix()}:dashlogin:${sha256(ip)}`, LOGIN_WINDOW_SECONDS);
+  const attempts = await deps.kv.incrWithTtl(globalKey("rl", "login", sha256(ip)), LOGIN_WINDOW_SECONDS);
   if (attempts > LOGIN_MAX_ATTEMPTS) return { ok: false, error: "Too many attempts. Wait 15 minutes and try again." };
   let valid = false;
   try {
@@ -40,6 +40,13 @@ export async function loginWithOwnerSecret(deps: Deps, candidate: string, ip: st
     return { ok: false, error: "Sign-in is turned off: OWNER_SECRET is not configured on the server." };
   }
   if (!valid) return { ok: false, error: "That owner secret didn't match." };
+  // Accounts A1 (docs/WEBAPP.md §3.2): make sure the owner tenant record exists on the legacy
+  // prefix. Best effort: nothing reads it yet, so a failure must never block sign-in.
+  try {
+    await deps.tenants.ensureOwnerTenant();
+  } catch (err) {
+    console.error("[dashboard] owner tenant record not created", err instanceof Error ? err.message : "unknown error");
+  }
   const token = await signSession(secret, now);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token.value, sessionCookieOptions(token.expiresAt));

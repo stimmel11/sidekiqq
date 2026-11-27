@@ -2,7 +2,6 @@ import { requireCron } from "@/lib/auth";
 import { getDeps } from "@/lib/deps";
 import { GoogleNotConnectedError } from "@/lib/google/auth";
 import { ConnectionUnusableError } from "@/lib/connectors/types";
-import { config } from "@/lib/env";
 import { errorResponse, json } from "@/lib/http";
 import { runScan } from "@/lib/scan/scanner";
 
@@ -18,7 +17,7 @@ async function handle(req: Request): Promise<Response> {
   try {
     requireCron(req);
     const deps = getDeps();
-    const lockKey = `${config.redisPrefix()}:lock:scan`;
+    const lockKey = `${deps.tenant.prefix}:lock:scan`;
     if (!(await deps.kv.set(lockKey, "1", { nx: true, exSeconds: 280 }))) {
       return json({ ok: true, skipped: "scan already running" });
     }
