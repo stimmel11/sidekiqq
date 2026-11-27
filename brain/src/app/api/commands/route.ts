@@ -1,4 +1,4 @@
-import { withDevice } from "@/lib/auth";
+import { withDevice, withPrincipal } from "@/lib/auth";
 import { HttpError, json, parseJson } from "@/lib/http";
 import { buildCommand, resolveTarget } from "@/lib/commands";
 import { nudgeCommandTarget } from "@/lib/commands/nudge";
@@ -28,8 +28,10 @@ export const POST = withDevice(async (req, { device, deps }) => {
  * GET /api/commands?limit=<1..50> — this device's pending, unexpired commands, oldest first.
  * A command stays here until the device acks it (POST /api/commands/:id/ack) or it expires,
  * so devices should dedupe by `id` while one is on screen.
+ * Also accepts the dashboard session (withPrincipal): the browser reads the owner's `web`
+ * device's hand-offs (docs/WEBAPP.md §7). POST stays device-token only.
  */
-export const GET = withDevice(async (req, { device, deps }) => {
+export const GET = withPrincipal(async (req, { device, deps }) => {
   const rawLimit = req.nextUrl.searchParams.get("limit");
   if (rawLimit !== null && !/^\d{1,2}$/.test(rawLimit)) throw new HttpError(400, "limit must be 1-50");
   const limit = rawLimit ? Number(rawLimit) : 20;

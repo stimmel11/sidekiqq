@@ -53,6 +53,8 @@ export interface HandoffResult {
   label: string;
   url: string;
   expiresAt: string;
+  /** Kind of the device it was queued for (`phone`, or `web` when no phone is paired). */
+  device: DeviceKind;
 }
 
 function isHandoffCapability(cap: string): cap is HandoffCapability {
@@ -121,7 +123,7 @@ export async function handoffCapability(deps: Deps, cap: string, input: unknown,
     }
     const allowed = new Set([...ctx.allowedUrls].map(href).filter((h): h is string => h !== null));
     if (!allowed.has(u.href)) {
-      throw new CommandError("only a link SideKiqq created in this request can be opened on the phone", "link_not_created");
+      throw new CommandError("only a link SideKiqq created in this request can be handed off", "link_not_created");
     }
     const fields = buildCommand({ kind: "open_url", url: u.href });
     target = resolveTarget("open_url", undefined, await deps.repos.devices.list());
@@ -132,5 +134,5 @@ export async function handoffCapability(deps: Deps, cap: string, input: unknown,
   await audit(true);
   // Same silent, id-only FCM nudge as POST /api/commands (best effort, never throws).
   await nudgeCommandTarget(deps, target, row.id);
-  return { queued: true, commandId: row.id, label: row.label, url: row.url!, expiresAt: row.expiresAt };
+  return { queued: true, commandId: row.id, label: row.label, url: row.url!, expiresAt: row.expiresAt, device: target.kind };
 }
