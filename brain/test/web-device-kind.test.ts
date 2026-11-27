@@ -5,7 +5,9 @@ import { ASK_DEVICE_RELAYS, AskRequestSchema, DEVICE_KINDS, DeviceKindSchema, PA
 import { POST as ask } from "@/app/api/ask/route";
 import { POST as pair } from "@/app/api/devices/pair/route";
 import { POST as createCommand } from "@/app/api/commands/route";
-import { CONFIRM_VALUE, approveDraftFromDashboard, draftFingerprint } from "@/lib/dashboard/approval";
+import { draftFingerprint } from "@/lib/confirmation";
+import { approveDraft } from "@/lib/dashboard/browser-api";
+import { sessionFetch } from "./session-fetch";
 import { encrypt } from "@/lib/crypto";
 import { config } from "@/lib/env";
 import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
@@ -145,7 +147,14 @@ describe("dashboard device is kind web", () => {
     setDeps(deps);
     const g = await deps.ws.createDraft({ to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached." });
     const d = await deps.repos.drafts.create({ providerDraftId: g.gmailDraftId, to: ["dana@acme.com"], subject: "Proposal", body: "Hi Dana, attached.", client: "ACME" });
-    expect(await approveDraftFromDashboard(deps, d.id, { confirm: CONFIRM_VALUE, confirmation: draftFingerprint(d) }, key)).toEqual({ ok: true });
+    process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef";
+    process.env.TOKEN_ENCRYPTION_KEY = key.toString("base64");
+    try {
+      expect(await approveDraft(d.id, draftFingerprint(d), await sessionFetch())).toEqual({ ok: true });
+    } finally {
+      delete process.env.SESSION_SECRET;
+      delete process.env.TOKEN_ENCRYPTION_KEY;
+    }
     expect(deps.sender.sendDraft).toHaveBeenCalledOnce();
     const events = await deps.repos.timeline.forClient("ACME");
     expect(events.some((e) => e.event.includes("(approved on web)"))).toBe(true);
