@@ -4,15 +4,16 @@ import { getCollection } from 'astro:content';
 import DeviceArt from './DeviceArt.astro';
 import StatusTag from './StatusTag.astro';
 import type { CollectionEntry } from 'astro:content';
-interface Props { data: CollectionEntry<'home'>['data']['devices'] }
-const { data } = Astro.props;
+interface Props { data: CollectionEntry<'home'>['data']['devices']; /** First block on the page: h1 at hero size. */ hero?: boolean }
+const { data, hero = false } = Astro.props;
+const Heading = hero ? 'h1' : 'h2';
 const devices = (await getCollection('devices')).sort((a, b) => a.data.order - b.data.order);
 ---
-<section class="wrap py-16 sm:py-20 lg:py-28">
+<section class:list={["wrap", hero ? "pt-14 pb-16 md:pt-20 lg:pt-24 lg:pb-20" : "py-16 sm:py-20 lg:py-28"]}>
   <div class="flex flex-wrap items-end justify-between gap-6">
-    <div class="max-w-2xl">
-      <h2 class="text-3xl font-semibold sm:text-[2.6rem]">{data.heading}</h2>
-      <p class="mt-4 text-lg text-muted">{data.intro}</p>
+    <div class="max-w-3xl">
+      <Heading class:list={["font-semibold", hero ? "text-[2.6rem] sm:text-[3.4rem] lg:text-[4.4rem] lg:leading-[1.02]" : "text-3xl sm:text-[2.6rem]"]}>{data.heading}</Heading>
+      <p class:list={["mt-4 text-muted", hero ? "text-lg sm:text-xl" : "text-lg"]}>{data.intro}</p>
     </div>
     <a href={data.link.href} class="btn btn-quiet">{data.link.label}</a>
   </div>

@@ -4,12 +4,12 @@
 # FAQ answers, which live in src/content/faq/). Edit text between the quotes.
 # All names and companies in the samples below are fictional.
 
-title: "SideKiqq — One brain. Wherever your hands are."
+title: "SideKiqq — It goes where you go"
 description: "SideKiqq reads your email and calendar, tracks every commitment, tells you who to follow up with, and never sends a word without your approval."
 
 hero:
-  headline: "One brain. Wherever your hands are."
-  subhead: "One SideKiqq knows your email, your calendar and every promise made in them, and picks up right where you left off on whatever device is closest. It drafts the reply. You decide whether it goes."
+  headline: "It goes where you go."
+  subhead: "SideKiqq reads your email and calendar, keeps track of every promise made in them, and tells you who needs an answer. It drafts the reply. You decide whether it goes."
   primaryCta: { label: "Join the waitlist", href: "#waitlist" }
   secondaryCta: { label: "See how it works", href: "#how-it-works" }
   sample:
