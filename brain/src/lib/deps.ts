@@ -1,4 +1,6 @@
 import { config } from "./env";
+import { legacyOwnerPrefix } from "./platform/keys";
+import { TenantRegistry } from "./platform/tenants";
 import { keyRingFromEnv } from "./crypto";
 import { UpstashKV, type KV } from "./kv";
 import { createRepos, type Repos } from "./repos";
@@ -21,15 +23,44 @@ import { transcriberFromEnv, type Transcriber } from "./transcribe";
 import { speechSynthesizerFromEnv, type SpeechSynthesizer } from "./tts";
 
 /**
- * Dependency container. Routes call getDeps(); tests call setDeps() with fakes.
+ * Dependency container, split per docs/WEBAPP.md §3.1 (slice A1):
+ *
+ * - `PlatformDeps`: shared, holds no customer data (KV client, clock, model/push/voice clients,
+ *   the tenant registry).
+ * - `TenantDeps`: everything built from one tenant's key prefix (repos, connections, connectors,
+ *   senders, Web Push subscriptions). Built by `tenantDeps(platform, tenant)`.
+ *
+ * Until principals resolve a tenant (A2), routes still call getDeps(), which is the owner
+ * tenant on the legacy prefix: exactly the keys used before the split. Tests call setDeps().
  * Everything that needs a secret is constructed lazily so unrelated routes keep working
  * (and `next build` succeeds) when a given integration isn't configured.
  */
-export interface Deps {
+export interface PlatformDeps {
   kv: KV;
-  repos: Repos;
   clock: () => Date;
   llm(): LLM;
+  push(): PushSender;
+  /** Web Push (VAPID) to browsers; disabled when VAPID_* aren't set. */
+  webPush(): WebPushSender;
+  transcriber(): Transcriber;
+  /** Text-to-speech for devices that play audio themselves (Reachy Mini). */
+  tts(): SpeechSynthesizer;
+  /** Platform tenant records (`g:tenant:*`, `g:owner`, `g:tenants`). */
+  tenants: TenantRegistry;
+}
+
+/**
+ * Which tenant a `TenantDeps` belongs to. `id` is null only for the legacy owner scope that
+ * getDeps() builds before the owner tenant record is looked up (A2 resolves it per request).
+ */
+export interface TenantScope {
+  id: string | null;
+  prefix: string;
+}
+
+export interface TenantDeps {
+  tenant: TenantScope;
+  repos: Repos;
   /** Encrypted per-connector credentials, status and enabled capabilities (docs/CONNECTORS.md §7). */
   connections: ConnectionStore;
   /** Google's view of `connections`, used by the Google OAuth routes. */
@@ -43,21 +74,44 @@ export interface Deps {
   zoomAuth(): ZoomAuth | null;
   /** SENDER REGISTRY. Must only be used by /api/drafts/[id]/approve (see test/no-send.test.ts). */
   senders(): SenderRegistry;
-  push(): PushSender;
-  /** Web Push (VAPID) to browsers; disabled when VAPID_* aren't set. */
-  webPush(): WebPushSender;
   /** Browsers' Web Push subscriptions, sealed with TOKEN_ENCRYPTION_KEY. */
   webPushSubs: WebPushStore;
-  transcriber(): Transcriber;
-  /** Text-to-speech for devices that play audio themselves (Reachy Mini). */
-  tts(): SpeechSynthesizer;
 }
+
+/** What routes use today: the platform plus one tenant. */
+export type Deps = PlatformDeps & TenantDeps;
 
 let current: Deps | null = null;
 
-export function buildDeps(kv: KV): Deps {
-  const prefix = config.redisPrefix();
-  const clock = () => new Date();
+export function buildPlatformDeps(kv: KV, clock: () => Date = () => new Date()): PlatformDeps {
+  let llm: LLM | null = null;
+  let push: PushSender | null = null;
+  let webPush: WebPushSender | null = null;
+  return {
+    kv,
+    clock,
+    llm: () => (llm ??= llmFromEnv()),
+    push: () => (push ??= pushSenderFromEnv()),
+    webPush: () => (webPush ??= webPushSenderFromEnv()),
+    transcriber: () => transcriberFromEnv(),
+    tts: () => speechSynthesizerFromEnv(),
+    tenants: new TenantRegistry(kv, clock),
+  };
+}
+
+/** The owner tenant on its legacy prefix (`REDIS_PREFIX`): the scope every route used before accounts. */
+export function legacyOwnerScope(): TenantScope {
+  return { id: null, prefix: legacyOwnerPrefix() };
+}
+
+/**
+ * Builds one tenant's deps from its prefix. Never cache the result across requests once
+ * principals carry tenants (A2): a tenant object belongs to one request.
+ */
+export function tenantDeps(platform: PlatformDeps, tenant: TenantScope): TenantDeps {
+  const { kv, clock } = platform;
+  const prefix = tenant.prefix;
+  if (!prefix) throw new Error("tenant prefix is required");
   const repos = createRepos(kv, {
     prefix,
     clock,
@@ -67,9 +121,6 @@ export function buildDeps(kv: KV): Deps {
   });
   const connections = new ConnectionStore(kv, prefix, keyRingFromEnv);
   const googleTokens = new GoogleTokenStore(connections);
-  let llm: LLM | null = null;
-  let push: PushSender | null = null;
-  let webPush: WebPushSender | null = null;
   const googleWorkspace = async () => new GoogleWorkspace(await googleTokens.authorizedClient());
   const googleContacts = async () => new GoogleContacts(googlePeopleApi(await googleTokens.authorizedClient()));
   // Zoom is registered only when ZOOM_CLIENT_ID/ZOOM_CLIENT_SECRET are set.
@@ -79,10 +130,8 @@ export function buildDeps(kv: KV): Deps {
   let connectors: Connector[] | null = null;
   let senders: SenderRegistry | null = null;
   return {
-    kv,
+    tenant: { id: tenant.id, prefix },
     repos,
-    clock,
-    llm: () => (llm ??= llmFromEnv()),
     connections,
     googleTokens,
     connectors: () =>
@@ -100,12 +149,14 @@ export function buildDeps(kv: KV): Deps {
         },
         clock,
       })),
-    push: () => (push ??= pushSenderFromEnv()),
-    webPush: () => (webPush ??= webPushSenderFromEnv()),
     webPushSubs: new WebPushStore(kv, prefix, keyRingFromEnv),
-    transcriber: () => transcriberFromEnv(),
-    tts: () => speechSynthesizerFromEnv(),
   };
+}
+
+/** Platform + the legacy owner tenant. Same keys and behaviour as before the split. */
+export function buildDeps(kv: KV): Deps {
+  const platform = buildPlatformDeps(kv);
+  return { ...platform, ...tenantDeps(platform, legacyOwnerScope()) };
 }
 
 export function getDeps(): Deps {
