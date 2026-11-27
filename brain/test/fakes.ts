@@ -6,6 +6,7 @@ import type { KV } from "@/lib/kv";
 import type { DeviceKind } from "@/lib/models";
 import { createRepos } from "@/lib/repos";
 import type { Deps } from "@/lib/deps";
+import { TenantRegistry } from "@/lib/platform/tenants";
 import { GoogleTokenStore } from "@/lib/google/auth";
 import { ConnectionStore } from "@/lib/connectors/store";
 import type { CalendarEvent, DraftInput, EmailMessage, Workspace } from "@/lib/google/workspace";
@@ -278,6 +279,8 @@ export function makeDeps(
     kv,
     repos,
     clock,
+    tenant: { id: null, prefix: "t" },
+    tenants: new TenantRegistry(kv, clock),
     llm: () => {
       if (!opts.llm) throw new Error("no LLM configured for this test");
       return opts.llm;
