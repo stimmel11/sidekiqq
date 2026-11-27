@@ -5,7 +5,7 @@ import { config } from "../env";
 import type { DeviceRecord } from "../models";
 
 /**
- * The dashboard performs device actions (approve / discard a draft, complete a commitment) by
+ * The Talk screen still performs device actions (transcribe, ask, speak) by
  * invoking the EXISTING route handlers in-process, so there is exactly one implementation of each,
  * and in particular exactly one send path: POST /api/drafts/:id/approve.
  *
@@ -17,7 +17,8 @@ import type { DeviceRecord } from "../models";
  * Before the `web` kind existed this device was kind "phone", so phone hand-offs could be queued
  * for it although it never polls. A stored legacy device is revoked and replaced by a `web` one
  * (docs/WEBAPP.md §4.2). The drafts, ask, transcribe, speak and commitments routes now also accept the session directly (`withPrincipal`);
- * this bridge goes away in slice 2c-ii, once the dashboard posts to them as a session.
+ * drafts and commitments already post from the browser as the session (lib/dashboard/browser-api.ts),
+ * and this bridge goes away once the Talk screen does too.
  */
 
 export const DASHBOARD_DEVICE_NAME = "Owner web dashboard";

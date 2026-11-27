@@ -2,13 +2,12 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Tag } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getDeps } from "@/lib/deps";
-import { CONFIRM_VALUE, draftFingerprint } from "@/lib/dashboard/approval";
+import { draftFingerprint } from "@/lib/confirmation";
 import { formatDateTime } from "@/lib/dashboard/format";
 import { requireOwnerSession } from "@/lib/dashboard/owner";
 import type { Draft } from "@/lib/models";
-import { approveDraftAction, discardDraftAction } from "../../actions";
+import { DraftDecision } from "./DraftDecision";
 
 export const metadata: Metadata = { title: "Draft" };
 export const dynamic = "force-dynamic";
@@ -82,33 +81,19 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {pending ? (
-        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
-          <ConfirmDialog
-            triggerLabel="Discard"
-            triggerVariant="secondary"
-            title="Discard this draft?"
-            action={discardDraftAction}
-            fields={{ id: draft.id }}
-            confirmLabel="Discard draft"
-            confirmVariant="danger"
-            pendingLabel="Discarding…"
-          >
+        <DraftDecision
+          id={draft.id}
+          confirmation={draftFingerprint(draft)}
+          invite={invite}
+          approvable={approvable}
+          discardBody={
             <p className="text-body text-text-muted">
               {invite
                 ? "It stops appearing on your devices. Nothing is sent and nothing is added to your calendar."
                 : "It stops appearing on your devices. Nothing is sent, and the copy in Gmail Drafts stays where it is."}
             </p>
-          </ConfirmDialog>
-          {approvable && <ConfirmDialog
-            triggerLabel={invite ? "Approve and send invite" : "Approve and send"}
-            title={invite ? "Send this invite?" : "Send this email?"}
-            action={approveDraftAction}
-            fields={{ id: draft.id, confirmation: draftFingerprint(draft) }}
-            confirmName="confirm"
-            confirmValue={CONFIRM_VALUE}
-            confirmLabel={invite ? "Send invite" : "Send email"}
-            pendingLabel="Sending…"
-          >
+          }
+          approveBody={
             <div className="flex flex-col gap-4">
               <Envelope draft={draft} />
               <div className="max-h-[40dvh] overflow-y-auto rounded-md border border-line bg-surface-sunken px-4 py-3">
@@ -120,8 +105,8 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
                   : "This sends from your Gmail right away. It can't be unsent."}
               </p>
             </div>
-          </ConfirmDialog>}
-        </div>
+          }
+        />
       ) : (
         <p className="mt-6 text-body text-text-muted">
           {draft.status === "sent" ? `${invite ? "Invite sent" : "Sent"} ${formatDateTime(draft.sentAt)}.` : "This draft was discarded. Nothing was sent."}
