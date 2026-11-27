@@ -4,8 +4,8 @@ import { truncate } from "../util";
 
 /**
  * `email.read` for Outlook / Microsoft 365 via Microsoft Graph (docs/CONNECTORS.md §2, §10 step 7).
- * Slice 1: the provider module only. Connector registration, OAuth and the ConnectionStore come in
- * slice 2, so nothing here is wired into a route yet.
+ * Registered as the `outlook` connector's `email.read` (lib/connectors/outlook/), with tokens from
+ * `MicrosoftAuth` (lib/connectors/outlook/auth.ts).
  *
  * SAFETY:
  * - Read-only. Every request is a `GET` to `https://graph.microsoft.com/v1.0/me...`. There is no
@@ -88,6 +88,18 @@ export class OutlookUnavailableError extends Error {
     super(`Outlook didn't answer (${detail}).`);
     this.name = "OutlookUnavailableError";
   }
+}
+
+/** Errors whose messages are written to be spoken to the owner (no tokens, no response bodies). */
+export function isOutlookMailError(err: unknown): err is Error {
+  return (
+    err instanceof OutlookAuthError ||
+    err instanceof OutlookAccessError ||
+    err instanceof OutlookNotFoundError ||
+    err instanceof OutlookRateLimitError ||
+    err instanceof OutlookInputError ||
+    err instanceof OutlookUnavailableError
+  );
 }
 
 // ---------------------------------------------------------------------------------------

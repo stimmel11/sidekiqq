@@ -52,7 +52,7 @@ function summarize(cap: CapabilityId, input: unknown): string {
   const i = input as Record<string, unknown>;
   switch (cap) {
     case "email.read":
-      return `${String(i.op)}${typeof i.query === "string" ? ` "${i.query}"` : ""}`;
+      return `${String(i.op)}${typeof i.query === "string" ? ` "${i.query}"` : typeof i.since === "string" ? ` since ${i.since}` : ""}`;
     case "email.draft":
       return `draft to ${(i.to as string[]).join(", ")}: "${String(i.subject)}"`;
     case "calendar.read":
@@ -77,6 +77,22 @@ function auditArgs(data: unknown): string {
 
 export function connectorFor(connectors: readonly Connector[], cap: CapabilityId): Connector | undefined {
   return connectors.find((c) => c.capabilities.includes(cap));
+}
+
+/**
+ * Which connector serves `cap` for this call. With one provider (the usual case) it is that one.
+ * When several offer it (Gmail and Outlook both offer `email.read`), the first in registration order
+ * that has a stored connection wins, so an Outlook-only owner reads Outlook and a Google owner keeps
+ * reading Gmail. With none stored, the first one answers (its "not connected" error is the one the
+ * owner hears). A stored connection that needs reauth or is switched off still wins: the call then
+ * fails with "reconnect X" / "turned off" instead of silently reading another mailbox (§7).
+ * Limitation: with both connected, only the first (Google) is read; choosing per call is later work.
+ */
+export async function routeConnector(deps: Deps, cap: CapabilityId): Promise<Connector | undefined> {
+  const candidates = deps.connectors().filter((c) => c.capabilities.includes(cap));
+  if (candidates.length <= 1) return candidates[0];
+  for (const c of candidates) if (await deps.connections.hasRecord(c.id)) return c;
+  return candidates[0];
 }
 
 export async function invokeCapability<C extends ImplementedCapability>(deps: Deps, cap: C, input: In<C>, ctx: ConnCtx): Promise<Out<C>>;
@@ -105,7 +121,7 @@ export async function invokeCapability(deps: Deps, cap: string, input: unknown, 
   if (!READ_ONLY.includes(cap) && background) throw new CapabilityDeniedError(cap, "writes need an owner request");
 
   if (!implemented(cap)) throw new CapabilityUnavailableError(cap);
-  const connector = connectorFor(deps.connectors(), cap);
+  const connector = await routeConnector(deps, cap);
   if (!connector) throw new CapabilityUnavailableError(cap);
 
   const parsed = INPUT_SCHEMAS[cap].safeParse(input);

@@ -136,6 +136,15 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
    **Connect** next to Zoom on the dashboard's Connections screen (or `POST /api/connections/zoom/connect` with the
    owner secret for a one-time link). Disconnect revokes the token at Zoom. Rooms are created with a fixed request
    (no invitees, no Zoom emails); see `src/lib/connectors/zoom/meetings.ts`.
+9. **Outlook / Microsoft 365 (optional, read-only)**: in the Azure portal (Microsoft Entra ID → App registrations),
+   register a *Web* app ("Accounts in any organizational directory and personal Microsoft accounts" for `common`),
+   add the redirect URI `https://<your-domain>/api/connections/outlook/callback`, add the delegated Microsoft Graph
+   permissions `offline_access`, `User.Read` and `Mail.Read` (nothing else), and create a client secret. Set
+   `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET` (optional: `MICROSOFT_TENANT`, default `common`;
+   `MICROSOFT_REDIRECT_URI`; `MICROSOFT_ALLOWED_EMAIL`). Then press **Connect** next to Outlook on the Connections
+   screen. SideKiqq reads Outlook only when Google is not connected (with both, it reads Gmail). Microsoft has no
+   revoke endpoint, so after Disconnect remove the app's consent in your Microsoft account too. The client secret
+   expires (Azure's maximum is 2 years): renew it before then, or sign-in fails with `invalid_client`.
 
 ## Testing
 

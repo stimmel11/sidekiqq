@@ -64,8 +64,12 @@ const id = z.string().trim().min(1).max(200);
 
 export const EmailReadInput = z.discriminatedUnion("op", [
   z.object({ op: z.literal("search"), query: z.string().trim().min(1).max(500), max: z.number().int().min(1).max(25) }),
-  /** Ids only, for the cron scanner's cursoring. Larger cap because it fetches no content. */
-  z.object({ op: z.literal("list_ids"), query: z.string().trim().min(1).max(500), max: z.number().int().min(1).max(500) }),
+  /**
+   * Ids only, for the cron scanner's cursoring: the owner's received (Inbox) and sent mail since
+   * `since`, newest first. Provider-neutral: each connector maps it to its own query (Gmail also
+   * leaves out Promotions, Social and Chats). Larger cap because it fetches no content.
+   */
+  z.object({ op: z.literal("list_ids"), since: z.iso.datetime({ offset: true }), max: z.number().int().min(1).max(500) }),
   z.object({ op: z.literal("thread"), threadId: id }),
   z.object({ op: z.literal("message"), id }),
   /** The connected account's own address. */

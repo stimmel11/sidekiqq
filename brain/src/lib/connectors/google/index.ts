@@ -22,6 +22,11 @@ const SCOPES: Partial<Record<CapabilityId, string[]>> = {
   "contacts.lookup": ["https://www.googleapis.com/auth/contacts.readonly", "https://www.googleapis.com/auth/contacts.other.readonly"],
 };
 
+/** Gmail query for `email.read` `list_ids`: Inbox + Sent since `since`, without Promotions, Social or Chats. */
+export function gmailRecentQuery(since: Date): string {
+  return `(in:inbox OR in:sent) after:${Math.floor(since.getTime() / 1000)} -category:promotions -category:social -in:chats`;
+}
+
 export const GOOGLE_CAPABILITIES = ["email.read", "email.draft", "calendar.read", "calendar.invite.prepare", "files.read", "contacts.lookup"] as const satisfies readonly CapabilityId[];
 
 /** What the connector needs from lib/google/contacts.ts (`GoogleContacts`). Read-only. */
@@ -63,7 +68,7 @@ export class GoogleConnector implements Connector {
         const i = input as In<"email.read">;
         let out: ProviderOut<"email.read">;
         if (i.op === "search") out = await ws.searchGmail(i.query, i.max);
-        else if (i.op === "list_ids") out = await ws.listMessageIds(i.query, i.max);
+        else if (i.op === "list_ids") out = await ws.listMessageIds(gmailRecentQuery(new Date(i.since)), i.max);
         else if (i.op === "thread") out = await ws.getThread(i.threadId);
         else if (i.op === "message") out = await ws.getMessage(i.id);
         else {

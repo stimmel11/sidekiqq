@@ -21,8 +21,19 @@ scopes (§7), deleting the legacy `google:tokens` key, and remote MCP. Remaining
 `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
 Outlook slice 1 (2026-11-03): `brain/src/lib/microsoft/mail.ts` is a read-only Graph module
 (search, message, conversation, account, and `listRecentIds(since, max)` for the scanner) returning the
-Gmail shapes; not registered as a connector yet. Open for slice 2: `email.read` `list_ids` takes a
-Gmail-syntax query today, so it needs a provider-neutral `{since, max}` form.
+Gmail shapes. Outlook slice 2 (2026-11-27): registered as the built-in `outlook` connector
+(`lib/connectors/outlook/`, first-party, `email.read` only, scope `Mail.Read` + login scopes
+`offline_access User.Read`) when `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET` are set, with Microsoft
+sign-in (v2 endpoints, PKCE S256, `prompt=select_account`, optional `MICROSOFT_ALLOWED_EMAIL`) behind the
+generic `/api/connections/outlook/*` routes. Graph scope URIs are normalised to short names before they are
+stored. Microsoft has no token revocation endpoint, so disconnect only deletes the stored token. A dead
+refresh token (`invalid_grant`, `interaction_required`, `consent_required`, `login_required`) is a
+`ReauthRequiredError` → `needs_reauth`; `invalid_client` (expired app secret) is not. `email.read`
+`list_ids` is now provider-neutral (`{since, max}`: Inbox + Sent since `since`; Gmail adds its
+category filters). Routing (`routeConnector` in `invoke.ts`): when several connectors offer a capability,
+the first one (registration order: Google, then Outlook) with a stored connection serves it, and a stored
+one that needs reauth or is switched off still wins (no silent fallback to another mailbox). So with both
+connected, only Gmail is read; choosing a mailbox per call is later work.
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
