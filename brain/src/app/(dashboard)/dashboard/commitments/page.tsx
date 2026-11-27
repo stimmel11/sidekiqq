@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Tag } from "@/components/ui/Badge";
-import { buttonClass } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ListRow } from "@/components/ui/ListRow";
 import { Notice } from "@/components/ui/Notice";
@@ -10,7 +9,7 @@ import { getDeps } from "@/lib/deps";
 import { formatDay } from "@/lib/dashboard/format";
 import { requireOwnerSession } from "@/lib/dashboard/owner";
 import type { Commitment } from "@/lib/models";
-import { completeCommitmentAction } from "../actions";
+import { CompleteButton } from "./CompleteButton";
 
 export const metadata: Metadata = { title: "Commitments" };
 export const dynamic = "force-dynamic";
@@ -105,13 +104,7 @@ export default async function CommitmentsPage({ searchParams }: { searchParams: 
               }
               actions={
                 c.status !== "done" ? (
-                  <form action={completeCommitmentAction}>
-                    <input type="hidden" name="id" value={c.id} />
-                    <input type="hidden" name="back" value={filter} />
-                    <button type="submit" className={buttonClass("secondary", "sm")}>
-                      Mark complete<span className="sr-only">: {c.what}</span>
-                    </button>
-                  </form>
+                  <CompleteButton id={c.id} what={c.what} back={filter} />
                 ) : undefined
               }
             />
