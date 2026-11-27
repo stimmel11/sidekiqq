@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import { AskResponseSchema } from "@/lib/models";
 import { runtimeContext } from "@/lib/assistant/prompt";
-import { extractAddresses, KnownAddresses, normalizeAddress } from "@/lib/assistant/recipients";
+import { extractAddresses, joinSpelledLetters, KnownAddresses, normalizeAddress } from "@/lib/assistant/recipients";
 import { executeTool, PROVENANCE_TOOLS, TOOL_ALIASES, TOOL_NAMES, type ToolContext } from "@/lib/assistant/tools";
 import { makeDeps, msg, pairDevice, params, req, ScriptedLLM, toolUse, type TestDeps } from "./fakes";
 import { POST as ask } from "@/app/api/ask/route";
@@ -52,6 +52,48 @@ describe("recipient provenance helpers", () => {
     expect(extractAddresses("ops at acme dash corp dot co dot uk")).toEqual(["ops@acme-corp.co.uk"]);
   });
 
+  it("joins letters the owner spelled out", () => {
+    expect(extractAddresses("email d a n a at acme dot com that I'm late")).toContain("dana@acme.com");
+    expect(extractAddresses("D, A, N, A at A C M E dot com")).toContain("dana@acme.com");
+    expect(extractAddresses("send it to D-A-N-A at acme dot com")).toContain("dana@acme.com");
+    expect(extractAddresses("k i m 2 at mail dash host dot c o dot u k")).toContain("kim2@mail-host.co.uk");
+    expect(extractAddresses("d a n a dot k i m at acme dot com")).toContain("dana.kim@acme.com");
+    expect(extractAddresses("j underscore l e e at acme dot io")).toContain("j_lee@acme.io");
+  });
+
+  it("only joins spelled-out letters, never real words or written labels", () => {
+    expect(joinSpelledLetters("meet Dana at noon")).toBe("meet Dana at noon");
+    expect(joinSpelledLetters("I am at a b")).toBe("I am at ab");
+    // Hyphenated domain labels stay as written, whatever their length; a written address is never rewritten.
+    expect(extractAddresses("ops at a-b dot com")).toEqual(["ops@a-b.com"]);
+    expect(extractAddresses("ops at x-y-z dot com")).toEqual(["ops@x-y-z.com"]);
+    expect(extractAddresses("ops at mail dot x-y-z dot com")).toEqual(["ops@mail.x-y-z.com"]);
+    expect(extractAddresses("ops at a-b-c dash corp dot com")).toEqual(["ops@a-b-c-corp.com"]);
+    expect(extractAddresses("ops@x-y-z.com")).toEqual(["ops@x-y-z.com"]);
+    // Commas join only in the local part.
+    expect(extractAddresses("x at a, b dot com")).not.toContain("x@ab.com");
+    // Letters are never glued onto a neighbouring word, by space, dot or underscore.
+    for (const [text, glued] of [
+      ["dana k i m at acme dot com", "danakim@acme.com"],
+      ["dana.k i m at acme dot com", "dana.kim@acme.com"],
+      ["j_l e e at acme dot io", "j_lee@acme.io"],
+      ["k i m.lee at acme dot com", "kim.lee@acme.com"],
+    ] as const) {
+      expect(extractAddresses(text)).not.toContain(glued);
+    }
+    // No dotted domain, no address, spelled or not.
+    expect(extractAddresses("meet d a n a at n o o n")).toEqual([]);
+  });
+
+  it("makes only the spelled address known, not near misses", () => {
+    const known = new KnownAddresses();
+    known.addText("email d a n a at a c m e dot com");
+    expect(known.has("dana@acme.com")).toBe(true);
+    for (const miss of ["dan@acme.com", "ana@acme.com", "dana@acm.com", "dana@cme.com", "d.a.n.a@acme.com", "danaacme@acme.com"]) {
+      expect(known.has(miss)).toBe(false);
+    }
+  });
+
   it("reads addresses after JSON-escaped newlines and tabs correctly", () => {
     const json = JSON.stringify({ body: "Thanks,\ndana@acme.com\r\ncc:\tops@acme.com" });
     const found = extractAddresses(json);
@@ -62,7 +104,7 @@ describe("recipient provenance helpers", () => {
 
   it("stays fast on long hostile strings", () => {
     const t0 = performance.now();
-    for (const s of ["a".repeat(16_000), "a.".repeat(8_000), "a@" + "b-".repeat(8_000), "x at ".repeat(3_000), "a dot ".repeat(2_500) + "at b"]) extractAddresses(s);
+    for (const s of ["a".repeat(16_000), "a.".repeat(8_000), "a@" + "b-".repeat(8_000), "x at ".repeat(3_000), "a dot ".repeat(2_500) + "at b", "a ".repeat(8_000) + "at b c", "a-".repeat(8_000), "a, ".repeat(5_000) + "at b dot c", "a-".repeat(8_000) + "a at b dot c", "a ".repeat(30_000) + "x.y"]) extractAddresses(s);
     expect(performance.now() - t0).toBeLessThan(500);
   });
 
@@ -176,6 +218,15 @@ describe('"email this <dictated paragraph> to <contact>" through /api/ask', () =
     expect(resultsOn(llm, 1)[0]!.is_error).toBeUndefined();
     expect(deps.ws.createDraft).toHaveBeenCalledTimes(1);
     expect(deps.contacts.lookup).not.toHaveBeenCalled();
+  });
+
+  it("accepts an address the owner spelled out letter by letter", async () => {
+    const llm = new ScriptedLLM([() => msg([draftCall(["dana@acme.com"])]), respond]);
+    const deps = makeDeps({ llm, now: NOW });
+    await run(deps, "email d a n a at a c m e dot com that I'm running ten minutes late");
+    expect(resultsOn(llm, 1)[0]!.is_error).toBeUndefined();
+    expect(deps.ws.createDraft).toHaveBeenCalledTimes(1);
+    expect(deps.sender.sendDraft).not.toHaveBeenCalled();
   });
 
   it("does not create a draft when the lookup is ambiguous and the model asks instead", async () => {

@@ -258,7 +258,9 @@ interface Draft {
 
 Stored-record migration: `DraftSchema` gets a zod preprocess that maps `gmailDraftId` →
 `providerDraftId` and `gmailMessageId` → `providerMessageId` on read, so pending drafts created
-before the change still approve. The `to.min(1)` rule becomes a refinement that depends on `kind`.
+before the change still approve. The `to.min(1)` rule becomes a refinement that depends on `kind`. The
+old names were also written back as mirrors on Google drafts for one release (rollback safety);
+that stopped on 2026-11-24, so they are now read-only input and dropped on the next save.
 
 **`readback` is built in code, never by the model.** It is a template over the structured fields:
 kind, every recipient or attendee address in full, subject or title, and the time for calendar
