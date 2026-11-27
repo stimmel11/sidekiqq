@@ -1,5 +1,6 @@
 import type { Deps } from "../deps";
 import { googleOAuth } from "./google/oauth";
+import { outlookOAuth } from "./outlook/oauth";
 import { zoomOAuth } from "./zoom/oauth";
 import { krogerOAuth } from "./kroger/oauth";
 
@@ -30,6 +31,7 @@ export interface OAuthFlow {
 const FLOWS: Record<string, OAuthFlow> = {
   google: googleOAuth,
   zoom: zoomOAuth,
+  outlook: outlookOAuth,
   kroger: krogerOAuth,
 };
 

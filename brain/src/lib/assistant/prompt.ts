@@ -49,6 +49,8 @@ const ASK_PROTOCOL = `TOOL PROTOCOL (runtime)
   in THIS request (create the room first). Nothing opens by itself: say it is waiting on their phone to tap Open. Links from earlier
   requests or from email/files can't be handed off; offer to create a new room instead.
 - You cannot send email. create_email_draft only creates a Gmail draft; the owner sends it by tapping Approve on a device.
+  Drafting from an Outlook mailbox isn't supported yet: if create_email_draft says Google isn't connected, say so; never
+  pass an Outlook threadId to it.
   After creating a draft, tell the owner the recipient and gist and that it is waiting for approval.
 - Draft recipients must be addresses the owner said, or that a lookup tool returned in THIS request; create_email_draft
   rejects any other address. Earlier tool results are not remembered, so after asking "which Dana?" call

@@ -15,6 +15,8 @@ import { GoogleConnector, type ContactsLookup } from "@/lib/connectors/google";
 import { ZoomConnector } from "@/lib/connectors/zoom";
 import type { ZoomRooms } from "@/lib/connectors/zoom/meetings";
 import type { ZoomAuth } from "@/lib/connectors/zoom/auth";
+import { OutlookConnector, type OutlookMailReader } from "@/lib/connectors/outlook";
+import { OutlookNotConnectedError, type MicrosoftAuth } from "@/lib/connectors/outlook/auth";
 import { KrogerConnector } from "@/lib/connectors/kroger";
 import type { KrogerAuth } from "@/lib/connectors/kroger/auth";
 import { KrogerGrocery, type KrogerApi } from "@/lib/kroger/grocery";
@@ -232,7 +234,42 @@ export interface TestDeps extends Deps {
   pushFake: FakePush;
   webPushFake: FakeWebPush;
   zoom: FakeZoomRooms;
+  outlook: FakeOutlookMail;
   setNow(d: Date): void;
+}
+
+/** Outlook mail fake (read-only, like `OutlookMail`). `connected = false` throws OutlookNotConnectedError. */
+export class FakeOutlookMail implements OutlookMailReader {
+  connected = true;
+  messages: EmailMessage[] = [];
+  owner = "stimmel@contoso.com";
+  calls: { op: string; arg?: unknown }[] = [];
+  private check(op: string, arg?: unknown) {
+    this.calls.push({ op, ...(arg !== undefined ? { arg } : {}) });
+    if (!this.connected) throw new OutlookNotConnectedError();
+  }
+  async search(query: string, max: number) {
+    this.check("search", query);
+    return this.messages.slice(0, max);
+  }
+  async listRecentIds(since: Date, max: number) {
+    this.check("list_ids", since.toISOString());
+    return this.messages.slice(0, max).map((m) => ({ id: m.id, threadId: m.threadId }));
+  }
+  async getMessage(id: string) {
+    this.check("message", id);
+    const m = this.messages.find((x) => x.id === id);
+    if (!m) throw new Error(`no message ${id}`);
+    return m;
+  }
+  async getThread(threadId: string) {
+    this.check("thread", threadId);
+    return this.messages.filter((m) => m.threadId === threadId);
+  }
+  async account() {
+    this.check("account");
+    return { email: this.owner };
+  }
 }
 
 /** Records Zoom room requests instead of calling Zoom. */
@@ -248,7 +285,7 @@ export class FakeZoomRooms implements ZoomRooms {
 }
 
 export function makeDeps(
-  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean; zoomAuth?: (connections: ConnectionStore) => ZoomAuth; kroger?: KrogerApi; krogerAuth?: (connections: ConnectionStore) => KrogerAuth } = {},
+  opts: { llm?: LLM; now?: Date; transcriber?: Transcriber; tts?: SpeechSynthesizer; googleConnected?: boolean; zoom?: boolean; zoomAuth?: (connections: ConnectionStore) => ZoomAuth; outlook?: boolean; outlookAuth?: (connections: ConnectionStore) => MicrosoftAuth; kroger?: KrogerApi; krogerAuth?: (connections: ConnectionStore) => KrogerAuth } = {},
 ): TestDeps {
   let now = opts.now ?? new Date("2026-10-16T15:00:00Z");
   const clock = () => now;
@@ -264,6 +301,8 @@ export function makeDeps(
   const webPushFake = new FakeWebPush();
   const zoom = new FakeZoomRooms();
   let zoomAuth: ZoomAuth | null | undefined; // one shared instance, like buildDeps
+  const outlook = new FakeOutlookMail();
+  let outlookAuth: MicrosoftAuth | null | undefined;
   let krogerAuth: KrogerAuth | null | undefined;
   const krogerGrocery = opts.kroger ? new KrogerGrocery(opts.kroger, new KvSearchedProducts(kv, "t", undefined, () => now.getTime())) : null;
   const connected = opts.googleConnected ?? true;
@@ -293,10 +332,14 @@ export function makeDeps(
     },
     connections,
     googleTokens: new GoogleTokenStore(connections),
-    connectors: () => [new GoogleConnector(workspace, contactsFactory), ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : []),
+    connectors: () => [
+      new GoogleConnector(workspace, contactsFactory),
+      ...(opts.zoom || opts.zoomAuth ? [new ZoomConnector(async () => zoom)] : []),
+      ...(opts.outlook || opts.outlookAuth ? [new OutlookConnector(async () => outlook)] : []),
       ...(krogerGrocery ? [new KrogerConnector(async () => krogerGrocery, connections)] : []),
     ],
     zoomAuth: () => (zoomAuth ??= opts.zoomAuth?.(connections) ?? null),
+    outlookAuth: () => (outlookAuth ??= opts.outlookAuth?.(connections) ?? null),
     krogerAuth: () => (krogerAuth ??= opts.krogerAuth?.(connections) ?? null),
     senders: () =>
       buildSenders({
@@ -328,6 +371,7 @@ export function makeDeps(
     pushFake,
     webPushFake,
     zoom,
+    outlook,
     setNow: (d: Date) => {
       now = d;
     },

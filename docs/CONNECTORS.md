@@ -21,8 +21,22 @@ scopes (§7), deleting the legacy `google:tokens` key, and remote MCP. Remaining
 `email.read` has two extra ops for the cron scanner (`list_ids`, `account`).
 Outlook slice 1 (2026-11-03): `brain/src/lib/microsoft/mail.ts` is a read-only Graph module
 (search, message, conversation, account, and `listRecentIds(since, max)` for the scanner) returning the
-Gmail shapes; not registered as a connector yet. Open for slice 2: `email.read` `list_ids` takes a
-Gmail-syntax query today, so it needs a provider-neutral `{since, max}` form.
+Gmail shapes. Outlook slice 2 (2026-11-27): registered as the built-in `outlook` connector
+(`lib/connectors/outlook/`, first-party, `email.read` only, scope `Mail.Read` + login scopes
+`offline_access User.Read`) when `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET` are set, with Microsoft
+sign-in (v2 endpoints, PKCE S256, `prompt=select_account`, optional `MICROSOFT_ALLOWED_EMAIL`) behind the
+generic `/api/connections/outlook/*` routes. Graph scope URIs are normalised to short names before they are
+stored. Microsoft has no token revocation endpoint, so disconnect only deletes the stored token. A dead
+refresh token (`invalid_grant`, `interaction_required`, `consent_required`, `login_required`) is a
+`ReauthRequiredError` → `needs_reauth`; `invalid_client` (expired app secret) is not. `email.read`
+`list_ids` is now provider-neutral (`{since, max}`: Inbox + Sent since `since`; Gmail adds its
+category filters; Outlook lists Inbox + Sent Items and de-duplicates self-sent mail by Internet
+Message-ID, but misses mail an Inbox rule moved to a subfolder). Routing (`routeConnector` in
+`invoke.ts`): when several connectors offer a capability, the first (registration order: Google, then
+Outlook) that is connected and can serve it (switch on, scope granted) wins; else the first with any stored
+record (so a `needs_reauth` mailbox fails with "reconnect X" rather than silently reading the other one);
+else the first. So with both usable, only Gmail is read; choosing a mailbox per call is later work.
+`email.draft` is still Gmail only (Outlook slice 3).
 Google `contacts.lookup` (2026-10-25, wired 2026-10-28): `brain/src/lib/google/contacts.ts` implements
 the lookup (People API, saved + Other contacts); it is registered as `contacts.lookup` on the `google`
 connector (input `{name, max}`), and Claude reaches it only through the `lookup_contact` tool. The §2
@@ -383,7 +397,7 @@ Initial scope plan (verify each against the provider's current docs when impleme
 | Google | calendar.hold / calendar.invite (+ Meet link via conferenceData) | `calendar.events` (requested at connect since 2026-11-08; per-capability scopes later) |
 | Google | files.read | `drive.readonly` (today) |
 | Google | contacts.lookup | `contacts.readonly`, `contacts.other.readonly` (requested since 2026-10-25; People API search needs an empty warm-up query first) |
-| Microsoft 365 | email.read | `Mail.Read`, `offline_access`, `User.Read` (slice 1, `lib/microsoft/mail.ts`) |
+| Microsoft 365 | email.read | `Mail.Read`, `offline_access`, `User.Read` (`lib/microsoft/mail.ts`, connector `lib/connectors/outlook/`) |
 | Microsoft 365 | email.draft | `Mail.ReadWrite` (only when enabled) |
 | Microsoft 365 | email.send | `Mail.Send` (only when enabled) |
 | Microsoft 365 | calendar.read / contacts.lookup | `Calendars.Read`, `Contacts.Read` |

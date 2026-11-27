@@ -2,6 +2,7 @@ import type { Deps } from "../deps";
 import { config } from "../env";
 import type { EmailMessage } from "../google/workspace";
 import { GoogleNotConnectedError } from "../google/auth";
+import { OutlookNotConnectedError } from "../connectors/outlook/auth";
 import { ConnectionUnusableError } from "../connectors/types";
 import { readEmail } from "../connectors/invoke";
 import { structuredCall } from "../assistant/llm";
@@ -140,18 +141,17 @@ export async function runScan(deps: Deps): Promise<ScanResult> {
   const ownerEmail = await readEmail(deps, { op: "account" }, cron).then(
     (a) => a.email,
     (err: unknown) => {
-      if (err instanceof GoogleNotConnectedError || err instanceof ConnectionUnusableError) throw err;
+      if (err instanceof GoogleNotConnectedError || err instanceof OutlookNotConnectedError || err instanceof ConnectionUnusableError) throw err;
       return undefined;
     },
   );
-  const query = `(in:inbox OR in:sent) after:${Math.floor(fromDate.getTime() / 1000)} -category:promotions -category:social -in:chats`;
-  // Gmail lists newest first. Listing only `scanMaxMessages` and then advancing the cursor silently
+  // Providers list newest first. Listing only `scanMaxMessages` and then advancing the cursor silently
   // dropped everything older once more than that arrived between runs (and later runs only ever
   // saw the same, already-processed newest page). Instead: over-fetch, drop already-processed ids,
   // work OLDEST first, and hold the cursor while a backlog remains so the next run continues.
   const maxPerRun = config.scanMaxMessages();
   const listLimit = Math.min(500, maxPerRun * 5);
-  const listed = await readEmail(deps, { op: "list_ids", query, max: listLimit }, cron);
+  const listed = await readEmail(deps, { op: "list_ids", since: fromDate.toISOString(), max: listLimit }, cron);
   const seen = await Promise.all(listed.map((m) => deps.repos.state.isMessageProcessed(m.id)));
   const pending = listed.filter((_, i) => !seen[i]).reverse();
   const ids = pending.slice(0, maxPerRun);

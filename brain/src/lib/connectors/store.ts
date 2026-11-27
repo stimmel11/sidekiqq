@@ -194,6 +194,32 @@ export class ConnectionStore {
   }
 
   /**
+   * Like `update`, but the write only happens when the stored ciphertext is still the one that was
+   * read (re-checked right before the write), and `patch` may return null to skip. Narrows the
+   * window in which a concurrent disconnect or reconnect could be overwritten to one KV round trip.
+   * (KV has no compare-and-set; callers must tolerate that remaining gap.) Returns true if written.
+   */
+  async updateIfUnchanged(connectorId: string, patch: (v: StoredConnection) => StoredConnection | null): Promise<boolean> {
+    const key = this.tokenKey(connectorId);
+    const raw = await this.kv.get(key);
+    if (!raw) return false;
+    const cur = await this.load(connectorId);
+    if (!cur) return false;
+    const next = patch(cur);
+    if (!next) return false;
+    const sealed = this.seal(connectorId, StoredConnectionSchema.parse(next));
+    const now = await this.kv.get(key);
+    // `load` may have re-encrypted after a key rotation; compare what it decrypts to instead.
+    if (now !== raw) {
+      if (!now) return false;
+      const again = await this.load(connectorId);
+      if (!again || again.secret !== cur.secret || again.connectedAt !== cur.connectedAt) return false;
+    }
+    await this.kv.set(key, sealed);
+    return true;
+  }
+
+  /**
    * Marks the connection as needing reconnect. Returns true only on the transition (so callers
    * alert once). `failedSecret` is the credential the failing call used: if the owner has
    * reconnected since, the new connection is left alone.

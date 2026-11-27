@@ -22,6 +22,7 @@ const SENDER_REGISTRY = path.join(SRC, "lib/connectors/senders.ts");
 const DEPS_MODULE = path.join(SRC, "lib/deps.ts");
 const ZOOM_MEETINGS = path.join(SRC, "lib/connectors/zoom/meetings.ts");
 const MICROSOFT_DIR = path.join(SRC, "lib/microsoft") + path.sep;
+const OUTLOOK_CONNECTOR_DIR = path.join(SRC, "lib/connectors/outlook") + path.sep;
 const OUTLOOK_MAIL = path.join(SRC, "lib/microsoft/mail.ts");
 
 function walk(dir: string): string[] {
@@ -91,7 +92,7 @@ const ALLOWED: Record<string, Prim[]> = {
 
 /** Files that talk to Microsoft Graph get the looser `graphVerb` check too. */
 function graphFile(file: string, c: string): boolean {
-  return file.startsWith(MICROSOFT_DIR) || /graph\.microsoft\.com/i.test(c);
+  return file.startsWith(MICROSOFT_DIR) || file.startsWith(OUTLOOK_CONNECTOR_DIR) || /graph\.microsoft\.com/i.test(c);
 }
 
 function hits(file: string): Prim[] {
@@ -220,6 +221,7 @@ describe("no route other than draft-approve can send mail (static)", () => {
     expect(graphFile(OUTLOOK_MAIL, code(OUTLOOK_MAIL))).toBe(true);
     expect(graphFile(path.join(SRC, "lib/x.ts"), `fetch("https://graph.microsoft.com/v1.0/me")`)).toBe(true);
     expect(graphFile(GOOGLE_SEND, code(GOOGLE_SEND))).toBe(false);
+    expect(graphFile(path.join(SRC, "lib/connectors/outlook/send.ts"), "")).toBe(true);
   });
 
   it("the import scanner sees re-exports, dynamic imports, require, extensions and relative paths", () => {

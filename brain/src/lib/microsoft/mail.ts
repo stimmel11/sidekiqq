@@ -4,8 +4,8 @@ import { truncate } from "../util";
 
 /**
  * `email.read` for Outlook / Microsoft 365 via Microsoft Graph (docs/CONNECTORS.md §2, §10 step 7).
- * Slice 1: the provider module only. Connector registration, OAuth and the ConnectionStore come in
- * slice 2, so nothing here is wired into a route yet.
+ * Registered as the `outlook` connector's `email.read` (lib/connectors/outlook/), with tokens from
+ * `MicrosoftAuth` (lib/connectors/outlook/auth.ts).
  *
  * SAFETY:
  * - Read-only. Every request is a `GET` to `https://graph.microsoft.com/v1.0/me...`. There is no
@@ -88,6 +88,18 @@ export class OutlookUnavailableError extends Error {
     super(`Outlook didn't answer (${detail}).`);
     this.name = "OutlookUnavailableError";
   }
+}
+
+/** Errors whose messages are written to be spoken to the owner (no tokens, no response bodies). */
+export function isOutlookMailError(err: unknown): err is Error {
+  return (
+    err instanceof OutlookAuthError ||
+    err instanceof OutlookAccessError ||
+    err instanceof OutlookNotFoundError ||
+    err instanceof OutlookRateLimitError ||
+    err instanceof OutlookInputError ||
+    err instanceof OutlookUnavailableError
+  );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -280,7 +292,8 @@ export class OutlookMail {
 
   /**
    * Ids of messages received in the Inbox and Sent Items since `since`, newest first, for the cron
-   * scanner (the Gmail scanner's `(in:inbox OR in:sent) after:` query). Follows `@odata.nextLink`
+   * scanner (`email.read` `list_ids`; Gmail's equivalent is `(in:inbox OR in:sent) after:`). Mail an
+   * Inbox rule files into a subfolder is not listed (known limitation). Follows `@odata.nextLink`
    * up to `max` per folder, then merges and caps at `max`.
    */
   async listRecentIds(since: Date, max: number): Promise<{ id: string; threadId: string }[]> {
@@ -296,21 +309,30 @@ export class OutlookMail {
           $filter: `${field} ge ${iso}`,
           $orderby: `${field} desc`,
           $top: String(Math.min(max, 100)),
-          $select: `id,conversationId,${field}`,
+          $select: `id,conversationId,internetMessageId,${field}`,
         });
-        const rows: { id: string; threadId: string; at: number }[] = [];
+        const rows: { id: string; threadId: string; at: number; mid?: string }[] = [];
         for await (const m of this.pages<GraphMessage>(first, max)) {
           if (!usable(m)) continue;
-          rows.push({ id: m.id!, threadId: m.conversationId!, at: Date.parse((field === "sentDateTime" ? m.sentDateTime : m.receivedDateTime) ?? "") || 0 });
+          const mid = typeof m.internetMessageId === "string" && m.internetMessageId ? m.internetMessageId.slice(0, 1000) : undefined;
+          rows.push({ id: m.id!, threadId: m.conversationId!, at: Date.parse((field === "sentDateTime" ? m.sentDateTime : m.receivedDateTime) ?? "") || 0, ...(mid ? { mid } : {}) });
         }
         return rows;
       }),
     );
+    // Mail the owner sends to themselves has an Inbox copy and a Sent Items copy with different
+    // ids but the same Internet Message-ID: keep one, so the scanner doesn't analyse it twice.
     const seen = new Set<string>();
+    const seenMid = new Set<string>();
     return perFolder
       .flat()
       .sort((a, b) => b.at - a.at)
-      .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+      .filter((r) => {
+        if (seen.has(r.id) || (r.mid && seenMid.has(r.mid))) return false;
+        seen.add(r.id);
+        if (r.mid) seenMid.add(r.mid);
+        return true;
+      })
       .slice(0, max)
       .map(({ id, threadId }) => ({ id, threadId }));
   }

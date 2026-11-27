@@ -8,6 +8,8 @@ import { prepareCalendarInvite } from "../connectors/prepare";
 import { ZoomApiError } from "../connectors/zoom/errors";
 import { ZoomAuthError } from "../connectors/zoom/auth";
 import { ReauthRequiredError } from "../connectors/types";
+import { MicrosoftAuthError } from "../connectors/outlook/auth";
+import { isOutlookMailError } from "../microsoft/mail";
 import { CapabilityDeniedError, CapabilityUnavailableError, type ConnCtx } from "../connectors/types";
 import { isPlausibleEmail } from "../google/mime";
 import { ContactQueryError, ContactsAccessError, ContactsUnavailableError, CONTACTS_DEFAULT_MAX, CONTACTS_MAX } from "../google/contacts";
@@ -106,7 +108,7 @@ const isoish = z.string().describe("ISO-8601 date or datetime, e.g. 2026-10-20 o
 const searchEmail = tool({
   name: "search_email",
   description:
-    "Search the owner's email (Gmail) using Gmail search syntax (from:, to:, subject:, newer_than:7d, is:unread, etc.). Returns message summaries (id, threadId, from, to, subject, date, snippet).",
+    "Search the owner's email. Gmail mailboxes take Gmail search syntax (from:, to:, subject:, newer_than:7d, is:unread, etc.); Outlook mailboxes take KQL (from:, to:, subject:, received>=2026-10-01), so if a Gmail-only operator finds nothing, retry with plain words and from:/subject:. Returns message summaries (id, threadId, from, to, subject, date, snippet).",
   input: z.object({
     query: z.string().trim().min(1).max(500),
     maxResults: z.number().int().min(1).max(25).default(10),
@@ -118,7 +120,7 @@ const searchEmail = tool({
 
 const getEmailThread = tool({
   name: "get_email_thread",
-  description: "Fetch a full Gmail thread (all messages, plain-text bodies with quoted history trimmed) by threadId.",
+  description: "Fetch a full email thread (all messages, plain-text bodies with quoted history trimmed) by the threadId from search_email.",
   input: z.object({ threadId: z.string().trim().min(1).max(200) }),
   async run(input, ctx) {
     const messages = await readEmail(ctx.deps, { op: "thread", threadId: input.threadId }, conn(ctx));
@@ -833,6 +835,7 @@ export async function executeTool(
     if (err instanceof CapabilityDeniedError || err instanceof CapabilityUnavailableError) return { content: err.message, isError: true };
     if (err instanceof CommandError) return { content: err.message, isError: true };
     if (err instanceof ZoomApiError || err instanceof ZoomAuthError || err instanceof ReauthRequiredError) return { content: err.message, isError: true };
+    if (isOutlookMailError(err) || err instanceof MicrosoftAuthError) return { content: err.message, isError: true };
     console.error(`[tool ${name}] failed`, err);
     return { content: `Tool ${name} failed: ${(err as Error).message ?? "unknown error"}`, isError: true };
   }

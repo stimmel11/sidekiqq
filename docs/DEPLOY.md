@@ -134,6 +134,7 @@ curl -s -X POST $BRAIN/api/ask -H "Authorization: Bearer <token from the line ab
   - Under **Project settings → Service accounts**, generate a key and paste the JSON (or its base64) into
     `FIREBASE_SERVICE_ACCOUNT_JSON` in Vercel.
 - **Zoom:** see `brain/README.md` › Deploy step 8.
+- **Outlook / Microsoft 365 (read-only):** see `brain/README.md` › Deploy step 9.
 
 ## Troubleshooting
 
