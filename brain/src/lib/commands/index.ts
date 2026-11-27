@@ -1,4 +1,5 @@
 import { HttpError } from "../http";
+import { isAllowedOpenUrlHost } from "./links";
 import { REACHY_START_ACTIVITIES, type CommandKind, type CreateCommandRequest, type DeviceCommand, type DeviceKind, type DeviceRecord } from "../models";
 
 /**
@@ -19,18 +20,22 @@ export const OPENED_ACK_GRACE_SECONDS = 60;
 /** Most pending commands one device can have queued. */
 export const MAX_PENDING_PER_DEVICE = 20;
 
-/** Which device kinds can run each command. The first entry is the default target. */
+/**
+ * Which device kinds can run each command, in default-target order: with no explicit target the
+ * command goes to the most recently seen device of the first kind that has one (open_url and
+ * call_contact: the phone, else a signed-in browser, docs/WEBAPP.md §7).
+ */
 export const COMMAND_TARGETS: Record<CommandKind, readonly DeviceKind[]> = {
-  open_url: ["phone"],
-  call_contact: ["phone"],
+  open_url: ["phone", "web"],
+  call_contact: ["phone", "web"],
   reachy_wake: ["reachy"],
   // The phone runs the LAN start (daemon on the home network) and then queues the reachy_wake.
   reachy_start: ["phone"],
 };
 
 /**
- * `open_url` host allowlist (CONNECTORS.md §2 `device.open_url`): meeting join links and grocery
- * cart pages only. Exact hosts, plus registrable domains whose subdomains are allowed.
+ * The `open_url` host allowlist lives in ./links (client-safe, so the browser re-checks with the
+ * same list). CONNECTORS.md §2 `device.open_url`: meeting join links and grocery cart pages only.
  *
  * POST /api/commands serves the owner-device path. From `/api/ask`, the `call_on_phone` tool queues
  * call_contact hand-offs with the number bound by ./call.ts (contacts.lookup in the same request or
@@ -38,8 +43,7 @@ export const COMMAND_TARGETS: Record<CommandKind, readonly DeviceKind[]> = {
  * (`handoffCapability`): §4.4 caller rules, a narrower per-capability host rule (HANDOFF_HOST_RULES;
  * join links today, grocery.checkout later) and links created in the same request only.
  */
-export const OPEN_URL_HOSTS: readonly string[] = ["meet.google.com", "www.kroger.com", "www.kingsoopers.com"];
-export const OPEN_URL_DOMAINS: readonly string[] = ["zoom.us"];
+export { OPEN_URL_DOMAINS, OPEN_URL_HOSTS } from "./links";
 
 export class CommandError extends HttpError {
   constructor(message: string, code = "bad_command", status = 400) {
@@ -59,8 +63,7 @@ export function validateOpenUrl(raw: string): URL {
   if (u.username || u.password) throw new CommandError("links with credentials are not allowed", "bad_url");
   if (u.port) throw new CommandError("links with a custom port are not allowed", "bad_url");
   const host = u.hostname.toLowerCase();
-  const allowed = OPEN_URL_HOSTS.includes(host) || OPEN_URL_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
-  if (!allowed) throw new CommandError(`links to ${host} can't be opened on a device`, "url_not_allowed");
+  if (!isAllowedOpenUrlHost(host)) throw new CommandError(`links to ${host} can't be opened on a device`, "url_not_allowed");
   return u;
 }
 
@@ -147,8 +150,9 @@ export function buildCommand(req: CreateCommandRequest): CommandFields {
 /**
  * Pick the device a command is queued for.
  * - `deviceId`: that device, if paired, not revoked and of a kind that can run the command.
- * - `device` (a kind) or nothing: the most recently seen paired device of that kind (default: the
- *   command's first allowed kind).
+ * - `device` (a kind): the most recently seen paired device of that kind.
+ * - nothing: the most recently seen device of the first allowed kind that has one
+ *   (COMMAND_TARGETS order, e.g. phone before web).
  */
 export function resolveTarget(
   kind: CommandKind,
@@ -163,10 +167,18 @@ export function resolveTarget(
     if (!allowed.includes(d.kind)) throw new CommandError(`a ${d.kind} can't run ${kind}`, "wrong_target", 409);
     return d;
   }
-  const want = target?.device ?? allowed[0]!;
-  if (!allowed.includes(want)) throw new CommandError(`a ${want} can't run ${kind}`, "wrong_target", 409);
   const seen = (d: DeviceRecord) => Date.parse(d.lastSeenAt ?? d.createdAt);
-  const best = live.filter((d) => d.kind === want).sort((a, b) => seen(b) - seen(a))[0];
-  if (!best) throw new CommandError(`no paired ${want} to run this on`, "no_target_device", 409);
-  return best;
+  const newest = (k: DeviceKind) => live.filter((d) => d.kind === k).sort((a, b) => seen(b) - seen(a))[0];
+  if (target?.device) {
+    const want = target.device;
+    if (!allowed.includes(want)) throw new CommandError(`a ${want} can't run ${kind}`, "wrong_target", 409);
+    const best = newest(want);
+    if (!best) throw new CommandError(`no paired ${want} to run this on`, "no_target_device", 409);
+    return best;
+  }
+  for (const k of allowed) {
+    const best = newest(k);
+    if (best) return best;
+  }
+  throw new CommandError(`no paired ${allowed[0]!} to run this on`, "no_target_device", 409);
 }
