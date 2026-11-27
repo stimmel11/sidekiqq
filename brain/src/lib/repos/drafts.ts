@@ -9,7 +9,7 @@ import { Collection } from "./collection";
  * What a caller supplies to create a draft. `readback` is deliberately absent: the repo builds it
  * from the structured fields (docs/CONNECTORS.md §5), so no caller (and no model) can write it.
  */
-export type NewDraft = Omit<Draft, "id" | "status" | "createdAt" | "cc" | "kind" | "connectorId" | "readback" | "sentAt" | "providerMessageId"> & {
+export type NewDraft = Omit<Draft, "id" | "status" | "createdAt" | "cc" | "kind" | "connectorId" | "readback" | "sentAt" | "providerMessageId" | "videoRoom"> & {
   cc?: string[];
   kind?: Draft["kind"];
   connectorId?: string;
@@ -76,6 +76,18 @@ export class DraftsRepo {
       sentAt: this.clock().toISOString(),
       ...(providerMessageId ? { providerMessageId } : {}),
     });
+  }
+
+  /**
+   * Saves the Zoom room an approve attempt just made, before the event is written, so a retried
+   * approve reuses it (no second room). Only on a pending Zoom invite with no room yet; returns
+   * false (nothing written) otherwise. Callers hold the send lock.
+   */
+  async setVideoRoom(id: string, room: NonNullable<Draft["videoRoom"]>): Promise<boolean> {
+    const cur = await this.col.get(id);
+    if (!cur || cur.status !== "pending" || cur.kind !== "calendar_invite" || cur.conference !== "zoom" || cur.videoRoom) return false;
+    await this.col.put({ ...cur, videoRoom: room });
+    return true;
   }
 
   /** Never overwrites a sent draft (a lazy-expiry discard may race an approve that just sent). */
