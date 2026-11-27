@@ -14,7 +14,7 @@ type Props = {
   title: string;
   /** What the owner is confirming. Shown in full inside the dialog. */
   children: ReactNode;
-  /** Server action run only from the dialog's confirm button. */
+  /** Server action or client function, run only from the dialog's confirm button. */
   action: (state: ConfirmState, form: FormData) => Promise<ConfirmState>;
   /** Hidden fields posted with the confirmation. */
   fields: Record<string, string>;

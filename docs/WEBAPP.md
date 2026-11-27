@@ -285,8 +285,8 @@ dashboard", kind `phone`). With a `web` device kind (§6.3):
 - device routes move from `withDevice` to `withPrincipal`, which accepts a device token **or** a
   session (plus the fail-closed CSRF check) and yields the same `{ tenant, device }`. The approve
   route stays the single executor;
-- **the confirm check moves into the approve route for sessions.** Today it lives only in the
-  bridge: `approveDraftFromDashboard` (`lib/dashboard/approval.ts`) requires `confirm="send"` and
+- **the confirm check moves into the approve route for sessions.** It used to live only in the
+  bridge (`approveDraftFromDashboard`, removed in 2c-ii-b), which required `confirm="send"` and
   a fingerprint of what the dialog showed (`draftFingerprint`), recomputed on the server. With a
   session principal, `POST /api/drafts/:id/approve` requires `{ "confirmation": <fingerprint> }`
   in the body, computed by the same `draftFingerprint`, and returns 409 `changed` (nothing sent)
@@ -314,6 +314,16 @@ same fail-closed same-origin check; a session asks only as `web`. The dashboard 
 now. Remaining (2c-ii-b and later): the Talk screen posts to these routes from the browser (lifting the 30 s
 server-action cap), the Drafts dialog posts `{ confirmation }` to approve as a session, commitments complete from the
 browser, then remove `device-bridge.ts`; one `web` device per browser after that.
+
+**Status (2026-11-19, slice 2c-ii-b-i, `crew/web-session-drafts`):** the Drafts confirm dialog, Discard and
+Commitments "Mark complete" post from the browser as the session (`lib/dashboard/browser-api.ts`): approve sends
+exactly `{ "confirmation": draftFingerprint }` (computed by the server page from what the dialog shows), only from the
+dialog's own button, same-origin with `credentials: "same-origin"`; ids and fingerprints are shape-checked before any
+request. A network error or a 502/504 on approve says the result is unknown (check before retrying); a 401 sends the
+owner to `/login?next=…`; an approve `warning` shows as a fixed notice on Drafts (`done=sent_warning`, the text is not
+put in the URL). `lib/dashboard/approval.ts` and the approve/discard/complete server actions are gone, so the bridge
+no longer touches drafts or commitments. Remaining: the Talk screen posts to `/api/transcribe`, `/api/ask` and
+`/api/speak` from the browser (lifts the 30 s cap), then remove `device-bridge.ts`; one `web` device per browser.
 
 **Feeds:** web app slice 2 (device kind), accounts A3 (sessions).
 
