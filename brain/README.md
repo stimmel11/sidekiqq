@@ -21,7 +21,7 @@ All endpoints take and return JSON and require `Authorization: Bearer <device to
 | POST | `/api/commitments/:id/complete` | `{ ok: true }` |
 | POST | `/api/drafts/:id/approve` | `{ ok: true }`. **The only code path that sends email.** |
 | POST | `/api/devices/register` | `{ fcmToken, device }` → `{ ok: true }` (attaches FCM token to the calling device) |
-| GET/POST | `/api/cron/scan` | `Authorization: Bearer $CRON_SECRET` (Vercel Cron, every 30 min) |
+| GET/POST | `/api/cron/scan` | `Authorization: Bearer $CRON_SECRET` (Vercel Cron, daily on Hobby / every 30 min on Pro) |
 | POST | `/api/devices/pair-code` | **Owner secret** (`Authorization: Bearer $OWNER_SECRET` or `X-Owner-Secret`). Body `{ label? }` → `{ code, expiresAt, ttlSeconds }` |
 | POST | `/api/devices/pair` | **No auth.** `{ code, device, name? }` → `{ token, deviceId, device }` |
 | POST | `/api/google/connect` | **Owner secret** (header). → `{ url, expiresAt }`: a one-time browser link (`?ticket=`, 5 min) |
@@ -127,8 +127,8 @@ curl -s -X POST localhost:3000/api/ask -H "Authorization: Bearer $TOKEN" -H 'con
    `FIREBASE_SERVICE_ACCOUNT_JSON`). Deploy.
 5. **Connect Google**: `curl -s -X POST https://<your-domain>/api/google/connect -H "Authorization: Bearer $OWNER_SECRET"`
    returns a one-time `url`; open it in a browser within 5 minutes and approve. (Never put the owner secret in a URL.)
-6. **Cron**: `vercel.json` schedules `/api/cron/scan` every 30 minutes. Sub-daily crons require a Vercel Pro plan
-   (Hobby allows daily only). The scan route sets `maxDuration = 300`.
+6. **Cron**: `vercel.json` schedules `/api/cron/scan` once a day at 13:00 UTC, because the owner's Vercel team is on Hobby
+   (daily crons only). On Pro, change it to `"*/30 * * * *"`. The scan route sets `maxDuration = 300`.
 7. Pair devices as described above.
 8. **Zoom (optional)**: create a user-managed *General* OAuth app in the Zoom App Marketplace with the single
    granular scope `meeting:write:meeting` and redirect URL `https://<your-domain>/api/connections/zoom/callback`,
