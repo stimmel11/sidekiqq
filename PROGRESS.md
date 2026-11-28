@@ -56,6 +56,7 @@ This file is the build crew's memory. Every session (human or bot) reads it firs
 - 2026-11-22: Android CI (`crew/android-ci`): GitHub Actions builds the phone (with glasses XR) and watch debug APKs and runs the JVM tests; the first real AGP compile passed unchanged.
 - 2026-11-25: Zoom in invites (`crew/zoom-invites`): `conference: "zoom"` on calendar invites; the room is made through `video.create_room` only at approve, saved on the draft before the event write (no second room on retry), join link in the event. 974 brain tests.
 - 2026-11-28: Personalization backlog (`crew/personalization-backlog`): Fireworks per-client LoRA investigation summarized; design, needs-human checks, training-pair capture and per-tenant adapter items added.
+- 2026-11-28: Channels backlog (`crew/channels-backlog`): owner decisions for Facebook, SMS and voicemail recorded; design + build items added; old "Phase 2 design" item folded in.
 - 2026-11-12: Owner priority change: customer web app (PWA, no app stores) first, then native apps for the wearables. Backlog sections added (`crew/webapp-backlog`).
 - 2026-11-12: Web app design (`crew/webapp-design`): `docs/WEBAPP.md` (PWA scope + offline-shell-only service worker, tenant prefixes with zero-copy owner tenant, global index keys, per-tenant DEKs, deletion guard, cross-tenant access-log tests, v2 revocable sessions, `withPrincipal` with the confirm fingerprint moved into approve for sessions, Web Push with endpoint allowlist, browser tap-to-talk, tap-to-open hand-offs, native-only limits). Docs only.
 - 2026-11-14: Web app slice 2a (`crew/web-device-kind`): `web` device kind (TS/Kotlin/Swift/contract, not pairable), `/api/ask` body-device check with phone relays, dashboard device migrated to `web`. 775 brain tests; Android/Swift unverified.
@@ -92,6 +93,36 @@ Customers get SideKiqq as an installable web app (PWA: "Add to Home Screen" on i
 - [ ] Brain: multi-tenant accounts per `docs/WEBAPP.md` (large; slice it). Google sign-in for customers, tenant-scoped repos and connections, per-tenant rate limits and caps, account deletion that wipes the tenant's keys, and tests proving no cross-tenant reads. **A1 done 2026-11-21 (`crew/tenant-deps`):** `PlatformDeps`/`TenantDeps` split with `tenantDeps(platform, scope)`; `buildDeps`/`getDeps` = legacy owner scope (same keys); `lib/platform/keys.ts` is the only `REDIS_PREFIX` reader (static test; temporary exception for `lib/dashboard/device-bridge.ts`, drop it with the bridge); `TenantRegistry` (`g:owner`, `g:tenant:<id>`, `g:tenants`; owner role/legacy prefix only for the `g:owner` tenant); owner sign-in ensures the owner tenant (best effort); login rate limit at `g:rl:login`; scan lock per tenant prefix. Remaining: A2–A8 (docs/WEBAPP.md §10), starting with A2 global indexes + `withPrincipal` resolving the tenant.
 - [ ] `[needs-human]` Google OAuth app verification for the Gmail restricted scopes (needed past 100 test users) and the yearly CASA security assessment; a public privacy policy and terms; choose a domain for the web app.
 - [ ] `[needs-human]` Pick billing (e.g. Stripe) and pricing once accounts exist.
+
+### Communication channels: Facebook, SMS, voicemail (owner priority, 2026-11-28)
+SideKiqq should read any communication channel the owner (or a customer) sets up, track commitments and follow-ups from it, and draft replies. Owner decisions (2026-11-28):
+- **Facebook:** every Facebook channel a user can connect as a user: personal Messenger, groups, and Pages.
+- **SMS:** Android and iPhone, and more than one phone number per customer.
+- **Voicemail:** personal cells and business lines. Forwarding missed calls to a SideKiqq number is undecided, so the design must also cover options without forwarding.
+- **Replies:** drafted for approval. Every send still goes only through `POST /api/drafts/:id/approve` after an explicit confirm, including texts that the phone sends.
+- **Audience:** the owner (admin/tester) and paying customers. This means Meta app review, Google Play policy and per-number costs apply.
+
+Known limits found 2026-11-28, which the design should confirm:
+- Meta has no official API for personal Messenger. The Messenger Platform covers Page inboxes only, and unofficial bridges break Meta's terms.
+- The Facebook Groups API was shut off in April 2024.
+- Google Play restricts READ_SMS and call-log access to default handlers and listed exceptions.
+- iPhone apps can't read SMS, iMessage or carrier voicemail.
+
+Paths the design should evaluate:
+- Android `NotificationListenerService`, which reads incoming Messenger, SMS and other app notifications and can reply through the notification's own reply action, plus whether Play allows it.
+- Being the default SMS app on Android, versus sideloading for the owner.
+- A Mac Messages bridge for iPhone users who have a Mac.
+- Business numbers (Twilio or similar) for SMS and voicemail.
+- Facebook notification emails through the existing Gmail connector.
+- Page Messenger, Instagram business DMs and WhatsApp Business through official APIs.
+- Android visual voicemail and carrier options.
+- Per-tenant phone-number records.
+- Data retention, consent, and how a phone-side send stays behind approve.
+- [ ] Design `docs/CHANNELS.md` from the decisions and paths above. For each channel and platform: what is possible officially, what it needs from the owner or customer, privacy and policy review needed, cost per customer, and a recommended build order. Include a channel-agnostic message model (Channel, Thread, Message, participants, phone numbers per tenant) that maps into the existing timeline, commitments and Drafts (`kind` per channel). Docs only; flag every choice that needs the owner as `[needs-human]` follow-ups.
+- [ ] Brain: channel-agnostic message model + ingestion API from the design (devices post messages they can read; tenant-scoped; nothing sends). With tests.
+- [ ] Android: notification-listener capture for SMS and Messenger (opt-in, per app), posting to the ingestion API. Android unverified until CI builds it.
+- [ ] Drafts for channel replies: a reply draft per channel kind, approved through the existing approve route; the phone sends only after approve hands it a one-time send command. With tests.
+- [ ] Voicemail: transcription and follow-ups from whichever source the design picks (owner to decide on call forwarding).
 
 ### Native apps for wearables (after the customer web app, owner priority 2026-11-12)
 The Android phone app becomes the companion for the wearables: Galaxy Watch, Galaxy Glasses, the medallion (background BLE press-to-talk) and Android Auto. It signs in to the same customer account as the web app. The existing Android, medallion and Apple items below stay the work list. Start with the first real Android build (`[needs-human]` in Earlier items, or a GitHub Actions workflow that builds a debug APK, which is bot-doable), then medallion BLE bonding, then sign-in for customer accounts in place of pairing codes.
@@ -194,7 +225,6 @@ Same brain and API contract; Apple devices are thin clients like the Android one
 - [ ] CI: run `node design/build.mjs --check` so generated design outputs never drift.
 - [ ] Medallion + phone: BLE bonding/encryption, so the phone pairs only to the owner's medallion.
 - [x] Brain: a `docs/DEPLOY.md` step-by-step for Vercel (Pro plan for 30-min cron), Upstash, Google Cloud OAuth consent, FCM, env vars. Done 2026-11-12 (`crew/deploy-guide`).
-- [ ] Phase 2 design: texts (Android SMS via the phone companion), Facebook groups (API limits; investigate options), Outlook. Write `docs/CHANNELS.md` with a recommendation before building.
 - [ ] Reachy: settings page (port 8042) has no auth. Add an optional local PIN, or bind to localhost behind the dashboard.
 - [ ] Reachy: train a custom "hey SideKiqq" openWakeWord model (the default is `hey_jarvis`) and test false-accept rates.
 - [ ] Reachy: barge-in (stop TTS when the owner talks over it) and head wobble while speaking (`media.enable_wobbling`).
