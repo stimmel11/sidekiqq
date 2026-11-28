@@ -49,11 +49,10 @@ You can use the Vercel Upstash integration instead. Its `KV_REST_API_URL` / `KV_
 1. In Vercel, go to **Add New → Project** and import `stimmel11/sidekiqq`.
 2. Set **Root Directory** to `brain`. Leave the framework (Next.js) and the build command (`npm run build`) as they are.
    This is a separate project from the marketing `site` project.
-3. **Cron and your plan:** `brain/vercel.json` runs `/api/cron/scan` every 30 minutes. A Hobby plan allows cron jobs
-   at most once a day, and Vercel rejects the deployment if the schedule is more frequent. Pick one:
-   - Pro plan: leave it as it is.
-   - Hobby plan for now: change the schedule in `vercel.json` to `"0 13 * * *"` (daily, 13:00 UTC). Then run the
-     scan by hand whenever you like:
+3. **Cron and your plan:** `brain/vercel.json` runs `/api/cron/scan` once a day at 13:00 UTC (6 or 7 am in Denver),
+   because a Hobby plan allows cron jobs at most once a day and Vercel rejects a more frequent schedule.
+   - Pro plan: change the schedule to `"*/30 * * * *"` for a scan every 30 minutes.
+   - Hobby plan: leave it as it is, and run the scan by hand whenever you like:
      `curl -X POST https://<project>.vercel.app/api/cron/scan -H "Authorization: Bearer $CRON_SECRET"`.
 4. Under **Environment Variables**, add the following. They apply to Production, and to Preview too if you want
    preview deploys to work.

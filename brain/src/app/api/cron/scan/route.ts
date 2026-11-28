@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Vercel Cron (every 30 min, see vercel.json) calls this with
+ * Vercel Cron (daily at 13:00 UTC on Hobby; every 30 min on Pro, see vercel.json) calls this with
  * `Authorization: Bearer $CRON_SECRET`. A Redis lock prevents overlapping runs.
  */
 async function handle(req: Request): Promise<Response> {
