@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAsk } from "@/lib/assistant/ask";
 import { setDeps } from "@/lib/deps";
 import { SESSION_COOKIE, signSession } from "@/lib/dashboard/session";
-import { DASHBOARD_DEVICE_NAME } from "@/lib/dashboard/device-bridge";
+import { DASHBOARD_DEVICE_NAME } from "@/lib/dashboard/web-device";
 import { framesToWav } from "@/lib/talk/audio";
 import { middleware } from "@/middleware";
 import { POST as ask } from "@/app/api/ask/route";

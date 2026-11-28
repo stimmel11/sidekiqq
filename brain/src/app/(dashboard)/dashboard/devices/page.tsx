@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ListRow } from "@/components/ui/ListRow";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getDeps } from "@/lib/deps";
-import { DASHBOARD_DEVICE_NAME } from "@/lib/dashboard/device-bridge";
+import { DASHBOARD_DEVICE_NAME } from "@/lib/dashboard/web-device";
 import { formatDateTime } from "@/lib/dashboard/format";
 import { requireOwnerSession } from "@/lib/dashboard/owner";
 import { PairCode } from "./PairCode";

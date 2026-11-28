@@ -8,11 +8,12 @@
 export const TARGET_RATE = 16_000;
 
 /**
- * The browser caps an utterance at 30 s (the design allows 60 s): a dashboard server action body
- * is limited to 1 MB, and 30 s of 16 kHz PCM16 is 960 044 bytes. Moving Talk onto `withPrincipal`
- * (web app slice 2c) lets it post to /api/transcribe directly and lift this to 60 s.
+ * The browser caps an utterance at 60 s (docs/WEBAPP.md §6.1; /api/transcribe allows 120 s). The
+ * page posts the WAV straight to /api/transcribe as the session, so the old 1 MB server-action
+ * limit (and its 30 s cap) no longer applies: 60 s of 16 kHz PCM16 is 1 920 044 bytes, well under
+ * Vercel's 4.5 MB request body limit.
  */
-export const MAX_SECONDS = 30;
+export const MAX_SECONDS = 60;
 export const MAX_WAV_BYTES = 44 + MAX_SECONDS * TARGET_RATE * 2;
 
 function blackman(x: number): number {
@@ -52,7 +53,7 @@ export function resample(input: Float32Array, inRate: number, outRate: number = 
 
   // Polyphase table: output sample n sits at input time n·inRate/outRate, whose fractional part
   // takes only outRate/gcd values (1 for 48 kHz → 16 kHz, 160 for 44.1 kHz). Weights are built
-  // once per phase, so a 30 s utterance costs ~taps multiply-adds per output sample.
+  // once per phase, so a 60 s utterance costs ~taps multiply-adds per output sample.
   const g = gcd(inRate, outRate);
   const phases = outRate / g;
   const exact = Number.isInteger(inRate) && Number.isInteger(outRate) && phases <= 4096;
@@ -175,7 +176,7 @@ export interface EndpointerOptions {
 
 /**
  * The simple energy gate from §6.1: after some speech, 2 s of quiet stops the recording; nothing
- * said for 8 s or 30 s in total also stops. A second tap always stops (handled by the page).
+ * said for 8 s or MAX_SECONDS (60 s) in total also stops. A second tap always stops (handled by the page).
  */
 export class Endpointer {
   private readonly threshold: number;

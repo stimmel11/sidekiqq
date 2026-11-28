@@ -6,7 +6,7 @@ import { authenticatePrincipal, requireSameOrigin } from "@/lib/auth";
 import { draftFingerprint } from "@/lib/confirmation";
 import { invokeCapability } from "@/lib/connectors/invoke";
 import { SESSION_COOKIE, signSession } from "@/lib/dashboard/session";
-import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
+import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/web-device";
 import { middleware } from "@/middleware";
 import { GET as listDrafts } from "@/app/api/drafts/route";
 import { POST as approve } from "@/app/api/drafts/[id]/approve/route";

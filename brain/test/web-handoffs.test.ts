@@ -8,7 +8,7 @@ import { resolveTarget } from "@/lib/commands";
 import { checkNumber, checkOpenUrl, handoffLink } from "@/lib/commands/links";
 import { handoffCapability } from "@/lib/connectors/handoff";
 import { SESSION_COOKIE, signSession } from "@/lib/dashboard/session";
-import { dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
+import { dashboardDeviceToken } from "@/lib/dashboard/web-device";
 import { ackHandoff, fetchHandoffs, mergeHandoffs } from "@/lib/handoffs/browser-api";
 import type { DeviceRecord } from "@/lib/models";
 import { middleware } from "@/middleware";

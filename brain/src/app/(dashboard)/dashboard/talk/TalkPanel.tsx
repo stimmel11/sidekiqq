@@ -1,21 +1,22 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Button, buttonClass } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Notice } from "@/components/ui/Notice";
 import { cx } from "@/components/ui/cx";
 import { icons } from "@/components/ui/icons";
-import type { SpeakOutcome, TalkOutcome } from "@/lib/dashboard/talk";
 import type { Action } from "@/lib/models";
-import { Endpointer, MAX_SECONDS, base64ToBytes, framesToWav } from "@/lib/talk/audio";
-import { askTextAction, speakAction, talkAction } from "../actions";
+import { Endpointer, MAX_SECONDS, framesToWav } from "@/lib/talk/audio";
+import { MAX_TYPED_CHARS, askText, speak as speakReply, talk, type SpeakOutcome, type TalkOutcome } from "@/lib/talk/client";
 
 /**
  * Browser tap-to-talk (docs/WEBAPP.md §6). Tap → mic on (AudioWorklet, or ScriptProcessor where
- * worklets are missing) → stop on 2 s of quiet, a second tap or 30 s → every mic track stopped →
- * 16 kHz WAV → transcribe → ask as `web` → reply shown and `spoken` played through the same
+ * worklets are missing) → stop on 2 s of quiet, a second tap or 60 s → every mic track stopped →
+ * 16 kHz WAV → the browser posts it to /api/transcribe, then /api/ask as `web`, as the signed-in
+ * session (lib/talk/client.ts) → reply shown and `spoken` from /api/speak played through the same
  * AudioContext. A draft only links to the Drafts screen: a spoken "send it" is not accepted here.
  */
 
@@ -88,7 +89,10 @@ function micError(err: unknown): string {
   return "The microphone couldn't start. Type instead.";
 }
 
-export function TalkPanel() {
+const LOGIN = `/login?next=${encodeURIComponent("/dashboard/talk")}`;
+
+export function TalkPanel({ speakMaxChars }: { speakMaxChars: number }) {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -163,12 +167,18 @@ export function TalkPanel() {
       setPhase("speaking");
       let out: SpeakOutcome;
       try {
-        out = await speakAction(spoken);
+        out = await speakReply(spoken, speakMaxChars);
       } catch {
         out = { ok: false, error: "The voice reply isn't available right now." };
       }
       if (playGenRef.current !== gen || unmountedRef.current) return; // stopped while loading
       if (!out.ok) {
+        if (out.signIn) {
+          setError(out.error);
+          setPhase("idle");
+          router.replace(LOGIN);
+          return;
+        }
         // Show a voice problem once per page, not on every turn (e.g. TTS not configured).
         if (!voiceErrorShownRef.current) setError(out.error);
         voiceErrorShownRef.current = true;
@@ -176,8 +186,7 @@ export function TalkPanel() {
         return;
       }
       try {
-        const bytes = base64ToBytes(out.wavBase64);
-        const buffer = await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+        const buffer = await ctx.decodeAudioData(out.wav);
         await ctx.resume();
         if (playGenRef.current !== gen || unmountedRef.current) return;
         const old = playingRef.current;
@@ -204,7 +213,7 @@ export function TalkPanel() {
         setPhase("idle");
       }
     },
-    [],
+    [router, speakMaxChars],
   );
 
   const handleOutcome = useCallback(
@@ -213,6 +222,7 @@ export function TalkPanel() {
         setError(out.error);
         if (out.text) setTyped(out.text);
         setPhase("idle");
+        if (out.signIn) router.replace(LOGIN);
         return;
       }
       if (out.conversationId) conversationRef.current = out.conversationId;
@@ -223,7 +233,7 @@ export function TalkPanel() {
       if (out.spoken && !mutedRef.current) await speak(out.spoken);
       else setPhase("idle");
     },
-    [speak],
+    [router, speak],
   );
 
   const finish = useCallback(
@@ -245,12 +255,9 @@ export function TalkPanel() {
       try {
         await new Promise((r) => setTimeout(r, 0)); // let "Thinking…" paint before encoding
         const wav = framesToWav(frames, ctx.sampleRate);
-        const form = new FormData();
-        form.append("audio", new Blob([wav as BlobPart], { type: "audio/wav" }), "talk.wav");
-        if (conversationRef.current) form.append("conversationId", conversationRef.current);
         let out: TalkOutcome;
         try {
-          out = await talkAction(form);
+          out = await talk(wav, conversationRef.current);
         } catch {
           out = { ok: false, error: "Couldn't reach SideKiqq. Check the connection and try again." };
         }
@@ -387,7 +394,7 @@ export function TalkPanel() {
     try {
       let out: TalkOutcome;
       try {
-        out = await askTextAction(typed, conversationRef.current);
+        out = await askText(typed, conversationRef.current);
       } catch {
         out = { ok: false, error: "Couldn't reach SideKiqq. Check the connection and try again.", text: typed };
       }
@@ -465,7 +472,7 @@ export function TalkPanel() {
           id="talk-typed"
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
-          maxLength={8000}
+          maxLength={MAX_TYPED_CHARS}
           placeholder="Or type a question"
           autoComplete="off"
           className="min-h-touch min-w-0 flex-1 rounded-md border border-line-strong bg-surface px-3 text-body text-text placeholder:text-text-muted"

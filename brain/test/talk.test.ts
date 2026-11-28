@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setDeps } from "@/lib/deps";
 import {
   Endpointer,
@@ -17,14 +17,29 @@ import {
   rms,
 } from "@/lib/talk/audio";
 import { assertContractWav, parseWav } from "@/lib/transcribe/wav";
-import { askFromDashboard, fitForSpeech, speakFromDashboard, talkFromDashboard } from "@/lib/dashboard/talk";
+import { ACTION_TYPES, askText, cleanActions, DEFAULT_SPEAK_MAX_CHARS, DRAFT_KINDS, fitForSpeech, speak, talk, TALK_SESSION_EXPIRED, type FetchLike } from "@/lib/talk/client";
+import { ActionSchema } from "@/lib/models";
+import { config } from "@/lib/env";
 import { TranscriptionError } from "@/lib/transcribe";
 import { SpeechError } from "@/lib/tts";
 import { makeDeps, msg, ScriptedLLM, toolUse, type TestDeps } from "./fakes";
+import { sessionFetch, type SessionFetch } from "./session-fetch";
 
-/** Web app slice 2b (docs/WEBAPP.md §6): browser tap-to-talk. */
+/**
+ * Web app slice 2b (docs/WEBAPP.md §6): browser tap-to-talk. Since slice 2c-ii-b-ii the browser
+ * posts to /api/transcribe, /api/ask and /api/speak itself as the session (lib/talk/client.ts);
+ * these tests drive the real middleware + route handlers through `sessionFetch`.
+ */
 
-const key = randomBytes(32);
+const SECRET = "talk-session-secret-0123456789abcdef";
+beforeEach(() => {
+  process.env.SESSION_SECRET = SECRET;
+  process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+});
+afterEach(() => {
+  delete process.env.SESSION_SECRET;
+  delete process.env.TOKEN_ENCRYPTION_KEY;
+});
 
 function tone(freq: number, rate: number, seconds: number, amp = 1): Float32Array {
   const n = Math.round(rate * seconds);
@@ -127,12 +142,9 @@ describe("PCM16 + WAV", () => {
   it(`caps an upload at ${MAX_SECONDS} s`, () => {
     const wav = framesToWav([new Float32Array(48_000 * (MAX_SECONDS + 2))], 48_000);
     expect(wav.byteLength).toBe(MAX_WAV_BYTES);
-    expect(MAX_WAV_BYTES).toBeLessThan(1024 * 1024); // fits the default 1 MB server action body
-    // ...including the multipart envelope the browser adds around it.
-    const form = new FormData();
-    form.append("audio", new Blob([wav as BlobPart], { type: "audio/wav" }), "talk.wav");
-    form.append("conversationId", "c".repeat(128));
-    return new Response(form).arrayBuffer().then((b) => expect(b.byteLength).toBeLessThan(1024 * 1024));
+    expect(MAX_SECONDS).toBe(60); // docs/WEBAPP.md §6.1
+    expect(MAX_WAV_BYTES).toBeLessThan(4.5 * 1000 * 1000); // Vercel's request body limit
+    expect(MAX_WAV_BYTES).toBeLessThanOrEqual(16_000 * 2 * 120 + 1024); // /api/transcribe's cap
   });
 
   it("base64 round-trips bytes larger than one chunk", () => {
@@ -222,58 +234,78 @@ function systemText(llm: ScriptedLLM, i = 0): string {
   return (llm.calls[i]!.system as { text: string }[]).map((b) => b.text).join("\n");
 }
 
-describe("talkFromDashboard: transcribe → ask as web", () => {
+describe("talk(): the browser posts the WAV to /api/transcribe, then asks as web", () => {
+  let f: SessionFetch;
+  beforeEach(async () => {
+    f = await sessionFetch();
+  });
+
   it("uploads the WAV unchanged, asks as the dashboard's web device and returns the reply", async () => {
     const llm = new ScriptedLLM([respond()]);
     const { deps, heard } = setup({ llm });
-    const out = await talkFromDashboard(deps, WAV_1S, null, key);
+    const out = await talk(WAV_1S, null, f);
     expect(out).toMatchObject({ ok: true, text: "what's on today", reply: "Two meetings today.", spoken: "Two meetings today.", actions: [] });
     expect(Array.from(heard[0]!)).toEqual(Array.from(WAV_1S));
     expect(systemText(llm)).toContain("Device for this request: web");
     const devices = await deps.repos.devices.list();
     expect(devices.map((d) => d.kind)).toEqual(["web"]);
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/transcribe", "/api/ask"]);
+    for (const c of f.calls) expect(c.init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error" });
+    expect(new Headers(f.calls[0]!.init.headers).get("content-type")).toBe("audio/wav");
+    expect(JSON.parse(f.calls[1]!.init.body as string)).toEqual({ text: "what's on today", device: "web" });
+  });
+
+  it(`accepts a full ${MAX_SECONDS} s recording (the old server-action cap was 30 s)`, async () => {
+    const { heard } = setup({ llm: new ScriptedLLM([respond()]) });
+    const long = framesToWav([tone(300, 48_000, MAX_SECONDS + 1, 0.3)], 48_000);
+    expect(long.byteLength).toBe(MAX_WAV_BYTES);
+    expect((await talk(long, null, f)).ok).toBe(true);
+    expect(heard[0]!.byteLength).toBe(MAX_WAV_BYTES);
   });
 
   it("keeps the conversation going with the returned id, and ignores a malformed one", async () => {
     const llm = new ScriptedLLM([respond("one"), respond("two"), respond("three")]);
-    const { deps } = setup({ llm });
-    const first = await talkFromDashboard(deps, WAV_1S, null, key);
+    setup({ llm });
+    const first = await talk(WAV_1S, null, f);
     if (!first.ok) throw new Error(first.error);
     expect(first.conversationId).toMatch(/^[A-Za-z0-9_-]+$/);
-    const second = await talkFromDashboard(deps, WAV_1S, first.conversationId, key);
+    const second = await talk(WAV_1S, first.conversationId, f);
     expect(second.ok && second.conversationId).toBe(first.conversationId);
     expect(llm.calls[1]!.messages.length).toBeGreaterThan(llm.calls[0]!.messages.length);
-    const third = await talkFromDashboard(deps, WAV_1S, "bad id/../x", key);
+    const third = await talk(WAV_1S, "bad id/../x", f);
     expect(third.ok && third.conversationId).not.toBe(first.conversationId);
+    expect(JSON.parse(f.calls[5]!.init.body as string)).not.toHaveProperty("conversationId");
   });
 
   it("an empty transcript asks nothing", async () => {
     const llm = new ScriptedLLM([]);
-    const { deps } = setup({ llm, transcript: "   " });
-    const out = await talkFromDashboard(deps, WAV_1S, null, key);
+    setup({ llm, transcript: "   " });
+    const out = await talk(WAV_1S, null, f);
     expect(out.ok).toBe(false);
     expect(llm.calls).toHaveLength(0);
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/transcribe"]);
   });
 
-  it("refuses empty and oversized audio before transcribing", async () => {
-    const { deps, heard } = setup({ llm: new ScriptedLLM([]) });
-    expect((await talkFromDashboard(deps, encodeWav(new Int16Array(0)), null, key)).ok).toBe(false);
-    expect((await talkFromDashboard(deps, new Uint8Array(MAX_WAV_BYTES + 2), null, key)).ok).toBe(false);
+  it("refuses empty and oversized audio before any request", async () => {
+    const { heard } = setup({ llm: new ScriptedLLM([]) });
+    expect((await talk(encodeWav(new Int16Array(0)), null, f)).ok).toBe(false);
+    expect((await talk(new Uint8Array(MAX_WAV_BYTES + 2), null, f)).ok).toBe(false);
     expect(heard).toHaveLength(0);
+    expect(f.calls).toHaveLength(0);
   });
 
   it("a non-contract WAV is refused by /api/transcribe with a readable error", async () => {
-    const { deps, heard } = setup({ llm: new ScriptedLLM([]) });
+    const { heard } = setup({ llm: new ScriptedLLM([]) });
     const wrongRate = encodeWav(new Int16Array(4_800), 48_000);
-    const out = await talkFromDashboard(deps, wrongRate, null, key);
+    const out = await talk(wrongRate, null, f);
     expect(out).toEqual({ ok: false, error: "The recording couldn't be read. Try again." });
     expect(heard).toHaveLength(0);
   });
 
   it("a transcription provider error says so and asks nothing", async () => {
     const llm = new ScriptedLLM([]);
-    const { deps } = setup({ llm, transcript: new TranscriptionError("boom", 500) });
-    const out = await talkFromDashboard(deps, WAV_1S, null, key);
+    setup({ llm, transcript: new TranscriptionError("boom", 500) });
+    const out = await talk(WAV_1S, null, f);
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.error).toMatch(/Transcription isn't working/);
     expect(llm.calls).toHaveLength(0);
@@ -285,7 +317,7 @@ describe("talkFromDashboard: transcribe → ask as web", () => {
       respond("Draft to dana@acme.com is ready.", "Draft is ready. Tap Send to review it."),
     ]);
     const { deps } = setup({ llm, transcript: "email dana@acme.com that I'm running ten minutes late" });
-    const out = await talkFromDashboard(deps, WAV_1S, null, key);
+    const out = await talk(WAV_1S, null, f);
     if (!out.ok) throw new Error(out.error);
     const draftAction = out.actions.find((a) => a.type === "draft_created");
     expect(draftAction).toBeDefined();
@@ -294,52 +326,123 @@ describe("talkFromDashboard: transcribe → ask as web", () => {
     expect(draft?.status).toBe("pending");
     expect(deps.sender.sendDraft).not.toHaveBeenCalled();
     expect(deps.inviter.insertInvite).not.toHaveBeenCalled();
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/transcribe", "/api/ask"]);
+  });
+
+  it("an expired or wrong session is refused by the route and asks the page to sign in", async () => {
+    const llm = new ScriptedLLM([]);
+    const { heard } = setup({ llm });
+    const stale = await sessionFetch({ secret: "some-other-secret-0123456789abcdef" });
+    expect(await talk(WAV_1S, null, stale)).toEqual({ ok: false, error: TALK_SESSION_EXPIRED, signIn: true });
+    expect(await askText("hello", null, stale)).toMatchObject({ ok: false, error: TALK_SESSION_EXPIRED, signIn: true, text: "hello" });
+    expect(await speak("hello", 1000, stale)).toMatchObject({ ok: false, signIn: true });
+    expect(heard).toHaveLength(0);
+    expect(llm.calls).toHaveLength(0);
+  });
+
+  it("a cross-site request is refused before anything runs", async () => {
+    const llm = new ScriptedLLM([]);
+    const { heard } = setup({ llm });
+    const cross = await sessionFetch({ headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" } });
+    const out = await talk(WAV_1S, null, cross);
+    expect(out).toEqual({ ok: false, error: "The request was refused by the browser check. Reload the page and try again." });
+    expect(heard).toHaveLength(0);
+    expect((await askText("hello", null, cross)).ok).toBe(false);
+    expect(llm.calls).toHaveLength(0);
+  });
+
+  it("a network failure is reported, not thrown", async () => {
+    const down: FetchLike = async () => {
+      throw new TypeError("Failed to fetch");
+    };
+    expect(await talk(WAV_1S, null, down)).toMatchObject({ ok: false, error: expect.stringMatching(/Couldn't reach SideKiqq/) });
+    expect(await askText("hi", null, down)).toMatchObject({ ok: false, text: "hi" });
+    expect((await speak("hi", 1000, down)).ok).toBe(false);
   });
 });
 
-describe("askFromDashboard (typed)", () => {
+describe("askText (typed)", () => {
   it("asks as web without transcribing", async () => {
     const llm = new ScriptedLLM([respond()]);
-    const { deps, heard } = setup({ llm });
-    const out = await askFromDashboard(deps, "  what's on today  ", null, key);
+    const { heard } = setup({ llm });
+    const f = await sessionFetch();
+    const out = await askText("  what's on today  ", null, f);
     expect(out).toMatchObject({ ok: true, text: "what's on today" });
     expect(heard).toHaveLength(0);
     expect(systemText(llm)).toContain("Device for this request: web");
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/ask"]);
   });
 
   it("refuses blank and over-long text without calling the model", async () => {
     const llm = new ScriptedLLM([]);
-    const { deps } = setup({ llm });
-    expect((await askFromDashboard(deps, "   ", null, key)).ok).toBe(false);
-    const long = await askFromDashboard(deps, "x".repeat(8001), null, key);
+    setup({ llm });
+    const f = await sessionFetch();
+    expect((await askText("   ", null, f)).ok).toBe(false);
+    const long = await askText("x".repeat(8001), null, f);
     expect(long.ok).toBe(false);
     if (!long.ok) expect(long.text).toHaveLength(8001); // kept so the owner can shorten it
     expect(llm.calls).toHaveLength(0);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  it("drops malformed actions and a malformed conversation id from the reply", async () => {
+    const fake: FetchLike = async () =>
+      new Response(
+        JSON.stringify({
+          reply: "ok",
+          spoken: "ok",
+          conversationId: "bad id/..",
+          actions: [
+            { type: "draft_created", id: "d1", summary: "Draft", draftKind: "calendar_invite" },
+            { type: "draft_created", id: "d2", summary: "Draft", draftKind: "sms" },
+            { type: "weird", id: "x", summary: "?" },
+            { type: "commitment_added", id: 3, summary: "?" },
+            null,
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const out = await askText("hi", "conv_1", fake);
+    expect(out).toMatchObject({ ok: true, conversationId: "conv_1", actions: [{ type: "draft_created", id: "d1", summary: "Draft", draftKind: "calendar_invite" }] });
+    expect(cleanActions("nope")).toEqual([]);
+  });
+
+  it("the client's action enums match the contract's ActionSchema (no silent drops)", () => {
+    expect([...ACTION_TYPES].sort()).toEqual([...ActionSchema.shape.type.options].sort());
+    expect([...DRAFT_KINDS].sort()).toEqual([...ActionSchema.shape.draftKind.unwrap().options].sort());
+    expect(DEFAULT_SPEAK_MAX_CHARS).toBe(config.speakMaxChars()); // the env default
   });
 });
 
-describe("speakFromDashboard", () => {
-  it("returns the /api/speak WAV as base64", async () => {
-    const { deps, spokenTexts } = setup();
-    const out = await speakFromDashboard(deps, " Two meetings today. ", key);
+describe("speak()", () => {
+  it("returns the /api/speak WAV", async () => {
+    const { spokenTexts } = setup();
+    const f = await sessionFetch();
+    const out = await speak(" Two meetings today. ", 1000, f);
     if (!out.ok) throw new Error(out.error);
-    const info = parseWav(base64ToBytes(out.wavBase64));
+    const info = parseWav(new Uint8Array(out.wav));
     expect(info.sampleRate).toBe(24_000);
     expect(spokenTexts).toEqual(["Two meetings today."]);
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/speak"]);
   });
 
   it("refuses empty text without calling TTS", async () => {
-    const { deps, spokenTexts } = setup();
-    expect((await speakFromDashboard(deps, "  ", key)).ok).toBe(false);
+    const { spokenTexts } = setup();
+    const f = await sessionFetch();
+    expect((await speak("  ", 1000, f)).ok).toBe(false);
     expect(spokenTexts).toHaveLength(0);
+    expect(f.calls).toHaveLength(0);
   });
 
-  it("a too-long reply is spoken as the whole sentences that fit", async () => {
-    const { deps, spokenTexts } = setup();
+  it("a too-long reply is spoken as the whole sentences that fit the configured limit", async () => {
+    const { spokenTexts } = setup();
+    const f = await sessionFetch();
     const long = `First sentence here. Second one! ${"word ".repeat(400)}end.`;
-    const out = await speakFromDashboard(deps, long, key);
+    const out = await speak(long, 1000, f);
     expect(out.ok).toBe(true);
     expect(spokenTexts).toEqual(["First sentence here. Second one!"]);
+    expect((await speak("One two. Three four five six.", 9, f)).ok).toBe(true);
+    expect(spokenTexts[1]).toBe("One two.");
   });
 
   it("fitForSpeech keeps short text, sentences, then a word boundary", () => {
@@ -351,8 +454,8 @@ describe("speakFromDashboard", () => {
   });
 
   it("a TTS failure is an error, not audio", async () => {
-    const { deps } = setup({ tts: new SpeechError("down", 503) });
-    expect(await speakFromDashboard(deps, "hello", key)).toEqual({ ok: false, error: "The voice reply isn't available right now." });
+    setup({ tts: new SpeechError("down", 503) });
+    expect(await speak("hello", 1000, await sessionFetch())).toEqual({ ok: false, error: "The voice reply isn't available right now." });
   });
 });
 
@@ -360,12 +463,30 @@ describe("Talk can't send", () => {
   const root = path.resolve(__dirname, "..");
   const read = (p: string) => readFileSync(path.join(root, p), "utf8");
 
-  it("the talk bridge and screen never reach the approve route", () => {
-    for (const f of ["src/lib/dashboard/talk.ts", "src/app/(dashboard)/dashboard/talk/TalkPanel.tsx", "src/app/(dashboard)/dashboard/talk/page.tsx"]) {
+  it("the Talk client only posts to transcribe, ask and speak", () => {
+    const src = read("src/lib/talk/client.ts")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1"); // code only, not the comments that explain the rule
+    const paths = [...src.matchAll(/["'`](\/api\/[^"'`]*)["'`]/g)].map((m) => m[1]);
+    expect(new Set(paths)).toEqual(new Set(["/api/transcribe", "/api/ask", "/api/speak"]));
+    expect(src).not.toMatch(/approve|\/api\/drafts|XMLHttpRequest|sendBeacon/);
+    expect(src).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+["'](?!\.\/audio["'])/m); // runtime imports: ./audio only
+  });
+
+  it("the Talk screen never reaches the approve route or calls fetch itself", () => {
+    for (const f of ["src/app/(dashboard)/dashboard/talk/TalkPanel.tsx", "src/app/(dashboard)/dashboard/talk/page.tsx"]) {
       const src = read(f);
-      expect(src).not.toMatch(/from\s+["'][^"']*(approve|\/api\/drafts)[^"']*["']/);
+      expect(src).not.toMatch(/from\s+["'][^"']*(approve|\/api\/drafts|browser-api)[^"']*["']/);
       expect(src).not.toMatch(/approveDraft|approveRoute|fetch\(/);
     }
+  });
+
+  it("the in-process device bridge and the talk server actions are gone", () => {
+    expect(() => read("src/lib/dashboard/device-bridge.ts")).toThrow();
+    expect(() => read("src/lib/dashboard/talk.ts")).toThrow();
+    const actions = read("src/app/(dashboard)/dashboard/actions.ts");
+    expect(actions).not.toMatch(/talkAction|askTextAction|speakAction|api\/(ask|transcribe|speak)/);
+    expect(read("src/lib/dashboard/web-device.ts")).not.toMatch(/NextRequest|requestAsDashboardDevice|callAsDashboardDevice|handler\(/);
   });
 
   it("the worklet only forwards frames", () => {

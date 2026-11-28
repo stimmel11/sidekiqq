@@ -5,7 +5,7 @@ import { safeEqual } from "./crypto";
 import { bearerToken, errorResponse, HttpError } from "./http";
 import type { DeviceRecord } from "./models";
 import { SESSION_COOKIE, sessionSecretFromEnv, verifySession } from "./dashboard/session";
-import { dashboardWebDevice } from "./dashboard/device-bridge";
+import { dashboardWebDevice } from "./dashboard/web-device";
 
 /**
  * Auth middleware for route handlers. Next's edge `middleware.ts` only checks that a

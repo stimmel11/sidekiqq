@@ -9,8 +9,7 @@ import { draftFingerprint } from "@/lib/confirmation";
 import { approveDraft } from "@/lib/dashboard/browser-api";
 import { sessionFetch } from "./session-fetch";
 import { encrypt } from "@/lib/crypto";
-import { config } from "@/lib/env";
-import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
+import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/web-device";
 import { makeDeps, msg, pairDevice, params, req, ScriptedLLM, toolUse } from "./fakes";
 
 /** Web app slice 2a (docs/WEBAPP.md §4.2, §6.2, §6.3): the `web` device kind. */
@@ -124,7 +123,7 @@ describe("dashboard device is kind web", () => {
     setDeps(deps);
     // What earlier builds stored: a "phone" device and its encrypted token.
     const legacy = await deps.repos.devices.create("phone", DASHBOARD_DEVICE_NAME);
-    await deps.kv.set(`${config.redisPrefix()}:dashboard:device-token`, encrypt(legacy.token, key, "dashboard-device-token"));
+    await deps.kv.set(`${deps.tenant.prefix}:dashboard:device-token`, encrypt(legacy.token, key, "dashboard-device-token"));
 
     const token = await dashboardDeviceToken(deps, key);
     expect(token).not.toBe(legacy.token);
@@ -142,7 +141,7 @@ describe("dashboard device is kind web", () => {
     setDeps(deps);
     const legacy = await deps.repos.devices.create("phone", DASHBOARD_DEVICE_NAME);
     await deps.repos.devices.touch(legacy.device.id);
-    await deps.kv.set(`${config.redisPrefix()}:dashboard:device-token`, encrypt(legacy.token, randomBytes(32), "dashboard-device-token"));
+    await deps.kv.set(`${deps.tenant.prefix}:dashboard:device-token`, encrypt(legacy.token, randomBytes(32), "dashboard-device-token"));
     const realPhone = await pairDevice(deps, "phone");
 
     const token = await dashboardDeviceToken(deps, key);
