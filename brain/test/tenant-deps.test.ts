@@ -16,11 +16,6 @@ import { makeDeps, MemoryKV, req } from "./fakes";
 const SRC = path.resolve(__dirname, "../src");
 const KEYS_MODULE = path.join(SRC, "lib/platform/keys.ts");
 const ENV_MODULE = path.join(SRC, "lib/env.ts");
-/**
- * Temporary: the dashboard device bridge keeps its `dashboard:device-token` key until the bridge
- * is removed (docs/WEBAPP.md §3.1, §4.2). Delete this entry with the bridge. No other exceptions.
- */
-const TEMPORARY_EXCEPTIONS = [path.join(SRC, "lib/dashboard/device-bridge.ts")];
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -48,20 +43,18 @@ describe("static prefix rules", () => {
 
   it("only the platform key module reads REDIS_PREFIX", () => {
     const offenders = files.filter((f) => {
-      if (f === KEYS_MODULE || f === ENV_MODULE || TEMPORARY_EXCEPTIONS.includes(f)) return false;
+      if (f === KEYS_MODULE || f === ENV_MODULE) return false;
       const c = code(f);
       return /\bredisPrefix\b/.test(c) || /\bREDIS_PREFIX\b/.test(c);
     });
     expect(offenders.map((f) => path.relative(SRC, f))).toEqual([]);
   });
 
-  it("env.ts defines redisPrefix and the keys module is its only caller besides the listed exception", () => {
+  it("env.ts defines redisPrefix and the keys module is its only caller (no exceptions)", () => {
     expect(code(ENV_MODULE)).toMatch(/redisPrefix\s*:/);
     expect(code(KEYS_MODULE)).toMatch(/config\.redisPrefix\(\)/);
-    for (const f of TEMPORARY_EXCEPTIONS) {
-      // When the bridge goes, its exception must go too (this fails if the file no longer exists).
-      expect(() => statSync(f)).not.toThrow();
-    }
+    // The dashboard device bridge (the last exception) is gone; its token key uses the tenant prefix.
+    expect(() => statSync(path.join(SRC, "lib/dashboard/device-bridge.ts"))).toThrow();
   });
 
   it("no key builder uses a reserved first segment (t, g) under a prefix", () => {

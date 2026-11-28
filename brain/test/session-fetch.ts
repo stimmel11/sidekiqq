@@ -4,6 +4,9 @@ import type { FetchLike } from "@/lib/dashboard/browser-api";
 import { POST as approve } from "@/app/api/drafts/[id]/approve/route";
 import { POST as discard } from "@/app/api/drafts/[id]/discard/route";
 import { POST as complete } from "@/app/api/commitments/[id]/complete/route";
+import { POST as ask } from "@/app/api/ask/route";
+import { POST as transcribe } from "@/app/api/transcribe/route";
+import { POST as speak } from "@/app/api/speak/route";
 import { middleware } from "@/middleware";
 
 /**
@@ -13,10 +16,15 @@ import { middleware } from "@/middleware";
  */
 export type SessionFetch = FetchLike & { calls: { path: string; init: RequestInit }[] };
 
-const ROUTES: [RegExp, typeof approve][] = [
-  [/^\/api\/drafts\/([^/]+)\/approve$/, approve],
-  [/^\/api\/drafts\/([^/]+)\/discard$/, discard],
-  [/^\/api\/commitments\/([^/]+)\/complete$/, complete],
+type Handler = (req: NextRequest, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
+
+const ROUTES: [RegExp, Handler][] = [
+  [/^\/api\/drafts\/([^/]+)\/approve$/, approve as Handler],
+  [/^\/api\/drafts\/([^/]+)\/discard$/, discard as Handler],
+  [/^\/api\/commitments\/([^/]+)\/complete$/, complete as Handler],
+  [/^\/api\/(ask)$/, ask as unknown as Handler],
+  [/^\/api\/(transcribe)$/, transcribe as unknown as Handler],
+  [/^\/api\/(speak)$/, speak as unknown as Handler],
 ];
 
 export async function sessionFetch(opts: { secret?: string; headers?: Record<string, string> } = {}): Promise<SessionFetch> {
@@ -34,7 +42,7 @@ export async function sessionFetch(opts: { secret?: string; headers?: Record<str
     if (!gate.headers.has("x-middleware-next")) return gate;
     for (const [re, handler] of ROUTES) {
       const m = re.exec(new URL(path, "http://localhost:3000").pathname);
-      if (m) return handler(req, { params: Promise.resolve({ id: decodeURIComponent(m[1]!) }) });
+      if (m) return handler(req, { params: Promise.resolve(/^\/api\/(ask|transcribe|speak)$/.test(m[0]) ? ({} as Record<string, string>) : { id: decodeURIComponent(m[1]!) }) });
     }
     return new Response(JSON.stringify({ error: "no route" }), { status: 404 });
   }) as SessionFetch;

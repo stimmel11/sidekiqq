@@ -9,7 +9,7 @@ import { middleware, config as middlewareConfig } from "@/middleware";
 import { draftFingerprint } from "@/lib/confirmation";
 import { approveDraft, completeCommitment, discardDraft } from "@/lib/dashboard/browser-api";
 import { sessionFetch } from "./session-fetch";
-import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/device-bridge";
+import { DASHBOARD_DEVICE_NAME, dashboardDeviceToken } from "@/lib/dashboard/web-device";
 
 const SECRET = "test-session-secret-0123456789abcdef";
 

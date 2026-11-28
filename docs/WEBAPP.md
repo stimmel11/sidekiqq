@@ -72,7 +72,7 @@ All four web slices can ship with today's single-owner sign-in, but slices 2–4
 to call device routes (`/api/transcribe`, `/api/ask`, `/api/speak`, `/api/commands`,
 `/api/alerts`, `/api/devices/register`). Today those are `withDevice`, the edge middleware 401s
 any `/api/*` call without a bearer header, and the browser never holds a device token (the
-dashboard's token stays server-side in `lib/dashboard/device-bridge.ts`). So slice 2 starts with
+dashboard's token stays server-side, today in `lib/dashboard/web-device.ts`). So slice 2 starts with
 the owner-only version of §4.2: `withPrincipal` (session or device token), the middleware
 allowance for the session cookie on those routes, and one `web` device record per signed-in
 browser. Accounts (§3) then only change how the tenant is found. Accounts come before any customer
@@ -119,7 +119,8 @@ other than the owner signs in.
   The tenant record lists its own prefix, so a tenant can be moved by changing one field.
   (`g:` and `t:` here are short for `${REDIS_PREFIX}:g:` and `${REDIS_PREFIX}:t:`.)
 - Code that builds keys from `config.redisPrefix()` outside `lib/deps.ts` is moved in A1:
-  `lib/dashboard/device-bridge.ts` (`dashboard:device-token`) goes away with the bridge (§4.2),
+  `lib/dashboard/device-bridge.ts` (`dashboard:device-token`) goes away with the bridge (§4.2;
+  done in 2c-ii-b-ii: the key now lives in `lib/dashboard/web-device.ts` under the tenant prefix),
   `lib/dashboard/owner.ts` (`dashlogin`) becomes `g:rl:login`, and the scan lock in
   `app/api/cron/scan/route.ts` becomes per tenant (§3.8).
 - **Per-tenant profile:** the owner's name and time zone are env-wide today
@@ -326,6 +327,16 @@ put in the URL). `lib/dashboard/approval.ts` and the approve/discard/complete se
 no longer touches drafts or commitments. Remaining: the Talk screen posts to `/api/transcribe`, `/api/ask` and
 `/api/speak` from the browser (lifts the 30 s cap), then remove `device-bridge.ts`; one `web` device per browser.
 
+**Status (2026-11-28, slice 2c-ii-b-ii, `crew/web-talk-direct`):** the Talk screen posts to `/api/transcribe` (the
+16 kHz WAV as `audio/wav`), `/api/ask` (`device: "web"`) and `/api/speak` from the browser as the session
+(`lib/talk/client.ts`: same-origin, `credentials: "same-origin"`, `no-store`, `redirect: "error"`; it can post to
+those three paths only, a static test checks it). The client cap is now 60 s (§6.1). A 401 sends the owner to
+`/login?next=/dashboard/talk`. The Talk server actions and `lib/dashboard/talk.ts` are gone, and the in-process
+bridge is removed: `device-bridge.ts` is now `lib/dashboard/web-device.ts`, which only mints and finds the shared
+`web` device (one lookup, `{ token, device }`), with its token key under the tenant prefix, so the static
+`REDIS_PREFIX` test has no exceptions left. Remaining: one `web` device per browser (v2 sessions or a session-nonce
+map; also fixes the first-use race that can mint two shared devices).
+
 **Feeds:** web app slice 2 (device kind), accounts A3 (sessions).
 
 ---
@@ -421,21 +432,18 @@ tone survives, an 11 kHz tone is attenuated).
   later must follow the device rule exactly (30 s window that opens only after the read-back has
   fully played, speech that started earlier can't confirm, re-fetch the draft before approve).
 
-### 6.2a What slice 2b shipped (interim, until 2c)
+### 6.2a What shipped (slice 2b, updated in 2c-ii-b-ii)
 
-The Talk screen (`/dashboard/talk`) differs from §6.1–6.2 in four ways, all to be revisited when
-`withPrincipal` lands (slice 2c):
+The Talk screen (`/dashboard/talk`) differs from §6.1–6.2 in these ways:
 
-- The browser does not call the device routes. Server actions (`talkAction`, `askTextAction`,
-  `speakAction`) run `/api/transcribe` → `/api/ask` → `/api/speak` in-process as the single shared
-  "Owner web dashboard" `web` device (`lib/dashboard/talk.ts`, `device-bridge.ts`), not one device
-  per browser.
-- The client cap is 30 s, not 60 s: a server action body is limited to 1 MB (30 s of 16 kHz PCM16
-  is 960 044 bytes). Posting to `/api/transcribe` directly lifts this.
+- ~~Server actions ran the routes in-process and the client cap was 30 s.~~ Since 2c-ii-b-ii the
+  browser calls `/api/transcribe` → `/api/ask` → `/api/speak` itself as the session
+  (`lib/talk/client.ts`) and the cap is 60 s. The session still maps to the single shared
+  "Owner web dashboard" `web` device, not one device per browser.
 - The worklet only forwards Float32 frames; the page resamples (polyphase windowed sinc) and
   encodes the WAV at stop (`lib/talk/audio.ts`). A `ScriptProcessorNode` is the fallback where
   AudioWorklet is missing.
-- A `draft_created` action shows its `readback` and a **Review and send** link to the Drafts
+- A `draft_created` action shows its `summary` and a **Review and send** link to the Drafts
   screen, whose confirm dialog is the only send path; there is no Send button on the Talk screen.
   A `spoken` text over `SPEAK_MAX_CHARS` is read as the whole sentences that fit.
 
@@ -542,7 +550,7 @@ Multi-tenant accounts (before any second customer):
   Owner sign-in ensures the owner tenant record (best effort). Login rate limit moved to
   `g:rl:login:<sha256(ip)>`; scan lock is `<tenant prefix>:lock:scan` (unchanged key for the
   owner). Static tests: only the keys module reads `REDIS_PREFIX` (temporary exception
-  `lib/dashboard/device-bridge.ts`, removed with the bridge); no key builder uses `t`/`g` as a
+  `lib/dashboard/device-bridge.ts`, removed with the bridge in 2c-ii-b-ii); no key builder uses `t`/`g` as a
   first segment. Routes still use `getDeps()`; A2 resolves the tenant from the principal.
 - **A2** Global indexes (`g:devtok` with owner fallback, `g:pair`, `g:oauth`, `g:ticket`,
   `g:push`, `g:fcm`); `withPrincipal` resolves the tenant; delete the legacy Google aliases.
