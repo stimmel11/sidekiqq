@@ -1,13 +1,14 @@
 ---
 /** Home hero. Copy comes from src/content/home/home.md → hero. */
 import type { CollectionEntry } from 'astro:content';
-interface Props { hero: CollectionEntry<'home'>['data']['hero'] }
-const { hero } = Astro.props;
+interface Props { hero: CollectionEntry<'home'>['data']['hero']; /** Heading level; h2 when another block is the page's h1. */ level?: 'h1' | 'h2' }
+const { hero, level = 'h1' } = Astro.props;
+const Heading = level;
 const s = hero.sample;
 ---
 <section class="wrap grid items-center gap-12 pt-14 pb-20 md:pt-20 lg:grid-cols-[1.15fr_1fr] lg:gap-16 lg:pt-24 lg:pb-28">
   <div>
-    <h1 class="text-[2.6rem] font-semibold sm:text-[3.4rem] lg:text-[4.4rem] lg:leading-[1.02]">{hero.headline}</h1>
+    <Heading class="text-[2.6rem] font-semibold sm:text-[3.4rem] lg:text-[4.4rem] lg:leading-[1.02]">{hero.headline}</Heading>
     <p class="mt-6 max-w-[34rem] text-lg text-muted sm:text-xl">{hero.subhead}</p>
     <div class="mt-8 flex flex-wrap gap-3">
       <a href={hero.primaryCta.href} class="btn btn-primary">{hero.primaryCta.label}</a>

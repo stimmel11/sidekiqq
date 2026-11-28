@@ -15,9 +15,9 @@ if (!home) throw new Error('Missing src/content/home/home.md');
 const d = home.data;
 ---
 <Base title={d.title} description={d.description}>
-  <Hero hero={d.hero} />
+  <DeviceRow data={d.devices} hero />
+  <Hero hero={d.hero} level="h2" />
   <HowItWorks data={d.howItWorks} />
-  <DeviceRow data={d.devices} />
   <Trust data={d.trust} />
   <BriefSample data={d.brief} />
   <Faq heading={d.faq.heading} />
